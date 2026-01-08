@@ -919,12 +919,12 @@ def initialize_spotify():
     if not client_id or not client_secret:
         raise Exception("SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET must be set")
     
-    # Initialize auth
+    # Initialize auth (port is automatically parsed from redirect_uri)
     auth = SpotifyAuthWithServer(
         client_id=client_id,
         client_secret=client_secret,
         redirect_uri=redirect_uri,
-        scope='user-read-currently-playing user-read-playback-state',
+        scope='user-read-currently-playing user-read-playback-state'
     )
     
     # Get authenticated client

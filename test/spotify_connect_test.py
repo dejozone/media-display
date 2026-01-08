@@ -244,19 +244,13 @@ def main():
     client_id = os.getenv('SPOTIFY_CLIENT_ID', 'YOUR_CLIENT_ID')
     client_secret = os.getenv('SPOTIFY_CLIENT_SECRET', 'YOUR_CLIENT_SECRET')
     redirect_uri = os.getenv('SPOTIFY_REDIRECT_URI', 'http://localhost:8888/callback')
-    local_callback_port = os.getenv('LOCAL_CALLBACK_PORT', 8888)
-    
-    if local_callback_port:
-        local_callback_port = int(local_callback_port)
-        print(f"Using local callback port: {local_callback_port}")
     
     if not client_id or client_id == 'YOUR_CLIENT_ID':
         print("\n⚠️  WARNING: Spotify credentials not configured!")
         print("\nPlease set the following environment variables:")
         print("  export SPOTIFY_CLIENT_ID='your_client_id'")
         print("  export SPOTIFY_CLIENT_SECRET='your_client_secret'")
-        print("  export SPOTIFY_REDIRECT_URI='https://yourdomain.com:9080/callback'")
-        print("  export LOCAL_CALLBACK_PORT='8888'  # Port for local server (if using nginx proxy)")
+        print("  export SPOTIFY_REDIRECT_URI='https://yourdomain.com:9080/callback'  # Port is parsed from this URI")
         print("\nOr edit this script and replace YOUR_CLIENT_ID and YOUR_CLIENT_SECRET")
         print("\nGet credentials at: https://developer.spotify.com/dashboard")
         print("=" * 60)
@@ -267,8 +261,7 @@ def main():
         client_id=client_id,
         client_secret=client_secret,
         redirect_uri=redirect_uri,
-        scope='user-read-currently-playing user-read-playback-state',
-        local_port=local_callback_port
+        scope='user-read-currently-playing user-read-playback-state'
     )
     
     print("\nInitializing Spotify authentication...")
