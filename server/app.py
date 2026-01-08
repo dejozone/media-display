@@ -1116,3 +1116,90 @@ def main():
 
 if __name__ == "__main__":
     exit(main())
+
+# For Gunicorn: expose the app
+# When running with gunicorn, the main() function won't be called automatically
+# Instead, gunicorn will use the 'app' object directly
+# The monitors need to be initialized here for gunicorn workers
+import atexit
+
+def initialize_for_gunicorn():
+    """Initialize monitors when running under gunicorn"""
+    if not active_monitors:  # Only initialize if not already done
+        try:
+            service_method = os.getenv('MEDIA_SERVICE_METHOD', 'all').lower().strip()
+            
+            print("\n🔧 Initializing playback monitoring (Gunicorn mode)...")
+            print(f"Configuration: MEDIA_SERVICE_METHOD={service_method.upper()}\n")
+            
+            if service_method == 'spotify':
+                monitor = initialize_spotify()
+                active_monitors.append(monitor)
+                print("✅ Spotify monitoring active")
+                
+            elif service_method == 'sonos':
+                device_monitor = DeviceMonitor()
+                if device_monitor.start():
+                    active_monitors.append(device_monitor)
+                    print("✅ Sonos monitoring active")
+                    
+            else:  # 'all'
+                # Initialize both in parallel
+                sonos_result = {'started': False, 'monitor': None}
+                spotify_result = {'started': False, 'monitor': None}
+                
+                def init_sonos():
+                    try:
+                        if SONOS_AVAILABLE:
+                            device_monitor = DeviceMonitor()
+                            if device_monitor.start():
+                                sonos_result['monitor'] = device_monitor
+                                sonos_result['started'] = True
+                    except Exception as e:
+                        print(f"⚠️  Sonos initialization failed: {e}")
+                
+                def init_spotify():
+                    try:
+                        spotify_monitor = initialize_spotify()
+                        spotify_result['monitor'] = spotify_monitor
+                        spotify_result['started'] = True
+                    except Exception as e:
+                        print(f"⚠️  Spotify initialization failed: {e}")
+                
+                sonos_thread = threading.Thread(target=init_sonos, daemon=True)
+                spotify_thread = threading.Thread(target=init_spotify, daemon=True)
+                
+                sonos_thread.start()
+                spotify_thread.start()
+                
+                # Wait for threads
+                sonos_thread.join(timeout=10)
+                spotify_thread.join(timeout=10)
+                
+                if sonos_result['started'] and sonos_result['monitor']:
+                    active_monitors.append(sonos_result['monitor'])
+                
+                if spotify_result['started'] and spotify_result['monitor']:
+                    active_monitors.append(spotify_result['monitor'])
+                
+                if sonos_result['started'] or spotify_result['started']:
+                    print("✅ Monitoring services initialized")
+                    
+        except Exception as e:
+            print(f"⚠️  Error initializing monitors: {e}")
+
+# Register cleanup handler
+def cleanup_monitors():
+    """Clean up monitors on shutdown"""
+    for monitor in active_monitors:
+        try:
+            monitor.stop()
+        except:
+            pass
+
+atexit.register(cleanup_monitors)
+
+# Initialize monitors if running under gunicorn
+# Check if we're being imported by gunicorn
+if 'gunicorn' in os.environ.get('SERVER_SOFTWARE', ''):
+    initialize_for_gunicorn()
