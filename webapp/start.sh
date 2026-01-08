@@ -1,7 +1,71 @@
 #!/bin/bash
-# Start the webapp development server
+# Start the webapp server
+# Compatible with systemd service management
 
-cd "$(dirname "$0")"
+set -e  # Exit on error
 
-echo "Starting Web App Development Server..."
-python server.py
+# Get the absolute path to the script directory
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+cd "$SCRIPT_DIR"
+
+# Check for --gunicorn flag
+USE_GUNICORN=false
+if [ "$1" = "--gunicorn" ]; then
+    USE_GUNICORN=true
+fi
+
+# Load environment variables
+if [ -f "$PROJECT_ROOT/.env" ]; then
+    set -a
+    source "$PROJECT_ROOT/.env"
+    set +a
+    echo "✓ Environment variables loaded from $PROJECT_ROOT/.env"
+else
+    echo "⚠️  Warning: .env file not found at $PROJECT_ROOT/.env"
+fi
+
+# Activate virtual environment if it exists
+if [ -d "$PROJECT_ROOT/.venv" ]; then
+    source "$PROJECT_ROOT/.venv/bin/activate"
+    echo "✓ Virtual environment activated: $PROJECT_ROOT/.venv"
+else
+    echo "⚠️  Warning: Virtual environment not found at $PROJECT_ROOT/.venv"
+fi
+
+# Verify Python is available
+if ! command -v python &> /dev/null; then
+    echo "✗ Error: Python not found in PATH"
+    exit 1
+fi
+
+# Install dependencies if needed
+if [ -f requirements.txt ]; then
+    if ! python -c "import gunicorn" 2>/dev/null; then
+        echo "Installing dependencies from requirements.txt..."
+        pip install -r requirements.txt || {
+            echo "✗ Error: Failed to install dependencies"
+            exit 1
+        }
+    fi
+fi
+
+# Get server configuration from environment or use defaults
+HOST=${WEBAPP_HOST:-0.0.0.0}
+PORT=${WEBAPP_PORT:-8080}
+
+# Start the server
+echo ""
+if [ "$USE_GUNICORN" = true ]; then
+    echo "Starting Web App Server with Gunicorn..."
+    echo "Server: http://${HOST}:${PORT}"
+    echo "Working directory: $SCRIPT_DIR"
+    echo ""
+    exec gunicorn -c gunicorn_config.py server:app
+else
+    echo "Starting Web App Server (Development Mode)..."
+    echo "Working directory: $SCRIPT_DIR"
+    echo ""
+    exec python server.py
+fi
