@@ -915,7 +915,6 @@ def initialize_spotify():
     client_id = os.getenv('SPOTIFY_CLIENT_ID')
     client_secret = os.getenv('SPOTIFY_CLIENT_SECRET')
     redirect_uri = os.getenv('SPOTIFY_REDIRECT_URI', 'http://localhost:8888/callback')
-    local_callback_port = int(os.getenv('LOCAL_CALLBACK_PORT', 8888))
     
     if not client_id or not client_secret:
         raise Exception("SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET must be set")
@@ -926,7 +925,6 @@ def initialize_spotify():
         client_secret=client_secret,
         redirect_uri=redirect_uri,
         scope='user-read-currently-playing user-read-playback-state',
-        local_port=local_callback_port
     )
     
     # Get authenticated client
@@ -1074,7 +1072,7 @@ def main():
         
         # Get server configuration
         host = os.getenv('SERVER_HOST', '0.0.0.0')
-        port = int(os.getenv('SERVER_PORT', 5001))
+        port = int(os.getenv('WEBSOCKET_SERVER_PORT', 5001))
         
         print(f"\n🚀 Starting server on {host}:{port}...")
         print(f"WebSocket endpoint: ws://localhost:{port}/")
