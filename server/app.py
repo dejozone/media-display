@@ -147,7 +147,20 @@ class SpotifyAuthWithServer:
         self.cache_path = '.spotify_cache'
         self.server = None
         self.server_thread = None
-        self.local_port = local_port if local_port else int(redirect_uri.split(':')[-1].split('/')[0])
+        
+        # Parse port from redirect_uri if not explicitly provided
+        if local_port:
+            self.local_port = local_port
+        else:
+            # Use urlparse to properly extract port from URI
+            from urllib.parse import urlparse
+            parsed = urlparse(redirect_uri)
+            # Use explicit port if present, otherwise default based on scheme
+            if parsed.port:
+                self.local_port = parsed.port
+            else:
+                # Default ports: 80 for http, 443 for https
+                self.local_port = 443 if parsed.scheme == 'https' else 80
         
     def start_server(self):
         """Start the callback server"""
