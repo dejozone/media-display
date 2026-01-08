@@ -56,7 +56,10 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-secret-key-change-in-production')
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 86400  # Default cache for static files: 1 day
 CORS(app)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+
+# Configure Socket.IO with custom path for nginx subpath proxying
+socketio_path = os.getenv('SOCKETIO_PATH', '/socket.io')
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading', path=socketio_path)
 
 # Override Flask-SocketIO's aggressive no-cache defaults for static assets
 @app.after_request

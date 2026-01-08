@@ -5,6 +5,7 @@ const LOCAL_CONFIG = {
     WEBSOCKET_URL: 'http://localhost',
     WEBSOCKET_PORT: 5001,
     WEBSOCKET_SSL_CERT_VERIFY: false, // For local testing with self-signed certs
+    WEBSOCKET_SUB_PATH: '/notis/media-display/socket.io',
     DEF_ALBUM_ART_PATH: 'assets/images/cat.jpg',
 };
 
@@ -12,7 +13,7 @@ const PROD_CONFIG = {
     WEBSOCKET_URL: null, // Will be determined dynamically if not set
     WEBSOCKET_PORT: null,
     WEBSOCKET_SSL_CERT_VERIFY: true, // MUST set to true in production
-    WEBSOCKET_SUB_PATH: '/notis/media-display',
+    WEBSOCKET_SUB_PATH: '/notis/media-display/socket.io',
     DEF_ALBUM_ART_PATH: 'assets/images/cat.jpg',
 }
 
@@ -37,10 +38,8 @@ if (selectedConfig.WEBSOCKET_PORT) {
     WEBSOCKET_URL = `${WEBSOCKET_URL}:${window.location.port}`;
 }
 
-// Handle WEBSOCKET_SUB_PATH if set - concatenate with WEBSOCKET_URL
-if (selectedConfig.WEBSOCKET_SUB_PATH) {
-    WEBSOCKET_URL = WEBSOCKET_URL + selectedConfig.WEBSOCKET_SUB_PATH;
-}
+// Note: WEBSOCKET_SUB_PATH is now handled in Socket.IO path option, not in URL
+// This allows proper Socket.IO routing through nginx subpaths
 
 // Set DEF_ALBUM_ART_PATH with default fallback
 const DEF_ALBUM_ART_PATH = selectedConfig.DEF_ALBUM_ART_PATH || 'assets/images/cat.jpg';
@@ -254,6 +253,7 @@ function connectWebSocket() {
     // 3. Then reload this page
     
     socket = io(WEBSOCKET_URL, {
+        path: selectedConfig.WEBSOCKET_SUB_PATH ? `${selectedConfig.WEBSOCKET_SUB_PATH}` : '/socket.io',
         transports: ['websocket', 'polling'],
         reconnection: true,
         reconnectionDelay: 1000,
