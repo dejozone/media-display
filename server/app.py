@@ -929,15 +929,20 @@ def initialize_spotify():
     client_secret = os.getenv('SPOTIFY_CLIENT_SECRET')
     redirect_uri = os.getenv('SPOTIFY_REDIRECT_URI', 'http://localhost:8888/callback')
     
+    # Get LOCAL_CALLBACK_PORT if explicitly set (optional override)
+    local_callback_port = os.getenv('LOCAL_CALLBACK_PORT', '').strip()
+    local_port = int(local_callback_port) if local_callback_port else None
+    
     if not client_id or not client_secret:
         raise Exception("SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET must be set")
     
-    # Initialize auth (port is automatically parsed from redirect_uri)
+    # Initialize auth (port from LOCAL_CALLBACK_PORT or parsed from redirect_uri)
     auth = SpotifyAuthWithServer(
         client_id=client_id,
         client_secret=client_secret,
         redirect_uri=redirect_uri,
-        scope='user-read-currently-playing user-read-playback-state'
+        scope='user-read-currently-playing user-read-playback-state',
+        local_port=local_port
     )
     
     # Get authenticated client
