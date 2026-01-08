@@ -2,20 +2,26 @@
 # 
 # Installation:
 #   1. Edit this file to set the correct paths and user
-#   2. Copy to systemd directory:
+#   2. Create log file:
+#      sudo touch /var/log/media-display.log
+#      sudo chown hthai00:hthai00 /var/log/media-display.log
+#   3. Copy to systemd directory:
 #      sudo cp media-display.service /etc/systemd/system/
-#   3. Reload systemd:
+#   4. Reload systemd:
 #      sudo systemctl daemon-reload
-#   4. Enable service to start on boot:
+#   5. Enable service to start on boot:
 #      sudo systemctl enable media-display.service
-#   5. Start the service:
+#   6. Start the service:
 #      sudo systemctl start media-display.service
+#   7. (Optional) Setup log rotation:
+#      sudo cp media-display-logrotate.conf /etc/logrotate.d/media-display
 #
 # Management commands:
 #   sudo systemctl status media-display    # Check status
 #   sudo systemctl stop media-display      # Stop service
 #   sudo systemctl restart media-display   # Restart service
-#   sudo journalctl -u media-display -f   # View logs
+#   tail -f /var/log/media-display.log     # View logs in real-time
+#   sudo logrotate -f /etc/logrotate.d/media-display  # Force log rotation
 
 [Unit]
 Description=Media Display Server - Spotify/Sonos Now Playing Monitor
@@ -23,19 +29,21 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-Type=notify
+Type=exec
 User=hthai00
 Group=hthai00
-WorkingDirectory=/Users/hthai00/Projects/media-display/server
+WorkingDirectory=/opt/media-display/server
 
 # Environment variables (can also be loaded from .env file by start.sh)
+# CRITICAL: PYTHONUNBUFFERED=1 ensures print() statements appear immediately in logs
+Environment="PYTHONUNBUFFERED=1"
 # Uncomment and customize as needed:
 # Environment="MEDIA_SERVICE_METHOD=all"
 # Environment="SERVER_HOST=0.0.0.0"
 # Environment="WEBSOCKET_SERVER_PORT=5001"
 
 # Start command - uses gunicorn for production
-ExecStart=/Users/hthai00/Projects/media-display/server/start.sh --gunicorn
+ExecStart=/opt/media-display/server/start.sh --gunicorn
 
 # Restart policy
 Restart=on-failure
@@ -49,12 +57,13 @@ LimitNOFILE=65536
 # PrivateTmp=true
 # ProtectSystem=strict
 # ProtectHome=read-only
-# ReadWritePaths=/Users/hthai00/Projects/media-display
+# ReadWritePaths=/opt/media-display
 
-# Logging
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=media-display
+# Logging - output to /var/log/media-display.log
+# Note: Log directory must exist and be writable by the service user
+# Create with: sudo mkdir -p /var/log && sudo touch /var/log/media-display.log && sudo chown hthai00:hthai00 /var/log/media-display.log
+StandardOutput=append:/var/log/media-display.log
+StandardError=append:/var/log/media-display.log
 
 # Graceful shutdown
 TimeoutStopSec=30
