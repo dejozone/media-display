@@ -2,7 +2,7 @@
 const PROD_ENV = 'media-display.projecttechcycle.org'; // production hostname
 
 const LOCAL_CONFIG = {
-    WEBSOCKET_URL: 'http://localhost',
+    WEBSOCKET_URL: null,
     WEBSOCKET_PORT: 5001,
     WEBSOCKET_SSL_CERT_VERIFY: false, // For local testing with self-signed certs
     WEBSOCKET_SUB_PATH: '/notis/media-display/socket.io',
