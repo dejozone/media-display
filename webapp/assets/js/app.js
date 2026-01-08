@@ -357,6 +357,7 @@ function showLoading(message = 'Connecting...') {
     elements.nowPlaying.classList.add('hidden');
     elements.loading.querySelector('p').textContent = message;
     document.body.classList.remove('no-playback-active');
+    document.body.classList.add('music-paused');
     
     // Hide equalizer and app settings during loading/reconnecting
     if (elements.equalizer) {
@@ -378,6 +379,7 @@ function showNoPlayback() {
     elements.noPlayback.classList.remove('hidden');
     elements.nowPlaying.classList.add('hidden');
     document.body.classList.add('no-playback-active');
+    document.body.classList.add('music-paused');
     isPlaying = false;
     
     // Show app settings in no-playback state (unless expanded)
@@ -1208,12 +1210,35 @@ function updateDisplay(trackData) {
         return;
     }
     
+    // Track previous playback state for comparison
+    const wasPlaying = isPlaying;
+    
     // Update playback state
     isPlaying = trackData.is_playing;
     
+    // Update body class for pausing animations
+    if (isPlaying) {
+        document.body.classList.remove('music-paused');
+    } else {
+        document.body.classList.add('music-paused');
+    }
+    
+    // Notify server about progress needs based on playback state and active effects
+    if (socket && socket.connected && progressEffectState !== 'off') {
+        if (isPlaying && !wasPlaying) {
+            // Music started playing - request progress updates
+            socket.emit('enable_progress');
+            console.log('Music playing - requesting progress updates from server');
+        } else if (!isPlaying && wasPlaying) {
+            // Music paused - stop progress updates
+            socket.emit('disable_progress');
+            console.log('Music paused - stopping progress updates from server');
+        }
+    }
+    
     // Update progress state for comet animation
     if (trackData.progress_ms !== undefined && trackData.duration_ms !== undefined) {
-        const wasPlaying = progressState.isPlaying;
+        const wasProgressPlaying = progressState.isPlaying;
         progressState.progressMs = trackData.progress_ms;
         progressState.durationMs = trackData.duration_ms;
         progressState.isPlaying = trackData.is_playing;
@@ -1223,10 +1248,10 @@ function updateDisplay(trackData) {
         updateProgressComet();
         
         // Handle play/pause state changes
-        if (trackData.is_playing && !wasPlaying) {
+        if (trackData.is_playing && !wasProgressPlaying) {
             // Resumed playing
             resumeProgressComet();
-        } else if (!trackData.is_playing && wasPlaying) {
+        } else if (!trackData.is_playing && wasProgressPlaying) {
             // Paused
             pauseProgressComet();
         } else if (trackData.is_playing) {

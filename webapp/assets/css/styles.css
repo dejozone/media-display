@@ -785,6 +785,16 @@ body.rotate-270 .no-playback-state .icon-container {
     animation: catGlowFast 1.5s ease-in-out infinite;
 }
 
+/* Pause glow animations when music is paused */
+body.music-paused .album-art.glow-all-colors,
+body.music-paused .album-art.glow-all-colors-fast,
+body.music-paused .album-art.glow-album-colors,
+body.music-paused .album-art.glow-album-colors-fast,
+body.music-paused .album-art.glow-white,
+body.music-paused .album-art.glow-white-fast {
+    animation-play-state: paused !important;
+}
+
 .album-art.glow-album-colors {
     animation: albumColorGlow 30s ease-in-out infinite;
 }
