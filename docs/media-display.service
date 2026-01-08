@@ -1,0 +1,65 @@
+# Systemd service file for Media Display Server
+# 
+# Installation:
+#   1. Edit this file to set the correct paths and user
+#   2. Copy to systemd directory:
+#      sudo cp media-display.service /etc/systemd/system/
+#   3. Reload systemd:
+#      sudo systemctl daemon-reload
+#   4. Enable service to start on boot:
+#      sudo systemctl enable media-display.service
+#   5. Start the service:
+#      sudo systemctl start media-display.service
+#
+# Management commands:
+#   sudo systemctl status media-display    # Check status
+#   sudo systemctl stop media-display      # Stop service
+#   sudo systemctl restart media-display   # Restart service
+#   sudo journalctl -u media-display -f   # View logs
+
+[Unit]
+Description=Media Display Server - Spotify/Sonos Now Playing Monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=hthai00
+Group=hthai00
+WorkingDirectory=/Users/hthai00/Projects/media-display/server
+
+# Environment variables (can also be loaded from .env file by start.sh)
+# Uncomment and customize as needed:
+# Environment="MEDIA_SERVICE_METHOD=all"
+# Environment="SERVER_HOST=0.0.0.0"
+# Environment="WEBSOCKET_SERVER_PORT=5001"
+
+# Start command - uses gunicorn for production
+ExecStart=/Users/hthai00/Projects/media-display/server/start.sh --gunicorn
+
+# Restart policy
+Restart=on-failure
+RestartSec=10s
+
+# Resource limits
+LimitNOFILE=65536
+
+# Security hardening (uncomment for additional security)
+# NoNewPrivileges=true
+# PrivateTmp=true
+# ProtectSystem=strict
+# ProtectHome=read-only
+# ReadWritePaths=/Users/hthai00/Projects/media-display
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=media-display
+
+# Graceful shutdown
+TimeoutStopSec=30
+KillMode=mixed
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target
