@@ -3,8 +3,8 @@
 # Installation:
 #   1. Edit this file to set the correct paths and user
 #   2. Create log file:
-#      sudo touch /var/log/media-display.log
-#      sudo chown hthai00:hthai00 /var/log/media-display.log
+#      sudo touch /var/log/dejozone/media-display.log
+#      sudo chown dejozone:dejozone /var/log/dejozone/media-display.log
 #   3. Copy to systemd directory:
 #      sudo cp media-display.service /etc/systemd/system/
 #   4. Reload systemd:
@@ -20,7 +20,7 @@
 #   sudo systemctl status media-display    # Check status
 #   sudo systemctl stop media-display      # Stop service
 #   sudo systemctl restart media-display   # Restart service
-#   tail -f /var/log/media-display.log     # View logs in real-time
+#   tail -f /var/log/dejozone/media-display.log     # View logs in real-time
 #   sudo logrotate -f /etc/logrotate.d/media-display  # Force log rotation
 
 [Unit]
@@ -30,8 +30,8 @@ Wants=network-online.target
 
 [Service]
 Type=exec
-User=hthai00
-Group=hthai00
+User=dejozone
+Group=dejozone
 WorkingDirectory=/opt/media-display/server
 
 # Environment variables (can also be loaded from .env file by start.sh)
@@ -59,11 +59,11 @@ LimitNOFILE=65536
 # ProtectHome=read-only
 # ReadWritePaths=/opt/media-display
 
-# Logging - output to /var/log/media-display.log
+# Logging - output to /var/log/dejozone/media-display.log
 # Note: Log directory must exist and be writable by the service user
-# Create with: sudo mkdir -p /var/log && sudo touch /var/log/media-display.log && sudo chown hthai00:hthai00 /var/log/media-display.log
-StandardOutput=append:/var/log/media-display.log
-StandardError=append:/var/log/media-display.log
+# Create with: sudo mkdir -p /var/log && sudo touch /var/log/dejozone/media-display.log && sudo chown dejozone:dejozone /var/log/dejozone/media-display.log
+StandardOutput=append:/var/log/dejozone/media-display.log
+StandardError=append:/var/log/dejozone/media-display.log
 
 # Graceful shutdown
 TimeoutStopSec=30
