@@ -1,5 +1,5 @@
 // Environment config
-const ENV = 'local'; // 'local' or 'production'
+const PROD_ENV = 'media-display.projecttechcycle.org'; // production hostname
 
 const LOCAL_CONFIG = {
     WEBSOCKET_URL: 'http://localhost',
@@ -17,8 +17,11 @@ const PROD_CONFIG = {
     DEF_ALBUM_ART_PATH: 'assets/images/cat.jpg',
 }
 
+// Auto-detect environment based on hostname
+const hostname = window.location.hostname;
+
 // Select configuration based on environment
-const selectedConfig = ENV === 'production' ? PROD_CONFIG : LOCAL_CONFIG;
+const selectedConfig = hostname === PROD_ENV ? PROD_CONFIG : LOCAL_CONFIG;
 
 // Determine WebSocket URL
 let WEBSOCKET_URL;
