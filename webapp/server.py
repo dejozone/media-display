@@ -9,10 +9,40 @@ import os
 import sys
 import signal
 import threading
+import socket
 from dotenv import load_dotenv
 from flask import Flask, send_from_directory, send_file, request
 from flask_cors import CORS
+# Utility function to get local IP addresses
+def get_local_ip():
+    """Get the local IP address(es) of the server"""
+    ips = ['localhost', '127.0.0.1']
+    try:
+        # Get hostname
+        hostname = socket.gethostname()
+        # Get all IP addresses associated with hostname
+        ip_addresses = socket.getaddrinfo(hostname, None, socket.AF_INET)
+        for ip_info in ip_addresses:
+            ip = str(ip_info[4][0])  # Ensure it's a string
+            if ip not in ips and not ip.startswith('127.'):
+                ips.append(ip)
+    except Exception:
+        pass
+    
+    # Try alternative method using UDP socket (doesn't actually send data)
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(('8.8.8.8', 80))  # Google DNS, connection not actually made
+        local_ip = s.getsockname()[0]
+        s.close()
+        if local_ip not in ips:
+            ips.append(local_ip)
+    except Exception:
+        pass
+    
+    return ips
 
+# 
 # Load environment variables
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '.env'))
 
@@ -102,9 +132,14 @@ def main():
     print("Spotify Display Web App - Development Server")
     print("=" * 60)
     print(f"\nServing files from: {WEBAPP_DIR}")
-    print(f"Server running on: http://localhost:{PORT}")
+    print(f"Server running on port: {PORT}")
     print("\nOpen in your browser:")
-    print(f"  http://localhost:{PORT}/")
+    
+    # Show all accessible endpoints
+    local_ips = get_local_ip()
+    for ip in local_ips:
+        print(f"  http://{ip}:{PORT}/")
+    
     print("\nPress Ctrl+C to stop the server\n")
     
     # Create server with socket reuse enabled

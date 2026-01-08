@@ -10,6 +10,7 @@ import time
 import threading
 import logging
 import ssl
+import socket
 from flask import Flask, render_template, jsonify, send_from_directory, Response, request
 from flask_socketio import SocketIO, emit
 from flask_cors import CORS
@@ -30,6 +31,35 @@ try:
 except ImportError:
     SONOS_AVAILABLE = False
     print("⚠️  Sonos library (soco) not available. Install with: pip install soco")
+
+# Utility function to get local IP addresses
+def get_local_ip():
+    """Get the local IP address(es) of the server"""
+    ips = ['localhost', '127.0.0.1']
+    try:
+        # Get hostname
+        hostname = socket.gethostname()
+        # Get all IP addresses associated with hostname
+        ip_addresses = socket.getaddrinfo(hostname, None, socket.AF_INET)
+        for ip_info in ip_addresses:
+            ip = str(ip_info[4][0])  # Ensure it's a string
+            if ip not in ips and not ip.startswith('127.'):
+                ips.append(ip)
+    except Exception:
+        pass
+    
+    # Try alternative method using UDP socket (doesn't actually send data)
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(('8.8.8.8', 80))  # Google DNS, connection not actually made
+        local_ip = s.getsockname()[0]
+        s.close()
+        if local_ip not in ips:
+            ips.append(local_ip)
+    except Exception:
+        pass
+    
+    return ips
 
 # Load environment variables
 load_dotenv()
@@ -1096,7 +1126,14 @@ def main():
         port = int(os.getenv('WEBSOCKET_SERVER_PORT', 5001))
         
         print(f"\n🚀 Starting server on {host}:{port}...")
-        print(f"WebSocket endpoint: ws://localhost:{port}/")
+        print("WebSocket endpoints:")
+        
+        # Show all accessible endpoints
+        local_ips = get_local_ip()
+        for ip in local_ips:
+            protocol = 'wss' if ip.startswith('127.') or ip == 'localhost' else 'ws'
+            print(f"  {protocol}://{ip}:{port}/")
+        
         print("Press Ctrl+C to stop\n")
         
         # Start Flask-SocketIO server
