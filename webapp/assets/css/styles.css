@@ -1201,6 +1201,7 @@ body.rotate-270 .app-settings {
 #progress-effect-icon.effect-comet,
 #progress-effect-icon.effect-album-comet,
 #progress-effect-icon.effect-across-comet,
+#progress-effect-icon.effect-sunrise,
 #progress-effect-icon.effect-equalizer-fill {
     opacity: 1;
     background-color: #ffffff;
@@ -2292,4 +2293,269 @@ body.fullscreen .app-settings.expanded {
         opacity: 0.9;
         filter: blur(1px);
     }
+}
+
+/* Sunrise Progress Effect */
+.sunrise-container {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 1;
+    overflow: hidden;
+    transition: opacity 0.5s ease;
+}
+
+.sunrise-container.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* Background dimming overlay for day/night cycle */
+.sunrise-container::before {
+    content: '';
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.7);
+    opacity: calc(1 - var(--background-brightness, 1));
+    transition: opacity 0.5s ease;
+    pointer-events: none;
+    z-index: -1;
+}
+
+/* Stars container */
+.sunrise-stars {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    transition: opacity 1s ease;
+}
+
+/* Individual static stars */
+.star {
+    position: absolute;
+    width: 2px;
+    height: 2px;
+    background: white;
+    border-radius: 50%;
+    box-shadow: 0 0 3px rgba(255, 255, 255, 0.8);
+    animation: twinkle 3s ease-in-out infinite;
+}
+
+/* Shooting stars */
+.shooting-star {
+    position: absolute;
+    width: 0;
+    height: 0;
+    background: transparent;
+    animation: shoot 3s linear infinite;
+    opacity: 0;
+    will-change: transform, opacity;
+    --shoot-x: 200px;
+    --shoot-y: 100px;
+    --shoot-angle: 26.57deg;
+}
+
+.shooting-star::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 60px;
+    height: 3px;
+    background: linear-gradient(
+        to right, 
+        rgba(255, 255, 255, 1) 0%,
+        rgba(240, 245, 255, 0.8) 20%,
+        rgba(220, 230, 255, 0.5) 50%,
+        rgba(200, 220, 255, 0.2) 80%,
+        transparent 100%
+    );
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.6);
+    /* Rotate tail 180 degrees opposite to flight direction */
+    transform: rotate(calc(var(--shoot-angle) + 180deg));
+    transform-origin: left center;
+    border-radius: 50%;
+}
+
+/* Sky gradient background */
+.sunrise-sky {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background: radial-gradient(
+        ellipse at var(--sun-x, 10%) var(--sun-y, 110%),
+        var(--sky-color-1, rgba(255, 200, 100, 0)) 0%,
+        var(--sky-color-2, rgba(255, 150, 80, 0)) 15%,
+        var(--sky-color-3, rgba(255, 100, 60, 0)) 30%,
+        transparent 50%
+    );
+    transition: background 0.3s ease;
+    mix-blend-mode: screen;
+}
+
+/* Sun element */
+.sunrise-sun {
+    position: absolute;
+    left: var(--sun-x, 10%);
+    top: var(--sun-y, 110%);
+    width: var(--sun-size, 80px);
+    height: var(--sun-size, 80px);
+    transform: translate(-50%, -50%);
+    transition: left 0.1s ease-out, top 0.1s ease-out;
+}
+
+/* Sun core */
+.sunrise-sun::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 100%;
+    height: 100%;
+    transform: translate(-50%, -50%);
+    background: radial-gradient(circle,
+        #FFFEF0 0%,
+        #FFE87C 30%,
+        #FFB347 60%,
+        transparent 100%
+    );
+    border-radius: 50%;
+    filter: blur(3px);
+    opacity: var(--sun-opacity, 0.9);
+    animation: sunPulse 4s ease-in-out infinite;
+}
+
+/* Sun outer glow */
+.sunrise-sun::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 200%;
+    height: 200%;
+    transform: translate(-50%, -50%);
+    background: radial-gradient(circle,
+        rgba(255, 230, 124, 0.6) 0%,
+        rgba(255, 179, 71, 0.4) 25%,
+        rgba(255, 209, 220, 0.2) 50%,
+        transparent 70%
+    );
+    border-radius: 50%;
+    filter: blur(20px);
+    opacity: var(--sun-opacity, 0.8);
+    animation: sunGlow 3s ease-in-out infinite;
+}
+
+/* Optional mountain silhouette */
+.sunrise-mountains {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    width: 100%;
+    height: 15%;
+    background: linear-gradient(to bottom, rgba(20, 20, 20, 0.3) 0%, rgba(10, 10, 10, 1) 40%);
+    clip-path: polygon(
+        0% 100%,
+        0% 60%,
+        5% 55%,
+        10% 50%,
+        15% 45%,
+        20% 50%,
+        25% 48%,
+        30% 40%,
+        35% 45%,
+        40% 35%,
+        45% 40%,
+        50% 30%,
+        55% 35%,
+        60% 38%,
+        65% 42%,
+        70% 38%,
+        75% 45%,
+        80% 50%,
+        85% 48%,
+        90% 55%,
+        95% 52%,
+        100% 58%,
+        100% 100%
+    );
+    opacity: 1;
+}
+
+/* Animations */
+@keyframes sunPulse {
+    0%, 100% {
+        transform: translate(-50%, -50%) scale(1);
+        opacity: 0.9;
+    }
+    50% {
+        transform: translate(-50%, -50%) scale(1.05);
+        opacity: 1;
+    }
+}
+
+@keyframes sunGlow {
+    0%, 100% {
+        opacity: 0.7;
+        transform: translate(-50%, -50%) scale(1);
+    }
+    50% {
+        opacity: 0.9;
+        transform: translate(-50%, -50%) scale(1.1);
+    }
+}
+
+@keyframes twinkle {
+    0%, 100% {
+        opacity: 0.3;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 1;
+        transform: scale(1.5);
+    }
+}
+
+@keyframes shoot {
+    0% {
+        opacity: 0;
+        transform: translate(0, 0);
+        filter: brightness(1) blur(0px);
+    }
+    3% {
+        opacity: 1;
+        filter: brightness(1.2) blur(0px);
+    }
+    94% {
+        opacity: 1;
+        transform: translate(calc(var(--shoot-x) * 0.94), calc(var(--shoot-y) * 0.94));
+        filter: brightness(1.2) blur(0px);
+    }
+    98% {
+        opacity: 0.7;
+        transform: translate(calc(var(--shoot-x) * 0.98), calc(var(--shoot-y) * 0.98));
+        filter: brightness(2) blur(3px);
+    }
+    100% {
+        opacity: 0;
+        transform: translate(var(--shoot-x), var(--shoot-y));
+        filter: brightness(3) blur(6px);
+    }
+}
+
+/* Pause animations when music is paused */
+body:not(:has(.playback-status.playing)) .sunrise-sun::before,
+body:not(:has(.playback-status.playing)) .sunrise-sun::after {
+    animation-play-state: paused !important;
 }
