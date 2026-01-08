@@ -11,7 +11,7 @@ import threading
 import logging
 import ssl
 import socket
-from flask import Flask, render_template, jsonify, send_from_directory, Response, request
+from flask import Flask, jsonify, send_from_directory, Response, request
 from flask_socketio import SocketIO, emit
 from flask_cors import CORS
 import spotipy
@@ -88,7 +88,7 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 86400  # Default cache for static file
 CORS(app)
 
 # Configure Socket.IO with custom path for nginx subpath proxying
-socketio_path = os.getenv('SOCKETIO_PATH', '/socket.io')
+socketio_path = os.getenv('WEBSOCKET_PATH', '/socket.io')
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading', path=socketio_path)
 
 # Override Flask-SocketIO's aggressive no-cache defaults for static assets
