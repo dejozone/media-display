@@ -2313,6 +2313,34 @@ body.fullscreen .app-settings.expanded {
     pointer-events: none;
 }
 
+/* Rotate sunrise container with canvas rotation */
+body.rotate-90 .sunrise-container {
+    transform: rotate(-90deg);
+    transform-origin: center center;
+    width: 100vh;
+    height: 100vw;
+    left: 50%;
+    top: 50%;
+    margin-left: -50vh;
+    margin-top: -50vw;
+}
+
+body.rotate-180 .sunrise-container {
+    transform: rotate(-180deg);
+    transform-origin: center center;
+}
+
+body.rotate-270 .sunrise-container {
+    transform: rotate(-270deg);
+    transform-origin: center center;
+    width: 100vh;
+    height: 100vw;
+    left: 50%;
+    top: 50%;
+    margin-left: -50vh;
+    margin-top: -50vw;
+}
+
 /* Background dimming overlay for day/night cycle */
 .sunrise-container::before {
     content: '';
@@ -2457,6 +2485,55 @@ body.fullscreen .app-settings.expanded {
     animation: sunGlow 3s ease-in-out infinite;
 }
 
+/* Mobile optimization for sun size */
+@media (max-width: 768px) {
+    .sunrise-sun {
+        --sun-size-scale: 0.7;
+        width: calc(var(--sun-size, 80px) * var(--sun-size-scale));
+        height: calc(var(--sun-size, 80px) * var(--sun-size-scale));
+    }
+    
+    .sunrise-sun::before {
+        filter: blur(2px);
+    }
+    
+    .sunrise-sun::after {
+        filter: blur(12px);
+    }
+}
+
+@media (max-width: 480px) {
+    .sunrise-sun {
+        --sun-size-scale: 0.5;
+        width: calc(var(--sun-size, 80px) * var(--sun-size-scale));
+        height: calc(var(--sun-size, 80px) * var(--sun-size-scale));
+    }
+    
+    .sunrise-sun::before {
+        filter: blur(1.5px);
+    }
+    
+    .sunrise-sun::after {
+        filter: blur(8px);
+    }
+}
+
+@media (max-width: 320px) {
+    .sunrise-sun {
+        --sun-size-scale: 0.4;
+        width: calc(var(--sun-size, 80px) * var(--sun-size-scale));
+        height: calc(var(--sun-size, 80px) * var(--sun-size-scale));
+    }
+    
+    .sunrise-sun::before {
+        filter: blur(1px);
+    }
+    
+    .sunrise-sun::after {
+        filter: blur(6px);
+    }
+}
+
 /* Optional mountain silhouette */
 .sunrise-mountains {
     position: absolute;
@@ -2491,6 +2568,11 @@ body.fullscreen .app-settings.expanded {
         100% 100%
     );
     opacity: 1;
+    /* Smooth rendering for rotated states */
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
+    -webkit-transform: translateZ(0);
+    transform: translateZ(0);
 }
 
 /* Animations */
