@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Now Playing</title>
+    <link rel="stylesheet" href="assets/css/styles.css">
+</head>
+<body>
+    <div id="display" class="container">
+        <!-- Loading state -->
+        <div id="loading" class="loading-state">
+            <div class="spinner"></div>
+            <p>Connecting...</p>
+        </div>
+        
+        <!-- No playback state -->
+        <div id="no-playback" class="no-playback-state hidden">
+            <div class="album-art-container">
+                <img id="screensaver-image" src="" alt="Screensaver" class="album-art">
+            </div>
+            <!-- <p>No music playing</p>
+            <small>Start playing on any Spotify device</small> -->
+        </div>
+        
+        <!-- Now playing display -->
+        <div id="now-playing" class="now-playing hidden">
+            <div class="album-art-container">
+                <img id="album-art" src="" alt="Album Art" class="album-art">
+            </div>
+            
+            <div class="track-info">
+                <h1 id="track-name" class="track-name">Track Name</h1>
+                <h2 id="artist-name" class="artist-name">Artist Name</h2>
+                <!-- <h3 id="album-name" class="album-name">Album Name</h3> -->
+            </div>
+            
+            <div class="device-info">
+                <span id="device-name"></span>
+            </div>
+        </div>
+        
+    </div>
+    
+    <!-- Equalizer visualization -->
+    <div id="equalizer" class="equalizer hidden">
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+        <div class="equalizer-bar"></div>
+    </div>
+        
+    <!-- Apple settings -->
+    <div id="app-settings" class="app-settings">
+        <div class="icons-container">
+            <div id="service-sonos" class="service-icon hidden"></div>
+            <div id="service-spotify" class="service-icon hidden"></div>
+            <div id="reset-icon" class="service-icon reset-icon"></div>
+            <div id="equalizer-icon" class="service-icon"></div>
+            <span id="playback-status" class="playback-status"></span>
+            <div id="glow-icon" class="service-icon"></div>
+            <div id="rotation-icon" class="service-icon"></div>
+            <div id="progress-effect-icon" class="service-icon"></div>
+            <div id="fullscreen-icon" class="service-icon"></div>
+        </div>
+    </div>
+    
+    <!-- Service label -->
+    <div id="service-label" class="service-label"></div>
+    
+    <script src="https://cdn.socket.io/4.8.3/socket.io.min.js"></script>
+    <script src="assets/js/app.js"></script>
+</body>
+</html>

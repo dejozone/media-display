@@ -1,0 +1,10 @@
+flask==3.0.0
+flask-socketio==5.3.5
+flask-cors==4.0.0
+spotipy==2.24.0
+soco==0.30.4
+zeroconf==0.132.2
+python-socketio==5.10.0
+gevent==24.11.1
+gevent-websocket==0.10.1
+python-dotenv==1.0.0
