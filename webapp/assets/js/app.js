@@ -390,6 +390,11 @@ function showNoPlayback() {
     // Hide progress comet in no playback/screensaver mode
     hideProgressComet();
     
+    // Force hide equalizer in screensaver mode
+    if (elements.equalizer) {
+        elements.equalizer.classList.add('hidden');
+    }
+    
     updateEqualizerVisibility();
     startScreensaverCycle();
 }
@@ -1883,6 +1888,13 @@ function setupServiceIconHandlers() {
     
     equalizerIcon.addEventListener('click', (e) => {
         e.stopPropagation();
+        
+        // Prevent toggling equalizer in screensaver mode
+        if (document.body.classList.contains('no-playback-active')) {
+            showServiceLabel('Equalizer unavailable in screensaver mode', equalizerIcon);
+            return;
+        }
+        
         cycleEqualizerState();
         // Reset timer when icon is clicked
         if (appSettings.classList.contains('expanded')) {
@@ -1893,6 +1905,13 @@ function setupServiceIconHandlers() {
     equalizerIcon.addEventListener('touchend', (e) => {
         e.preventDefault();
         e.stopPropagation();
+        
+        // Prevent toggling equalizer in screensaver mode
+        if (document.body.classList.contains('no-playback-active')) {
+            showServiceLabel('Equalizer unavailable in screensaver mode', equalizerIcon);
+            return;
+        }
+        
         cycleEqualizerState();
         // Reset timer when icon is touched
         if (appSettings.classList.contains('expanded')) {
@@ -1913,6 +1932,13 @@ function setupServiceIconHandlers() {
     
     progressEffectIcon.addEventListener('click', (e) => {
         e.stopPropagation();
+        
+        // Prevent toggling progress effect in screensaver mode
+        if (document.body.classList.contains('no-playback-active')) {
+            showServiceLabel('Progress effects unavailable in screensaver mode', progressEffectIcon);
+            return;
+        }
+        
         cycleProgressEffectState();
         // Reset timer when icon is clicked
         if (appSettings.classList.contains('expanded')) {
@@ -1923,6 +1949,13 @@ function setupServiceIconHandlers() {
     progressEffectIcon.addEventListener('touchend', (e) => {
         e.preventDefault();
         e.stopPropagation();
+        
+        // Prevent toggling progress effect in screensaver mode
+        if (document.body.classList.contains('no-playback-active')) {
+            showServiceLabel('Progress effects unavailable in screensaver mode', progressEffectIcon);
+            return;
+        }
+        
         cycleProgressEffectState();
         // Reset timer when icon is touched
         if (appSettings.classList.contains('expanded')) {
@@ -2215,6 +2248,17 @@ function updateEqualizerVisibility() {
     const albumArt = document.getElementById('album-art');
     
     if (!equalizer) {
+        return;
+    }
+    
+    // Never show equalizer in screensaver mode (no-playback-active)
+    const isScreensaverMode = document.body.classList.contains('no-playback-active');
+    if (isScreensaverMode) {
+        equalizer.classList.add('hidden');
+        // Also remove bass glow effects from album art in screensaver mode
+        if (albumArt) {
+            albumArt.classList.remove('bass-white-glow', 'bass-color-glow');
+        }
         return;
     }
     
