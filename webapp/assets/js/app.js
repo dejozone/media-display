@@ -250,6 +250,12 @@ let progressState = {
     animationFrameId: null
 };
 
+// Separate animation state for sunrise (to avoid conflicts with comet)
+let sunriseAnimationState = {
+    animationFrameId: null,
+    lastUpdateTime: null
+};
+
 // Initialize WebSocket connection
 function connectWebSocket() {
     // Note: In browsers, SSL certificate verification cannot be disabled programmatically.
@@ -1417,23 +1423,23 @@ function updateSunriseElement() {
 
 // Animate sunrise with client-side interpolation
 function animateSunrise() {
-    if (!progressState.isPlaying || !progressState.lastUpdateTime) {
+    if (!progressState.isPlaying || !sunriseAnimationState.lastUpdateTime) {
         return;
     }
     
     const now = Date.now();
-    const elapsed = now - progressState.lastUpdateTime;
+    const elapsed = now - sunriseAnimationState.lastUpdateTime;
     
     // Update progress with elapsed time
     progressState.progressMs = Math.min(progressState.progressMs + elapsed, progressState.durationMs);
-    progressState.lastUpdateTime = now;
+    sunriseAnimationState.lastUpdateTime = now;
     
     // Update visual position
     updateSunriseElement();
     
     // Continue animation loop if still playing
     if (progressState.isPlaying && progressState.progressMs < progressState.durationMs) {
-        progressState.animationFrameId = requestAnimationFrame(animateSunrise);
+        sunriseAnimationState.animationFrameId = requestAnimationFrame(animateSunrise);
     }
 }
 
@@ -1451,11 +1457,11 @@ function showSunriseElement() {
         
         // Start animation loop if playing
         if (progressState.isPlaying) {
-            if (progressState.animationFrameId) {
-                cancelAnimationFrame(progressState.animationFrameId);
+            if (sunriseAnimationState.animationFrameId) {
+                cancelAnimationFrame(sunriseAnimationState.animationFrameId);
             }
-            progressState.lastUpdateTime = Date.now();
-            progressState.animationFrameId = requestAnimationFrame(animateSunrise);
+            sunriseAnimationState.lastUpdateTime = Date.now();
+            sunriseAnimationState.animationFrameId = requestAnimationFrame(animateSunrise);
         }
     }
 }
@@ -1467,28 +1473,28 @@ function hideSunriseElement() {
     }
     
     // Stop animation loop
-    if (progressState.animationFrameId) {
-        cancelAnimationFrame(progressState.animationFrameId);
-        progressState.animationFrameId = null;
+    if (sunriseAnimationState.animationFrameId) {
+        cancelAnimationFrame(sunriseAnimationState.animationFrameId);
+        sunriseAnimationState.animationFrameId = null;
     }
 }
 
 // Pause sunrise (keep visible but stop moving)
 function pauseSunrise() {
-    if (progressState.animationFrameId) {
-        cancelAnimationFrame(progressState.animationFrameId);
-        progressState.animationFrameId = null;
+    if (sunriseAnimationState.animationFrameId) {
+        cancelAnimationFrame(sunriseAnimationState.animationFrameId);
+        sunriseAnimationState.animationFrameId = null;
     }
 }
 
 // Resume sunrise animation
 function resumeSunrise() {
     if (progressState.isPlaying && elements.sunriseContainer && !elements.sunriseContainer.classList.contains('hidden')) {
-        progressState.lastUpdateTime = Date.now();
-        if (progressState.animationFrameId) {
-            cancelAnimationFrame(progressState.animationFrameId);
+        sunriseAnimationState.lastUpdateTime = Date.now();
+        if (sunriseAnimationState.animationFrameId) {
+            cancelAnimationFrame(sunriseAnimationState.animationFrameId);
         }
-        progressState.animationFrameId = requestAnimationFrame(animateSunrise);
+        sunriseAnimationState.animationFrameId = requestAnimationFrame(animateSunrise);
     }
 }
 
