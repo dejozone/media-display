@@ -1377,6 +1377,7 @@ body.rotate-270 .equalizer {
     transition: background-color 0.3s ease;
     /* Add performance optimizations */
     will-change: height;
+    contain: layout style paint;
     transform: translateZ(0);
     backface-visibility: hidden;
     --bar-hue: 0; /* Set dynamically */
