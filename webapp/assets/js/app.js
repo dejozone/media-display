@@ -191,8 +191,8 @@ let isPlaying = false; // Track current playback state
 let equalizerAutoEnabled = false; // Track if equalizer was auto-enabled by progress effect
 
 // Progress effect state management
-let progressEffectState = 'off'; // 'off', 'comet', 'album-comet', 'across-comet', 'sunrise', 'equalizer-fill'
-const PROGRESS_EFFECT_STATES = ['off', 'comet', 'album-comet', 'across-comet', 'sunrise', 'equalizer-fill'];
+let progressEffectState = 'off'; // 'off', 'comet', 'album-comet', 'across-comet', 'sunrise', 'blended-sunrise', 'equalizer-fill'
+const PROGRESS_EFFECT_STATES = ['off', 'comet', 'album-comet', 'across-comet', 'sunrise', 'blended-sunrise', 'equalizer-fill'];
 
 // Effect name mappings for UI labels
 const GLOW_EFFECT_NAMES = {
@@ -224,6 +224,7 @@ const PROGRESS_EFFECT_NAMES = {
     'album-comet': 'Album Comet',
     'across-comet': 'Across Comet',
     'sunrise': 'Sunrise & Sunset',
+    'blended-sunrise': 'Blended Sunrise & Sunset',
     'equalizer-fill': 'Equalizer Fill'
 };
 
@@ -740,6 +741,11 @@ function applyGradientBackground(colors) {
     document.body.style.transition = 'background 1s ease';
     document.body.style.background = gradient;
     
+    // Store background colors as CSS variables for mountain blending
+    document.body.style.setProperty('--bg-color-1', bgColors[0]);
+    document.body.style.setProperty('--bg-color-2', bgColors[1] || bgColors[0]);
+    document.body.style.setProperty('--bg-color-3', bgColors[2] || bgColors[1] || bgColors[0]);
+    
     // Calculate average luminance of background colors
     const avgLuminance = colors.reduce((sum, color) => {
         return sum + getLuminance(color.r, color.g, color.b);
@@ -1196,7 +1202,12 @@ function updateSunriseElement() {
     if (!elements.sunriseContainer || !progressState.durationMs) return;
     
     const { progressMs, durationMs } = progressState;
-    const percentage = Math.min(Math.max(progressMs / durationMs, 0), 1);
+    
+    // Speed up sunrise to complete at 98% of song duration (same as comet)
+    // This ensures the sun fully sets before the song ends/transitions
+    const completionTarget = 0.98;
+    const percentage = Math.min(Math.max(progressMs / durationMs, 0), 1) / completionTarget;
+    const clampedPercentage = Math.min(percentage, 1);
     
     // Get screen dimensions (accounting for rotation)
     const effectiveWidth = (rotationState === 90 || rotationState === 270) ? window.innerHeight : window.innerWidth;
@@ -1206,7 +1217,7 @@ function updateSunriseElement() {
     // Horizontal movement: 2% → 98% of screen width (full screen left to right)
     const startX = 2;
     const endX = 98;
-    const sunX = startX + (endX - startX) * percentage;
+    const sunX = startX + (endX - startX) * clampedPercentage;
     
     // Vertical movement: sunrise → peak → sunset (symmetric arc)
     // Start: 97% (mostly below horizon, only upper portion peeking above mountains)
@@ -1226,18 +1237,18 @@ function updateSunriseElement() {
     
     // Create symmetric arc using parabola (peaks at 50%)
     // Arc height calculation: maximum at 50%, returns to horizon at 100%
-    const arcFactor = 4 * (startY - peakY) * percentage * (1 - percentage);
+    const arcFactor = 4 * (startY - peakY) * clampedPercentage * (1 - clampedPercentage);
     const sunY = startY - arcFactor;
     
     // Sun size increases as it rises (dawn to day)
     const minSize = 60;
     const maxSize = 120;
-    const sunSize = minSize + (maxSize - minSize) * percentage;
+    const sunSize = minSize + (maxSize - minSize) * clampedPercentage;
     
     // Sun opacity increases as it rises
     const minOpacity = 0.6;
     const maxOpacity = 1.0;
-    const sunOpacity = minOpacity + (maxOpacity - minOpacity) * percentage;
+    const sunOpacity = minOpacity + (maxOpacity - minOpacity) * clampedPercentage;
     
     // Mountain lighting based on sun Y position (lower Y = higher sun = more light)
     // sunY ranges from ~65 (high/midday) to 97 (low/horizon)
@@ -1252,11 +1263,22 @@ function updateSunriseElement() {
     // Brightness: 1.0 (dark) to 1.8 (bright)
     const mountainBrightness = 1 + (lightIntensity * 0.8);
     
-    // Glow colors with calculated alpha based on light intensity
+    // Sun's outer glow colors (from .sunrise-sun::after)
+    // Use the actual colors the sun is emitting
+    const sunGlowColor1 = { r: 255, g: 230, b: 124 }; // Bright golden
+    const sunGlowColor2 = { r: 255, g: 179, b: 71 };  // Orange
+    const sunGlowColor3 = { r: 255, g: 209, b: 220 }; // Peachy pink
+    
+    // Glow alpha based on light intensity and proximity
     // Stronger when sun is closer to mountain
     const glowAlpha1 = lightIntensity * (0.5 + proximity * 0.3);
     const glowAlpha2 = lightIntensity * (0.4 + proximity * 0.2);
     const glowAlpha3 = lightIntensity * (0.3 + proximity * 0.1);
+    
+    // Create RGBA strings with sun's glow colors
+    const mountainGlow1 = `rgba(${sunGlowColor1.r}, ${sunGlowColor1.g}, ${sunGlowColor1.b}, ${glowAlpha1})`;
+    const mountainGlow2 = `rgba(${sunGlowColor2.r}, ${sunGlowColor2.g}, ${sunGlowColor2.b}, ${glowAlpha2})`;
+    const mountainGlow3 = `rgba(${sunGlowColor3.r}, ${sunGlowColor3.g}, ${sunGlowColor3.b}, ${glowAlpha3})`;
     
     // Apply CSS custom properties for sun position
     const container = elements.sunriseContainer;
@@ -1265,34 +1287,34 @@ function updateSunriseElement() {
     container.style.setProperty('--sun-size', `${sunSize}px`);
     container.style.setProperty('--sun-opacity', sunOpacity);
     container.style.setProperty('--mountain-brightness', mountainBrightness);
-    container.style.setProperty('--mountain-glow-alpha-1', glowAlpha1);
-    container.style.setProperty('--mountain-glow-alpha-2', glowAlpha2);
-    container.style.setProperty('--mountain-glow-alpha-3', glowAlpha3);
+    container.style.setProperty('--mountain-glow-1', mountainGlow1);
+    container.style.setProperty('--mountain-glow-2', mountainGlow2);
+    container.style.setProperty('--mountain-glow-3', mountainGlow3);
     
     // Update sky gradient colors based on progress: sunrise → midday → sunset
     let skyColor1, skyColor2, skyColor3;
     
-    if (percentage < 0.25) {
+    if (clampedPercentage < 0.25) {
         // Early sunrise: warm orange and pink glow
-        const t = percentage / 0.25;
+        const t = clampedPercentage / 0.25;
         skyColor1 = `rgba(${Math.round(255)}, ${Math.round(140 + 67 * t)}, ${Math.round(60 + 40 * t)}, ${0.3 + 0.2 * t})`;
         skyColor2 = `rgba(${Math.round(255)}, ${Math.round(100 + 65 * t)}, ${Math.round(50 + 30 * t)}, ${0.2 + 0.2 * t})`;
         skyColor3 = `rgba(${Math.round(255 - 50 * t)}, ${Math.round(80 + 55 * t)}, ${Math.round(60 + 40 * t)}, ${0.15 + 0.15 * t})`;
-    } else if (percentage < 0.5) {
+    } else if (clampedPercentage < 0.5) {
         // Mid-morning to noon: bright golden to blue sky
-        const t = (percentage - 0.25) / 0.25;
+        const t = (clampedPercentage - 0.25) / 0.25;
         skyColor1 = `rgba(${Math.round(255 - 120 * t)}, ${Math.round(207 + 48 * t)}, ${Math.round(100 + 135 * t)}, ${0.5 - 0.1 * t})`;
         skyColor2 = `rgba(${Math.round(255 - 110 * t)}, ${Math.round(165 + 65 * t)}, ${Math.round(80 + 120 * t)}, ${0.4 - 0.1 * t})`;
         skyColor3 = `rgba(${Math.round(205 - 70 * t)}, ${Math.round(135 + 95 * t)}, ${Math.round(100 + 100 * t)}, ${0.3 - 0.1 * t})`;
-    } else if (percentage < 0.75) {
+    } else if (clampedPercentage < 0.75) {
         // Afternoon to evening: blue sky to golden hour
-        const t = (percentage - 0.5) / 0.25;
+        const t = (clampedPercentage - 0.5) / 0.25;
         skyColor1 = `rgba(${Math.round(135 + 120 * t)}, ${Math.round(255 - 55 * t)}, ${Math.round(235 - 135 * t)}, ${0.4 + 0.1 * t})`;
         skyColor2 = `rgba(${Math.round(145 + 110 * t)}, ${Math.round(230 - 80 * t)}, ${Math.round(200 - 120 * t)}, ${0.3 + 0.15 * t})`;
         skyColor3 = `rgba(${Math.round(135 + 100 * t)}, ${Math.round(230 - 110 * t)}, ${Math.round(200 - 130 * t)}, ${0.2 + 0.15 * t})`;
     } else {
         // Sunset: warm orange, red, and purple tones
-        const t = (percentage - 0.75) / 0.25;
+        const t = (clampedPercentage - 0.75) / 0.25;
         skyColor1 = `rgba(${Math.round(255)}, ${Math.round(200 - 90 * t)}, ${Math.round(100 - 40 * t)}, ${0.5 + 0.15 * t})`;
         skyColor2 = `rgba(${Math.round(255 - 45 * t)}, ${Math.round(150 - 70 * t)}, ${Math.round(80 + 20 * t)}, ${0.45 + 0.2 * t})`;
         skyColor3 = `rgba(${Math.round(235 - 85 * t)}, ${Math.round(120 - 50 * t)}, ${Math.round(70 + 80 * t)}, ${0.35 + 0.2 * t})`;
@@ -1317,7 +1339,7 @@ function updateSunriseElement() {
             const bright2 = brighten(warmColors[1], 1.1);
             const bright3 = brighten(warmColors[2], 1.0);
             
-            const intensity = 0.3 + 0.4 * percentage;
+            const intensity = 0.3 + 0.4 * clampedPercentage;
             skyColor1 = `rgba(${bright1.r}, ${bright1.g}, ${bright1.b}, ${intensity})`;
             skyColor2 = `rgba(${bright2.r}, ${bright2.g}, ${bright2.b}, ${intensity * 0.8})`;
             skyColor3 = `rgba(${bright3.r}, ${bright3.g}, ${bright3.b}, ${intensity * 0.6})`;
@@ -1328,15 +1350,53 @@ function updateSunriseElement() {
     container.style.setProperty('--sky-color-2', skyColor2);
     container.style.setProperty('--sky-color-3', skyColor3);
     
+    // Mountain color blending - only for 'blended-sunrise' effect
+    let mountainBase1, mountainBase2;
+    
+    if (progressEffectState === 'blended-sunrise') {
+        // Mountain blends with background colors (from album art)
+        // Get background colors from CSS variables
+        const bgColor1 = getComputedStyle(document.body).getPropertyValue('--bg-color-1').trim() || 'rgb(20, 20, 20)';
+        const bgColor2 = getComputedStyle(document.body).getPropertyValue('--bg-color-2').trim() || 'rgb(15, 15, 15)';
+        
+        // Parse RGB and slightly darken for mountain silhouette
+        const parseRGB = (colorStr) => {
+            const match = colorStr.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+            if (match) {
+                return {
+                    r: parseInt(match[1]),
+                    g: parseInt(match[2]),
+                    b: parseInt(match[3])
+                };
+            }
+            return { r: 20, g: 20, b: 20 };
+        };
+        
+        const bg1 = parseRGB(bgColor1);
+        const bg2 = parseRGB(bgColor2);
+        
+        // Use background colors with slight darkening for mountain silhouette
+        // Keep fully opaque (alpha = 1) so mountain blocks sun, blend mode handles color blending
+        mountainBase1 = `rgba(${Math.round(bg1.r * 0.8)}, ${Math.round(bg1.g * 0.8)}, ${Math.round(bg1.b * 0.8)}, 1)`;
+        mountainBase2 = `rgba(${Math.round(bg2.r * 0.7)}, ${Math.round(bg2.g * 0.7)}, ${Math.round(bg2.b * 0.7)}, 1)`;
+    } else {
+        // Regular 'sunrise' effect: keep original dark mountain colors (fully opaque)
+        mountainBase1 = 'rgba(20, 20, 20, 1)';
+        mountainBase2 = 'rgba(10, 10, 10, 1)';
+    }
+    
+    container.style.setProperty('--mountain-base-1', mountainBase1);
+    container.style.setProperty('--mountain-base-2', mountainBase2);
+    
     // Control background brightness (day/night cycle)
     // 0% = dawn (dark), 50% = midday (full brightness), 100% = night (dark)
     let backgroundBrightness;
-    if (percentage < 0.5) {
+    if (clampedPercentage < 0.5) {
         // Dawn to midday: fade from dark (0.3) to full brightness (1.0)
-        backgroundBrightness = 0.3 + (percentage * 2) * 0.7;
+        backgroundBrightness = 0.3 + (clampedPercentage * 2) * 0.7;
     } else {
         // Midday to dusk: fade from full brightness (1.0) to dark (0.2)
-        backgroundBrightness = 1.0 - ((percentage - 0.5) * 2) * 0.8;
+        backgroundBrightness = 1.0 - ((clampedPercentage - 0.5) * 2) * 0.8;
     }
     
     // Apply background overlay for dimming effect
@@ -1344,9 +1404,9 @@ function updateSunriseElement() {
     
     // Control star visibility (appear as sun sets after midday)
     let starOpacity = 0;
-    if (percentage > 0.5) {
+    if (clampedPercentage > 0.5) {
         // Stars fade in from 50% to 100% of song
-        starOpacity = (percentage - 0.5) * 2;
+        starOpacity = (clampedPercentage - 0.5) * 2;
     }
     
     const starsContainer = container.querySelector('.sunrise-stars');
@@ -1621,7 +1681,7 @@ function updateDisplay(trackData) {
         }
         
         // Show sunrise if we have valid duration and effect is enabled
-        if (trackData.duration_ms > 0 && progressEffectState === 'sunrise') {
+        if (trackData.duration_ms > 0 && (progressEffectState === 'sunrise' || progressEffectState === 'blended-sunrise')) {
             showSunriseElement();
         } else {
             hideSunriseElement();
@@ -2680,7 +2740,7 @@ function applyProgressEffectState() {
     if (!progressEffectIcon) return;
     
     // Remove all effect classes
-    progressEffectIcon.classList.remove('effect-comet', 'effect-album-comet', 'effect-across-comet', 'effect-sunrise', 'effect-equalizer-fill');
+    progressEffectIcon.classList.remove('effect-comet', 'effect-album-comet', 'effect-across-comet', 'effect-sunrise', 'effect-blended-sunrise', 'effect-equalizer-fill');
     
     // Notify server about progress needs
     if (socket && socket.connected) {
@@ -2728,6 +2788,16 @@ function applyProgressEffectState() {
         clearEqualizerFill();
     } else if (progressEffectState === 'sunrise') {
         progressEffectIcon.classList.add('effect-sunrise');
+        // Hide comet
+        hideProgressComet();
+        // Show sunrise if there's valid progress data
+        if (progressState.durationMs > 0 && isPlaying) {
+            showSunriseElement();
+        }
+        // Turn off equalizer fill
+        clearEqualizerFill();
+    } else if (progressEffectState === 'blended-sunrise') {
+        progressEffectIcon.classList.add('effect-blended-sunrise');
         // Hide comet
         hideProgressComet();
         // Show sunrise if there's valid progress data
