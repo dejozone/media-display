@@ -924,6 +924,8 @@ body:not(:has(.playback-status.playing)) .album-art.bass-color-glow {
     hyphens: auto;
     max-width: min(200px, 15vw);
     max-height: 60px;
+    /* Ensure it doesn't affect layout when removed */
+    flex-shrink: 0;
 }
 
 .device-info span {
@@ -933,6 +935,12 @@ body:not(:has(.playback-status.playing)) .album-art.bass-color-glow {
 
 .device-info span:hover {
     opacity: 1;
+}
+
+/* Ensure now-playing remains centered even without device-info */
+.now-playing:has(.album-art-container):not(:has(.device-info)),
+.now-playing:has(.album-art-container):has(.device-info:empty) {
+    justify-content: center;
 }
 
 /* Service status */

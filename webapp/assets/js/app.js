@@ -1925,25 +1925,6 @@ function updateDisplay(trackData) {
         elements.playbackStatus.classList.remove('playing');
     }
     
-    // Update the popup label if it's currently visible for playback status
-    const label = document.getElementById('service-label');
-    if (label.classList.contains('show')) {
-        // Check if the label is positioned relative to playback status
-        const labelText = label.textContent;
-        if (labelText.includes('Playing on') || labelText.includes('Paused on') || labelText === 'Playing' || labelText === 'Paused') {
-            // Update the label with current status
-            const statusText = isPlaying ? 'Playing on' : 'Paused on';
-            if (currentDeviceList.length > 0) {
-                const deviceDisplay = currentDeviceList.length === 1 
-                    ? currentDeviceList[0] 
-                    : `${currentDeviceList[0]} +${currentDeviceList.length - 1} more`;
-                label.textContent = `${statusText} ${deviceDisplay}`;
-            } else {
-                label.textContent = isPlaying ? 'Playing' : 'Paused';
-            }
-        }
-    }
-    
     // Update device info
     if (trackData.device) {
         // Format device names for display
