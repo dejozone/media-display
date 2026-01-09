@@ -775,6 +775,10 @@ body.rotate-270 .no-playback-state .icon-container {
     display: block;
     position: relative;
     z-index: 10;
+    /* Add performance optimizations */
+    will-change: box-shadow;
+    transform: translateZ(0);
+    backface-visibility: hidden;
 }
 
 .album-art.glow-all-colors {
@@ -1368,6 +1372,10 @@ body.rotate-270 .equalizer {
     border-radius: 3px 3px 0 0;
     min-height: 10px;
     transition: background-color 0.3s ease;
+    /* Add performance optimizations */
+    will-change: height;
+    transform: translateZ(0);
+    backface-visibility: hidden;
 }
 
 /* Pause animations when music is paused (pure CSS - checks if playback-status is not playing) */
@@ -2173,6 +2181,9 @@ body.fullscreen .app-settings.expanded {
     transition: opacity 0.3s ease;
     filter: drop-shadow(0 0 3px var(--comet-color-1, rgba(255, 255, 255, 0.7)))
             drop-shadow(0 0 6px var(--comet-color-2, rgba(255, 255, 255, 0.5)));
+    /* Add performance optimizations */
+    will-change: transform;
+    backface-visibility: hidden;
 }
 
 .progress-comet.hidden {
@@ -2442,6 +2453,10 @@ body.rotate-270 .sunrise-container {
     height: var(--sun-size, 80px);
     transform: translate(-50%, -50%);
     transition: left 0.1s ease-out, top 0.1s ease-out;
+    /* Add performance optimizations */
+    will-change: left, top;
+    backface-visibility: hidden;
+    transform: translate(-50%, -50%) translateZ(0);
 }
 
 /* Sun core */
