@@ -159,7 +159,7 @@ Open your browser to `http://localhost:8081` and the display will:
   - Setting persisted across sessions
 - **Settings Panel**: Expandable settings with auto-collapse after 5 seconds
   - Service status indicators (Sonos/Spotify)
-  - Playback status (play/pause)
+  - Playback status (play/pause) with device information
   - Glow effect toggle with effect name display
   - Equalizer effect toggle with effect name display
   - Progress effect toggle with effect name display
