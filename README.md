@@ -110,10 +110,42 @@ Open your browser to `http://localhost:8081` and the display will:
 ### Visual Effects
 - **Glow Effects** (Toggleable):
   - **Off**: No glow effect (default)
-  - **All Colors**: Rainbow color cycling (30s cycle for album art, 8s for screensaver)
-  - **White Soft**: Gentle white glow animation
+  - **Colors**: Rainbow color cycling (30s cycle for album art, 8s for screensaver)
+  - **White**: Gentle white glow animation
+  - **Fast White**: Rapid white glow animation
+  - **Fast Colors**: Rapid rainbow color cycling
+  - **Album Colors**: Glow colors extracted from album art
+  - **Fast Album Colors**: Rapid album color glow cycling
   - Persisted across sessions via localStorage
   - Click light bulb icon to cycle through modes
+
+- **Equalizer Effects** (Toggleable):
+  - **Off**: No equalizer bars (default)
+  - **Normal**: Animated bars with no glow
+  - **White Border**: White bordered bars
+  - **White**: White glowing bars
+  - **Navy**: Navy blue bars
+  - **Blue Spectrum**: Blue gradient spectrum
+  - **Colors**: Rainbow colored bars
+  - **Color Spectrum**: Full color spectrum animation
+  - **Fast White Album Glow**: Fast bass-reactive white glow on album art
+  - **Fast Color Album Glow**: Fast bass-reactive color glow on album art
+  - Automatically shows during playback, hides when paused
+  - Persisted across sessions via localStorage
+  - Click equalizer icon to cycle through modes
+
+- **Progress Effects** (Toggleable):
+  - **Off**: No progress visualization (default)
+  - **Edge Comet**: Animated comet traveling around screen edges
+  - **Album Comet**: Comet traveling around album art border
+  - **Across Comet**: Comet traveling horizontally along bottom
+  - **Sunrise & Sunset**: Animated sun rising/setting with dynamic sky colors, stars at night, and mountain silhouette with reactive lighting
+  - **Blended Sunrise & Sunset**: Same as Sunrise & Sunset but mountain colors blend with album art background
+  - **Equalizer Fill**: Progressively fills equalizer bars as song plays
+  - All effects complete at 98% of song duration for smooth transitions
+  - Persisted across sessions via localStorage
+  - Click progress effect icon to cycle through modes
+
 - **Screensaver Mode**: When no music is playing
   - Cycles through custom images every 30 seconds with fade transitions
   - Animated background color cycling
@@ -123,12 +155,16 @@ Open your browser to `http://localhost:8081` and the display will:
 - **Rotation Control**: Click rotation icon to rotate display counter-clockwise by 90°
   - Supports 0°, 90°, 180°, 270° orientations
   - Perfect for wall-mounted displays
+  - All visual effects automatically adjust to rotated orientation
   - Setting persisted across sessions
 - **Settings Panel**: Expandable settings with auto-collapse after 5 seconds
   - Service status indicators (Sonos/Spotify)
   - Playback status (play/pause)
-  - Glow effect toggle
-  - Display rotation
+  - Glow effect toggle with effect name display
+  - Equalizer effect toggle with effect name display
+  - Progress effect toggle with effect name display
+  - Display rotation control
+  - Fullscreen toggle
 
 ### Connection Management
 - **Auto-reconnect**: Handles connection drops gracefully
@@ -167,8 +203,17 @@ The `MEDIA_SERVICE_METHOD` environment variable controls which service to use:
 
 ### Interactive Elements
 - **Settings Icon** (gear): Expand/collapse settings panel
-- **Light Bulb Icon**: Cycle through glow effects (off → all colors → white → off)
+- **Light Bulb Icon**: Cycle through glow effects
+  - Displays current effect name on hover/click
+  - 7 modes: Off → Colors → White → Fast White → Fast Colors → Album Colors → Fast Album Colors
+- **Equalizer Icon**: Cycle through equalizer effects
+  - Displays current effect name on hover/click
+  - 10 modes: Off → Normal → White Border → White → Navy → Blue Spectrum → Colors → Color Spectrum → Fast White Album Glow → Fast Color Album Glow
+- **Progress Effect Icon**: Cycle through progress visualization effects
+  - Displays current effect name on hover/click
+  - 7 modes: Off → Edge Comet → Album Comet → Across Comet → Sunrise & Sunset → Blended Sunrise & Sunset → Equalizer Fill
 - **Rotation Icon**: Rotate display counter-clockwise by 90°
+- **Fullscreen Icon**: Toggle fullscreen mode
 - **Play/Pause Icon**: Shows current playback state
 - **Service Icons** (Sonos/Spotify): Click to view service details
 - **Device Name**: Click or hover to view all connected devices
@@ -232,7 +277,9 @@ Place your custom screensaver images in `webapp/assets/images/screensavers/` and
 The following settings are automatically saved to the browser's localStorage and persist across sessions:
 
 - **Display Rotation**: Current rotation angle (0°, 90°, 180°, 270°)
-- **Glow Effect**: Current glow mode (off, all-colors, white)
+- **Glow Effect**: Current glow mode (7 modes available)
+- **Equalizer Effect**: Current equalizer style (10 modes available)
+- **Progress Effect**: Current progress visualization (7 modes available)
 
 These settings are device-specific and stored in the browser. To reset preferences, clear the browser's localStorage or use developer tools.
 
