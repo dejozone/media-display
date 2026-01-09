@@ -62,7 +62,8 @@ const elements = {
     screensaverImage: document.getElementById('screensaver-image'),
     equalizer: document.getElementById('equalizer'),
     equalizerIcon: document.getElementById('equalizer-icon'),
-    progressComet: null // Will be created dynamically
+    progressComet: null, // Will be created dynamically
+    sunriseContainer: null // Will be created dynamically
 };
 
 // Screensaver images - loaded dynamically from folder
@@ -190,8 +191,8 @@ let isPlaying = false; // Track current playback state
 let equalizerAutoEnabled = false; // Track if equalizer was auto-enabled by progress effect
 
 // Progress effect state management
-let progressEffectState = 'off'; // 'off', 'comet', 'album-comet', 'across-comet', 'equalizer-fill'
-const PROGRESS_EFFECT_STATES = ['off', 'comet', 'album-comet', 'across-comet', 'equalizer-fill'];
+let progressEffectState = 'off'; // 'off', 'comet', 'album-comet', 'across-comet', 'sunrise', 'blended-sunrise', 'equalizer-fill'
+const PROGRESS_EFFECT_STATES = ['off', 'comet', 'album-comet', 'across-comet', 'sunrise', 'blended-sunrise', 'equalizer-fill'];
 
 // Effect name mappings for UI labels
 const GLOW_EFFECT_NAMES = {
@@ -222,6 +223,8 @@ const PROGRESS_EFFECT_NAMES = {
     'comet': 'Edge Comet',
     'album-comet': 'Album Comet',
     'across-comet': 'Across Comet',
+    'sunrise': 'Sunrise & Sunset',
+    'blended-sunrise': 'Blended Sunrise & Sunset',
     'equalizer-fill': 'Equalizer Fill'
 };
 
@@ -387,8 +390,9 @@ function showNoPlayback() {
         elements.connectionStatus.style.display = '';
     }
     
-    // Hide progress comet in no playback/screensaver mode
+    // Hide progress effects in no playback/screensaver mode
     hideProgressComet();
+    hideSunriseElement();
     
     // Force hide equalizer in screensaver mode
     if (elements.equalizer) {
@@ -736,6 +740,11 @@ function applyGradientBackground(colors) {
     const gradient = `linear-gradient(135deg, ${bgColors[0]}, ${bgColors[1] || bgColors[0]}, ${bgColors[2] || bgColors[1] || bgColors[0]})`;
     document.body.style.transition = 'background 1s ease';
     document.body.style.background = gradient;
+    
+    // Store background colors as CSS variables for mountain blending
+    document.body.style.setProperty('--bg-color-1', bgColors[0]);
+    document.body.style.setProperty('--bg-color-2', bgColors[1] || bgColors[0]);
+    document.body.style.setProperty('--bg-color-3', bgColors[2] || bgColors[1] || bgColors[0]);
     
     // Calculate average luminance of background colors
     const avgLuminance = colors.reduce((sum, color) => {
@@ -1093,6 +1102,396 @@ function hideProgressComet() {
     }
 }
 
+// ===== Sunrise Progress Functions =====
+
+// Create sunrise element
+function createSunriseElement() {
+    if (elements.sunriseContainer) return; // Already exists
+    
+    const container = document.createElement('div');
+    container.className = 'sunrise-container hidden';
+    container.id = 'sunrise-container';
+    
+    // Create stars container (for nighttime)
+    const starsContainer = document.createElement('div');
+    starsContainer.className = 'sunrise-stars';
+    
+    // Create static twinkling stars
+    for (let i = 0; i < 80; i++) {
+        const star = document.createElement('div');
+        star.className = 'star';
+        star.style.left = `${Math.random() * 100}%`;
+        star.style.top = `${Math.random() * 80}%`; // Keep in upper 80% of screen
+        star.style.animationDelay = `${Math.random() * 3}s`;
+        star.style.animationDuration = `${2 + Math.random() * 2}s`;
+        
+        // Vary star sizes - some bigger than others
+        const starSize = 2 + Math.random() * 2; // 2-4px
+        star.style.width = `${starSize}px`;
+        star.style.height = `${starSize}px`;
+        if (starSize > 3) {
+            star.style.boxShadow = `0 0 ${starSize * 1.5}px rgba(255, 255, 255, 0.9)`;
+        }
+        
+        starsContainer.appendChild(star);
+    }
+    
+    // Create shooting stars with diverse directions and trajectories
+    const shootingStarCount = 7;
+    for (let i = 0; i < shootingStarCount; i++) {
+        const shootingStar = document.createElement('div');
+        shootingStar.className = 'shooting-star';
+        
+        // Random starting position (top 60% of screen)
+        shootingStar.style.left = `${Math.random() * 100}%`;
+        shootingStar.style.top = `${Math.random() * 60}%`;
+        
+        // Diverse direction vectors covering all quadrants
+        const directions = [
+            { x: 220, y: 80 },    // Shallow down-right
+            { x: -220, y: 80 },   // Shallow down-left
+            { x: 180, y: 140 },   // Diagonal down-right
+            { x: -180, y: 140 },  // Diagonal down-left
+            { x: 120, y: 200 },   // Steep down-right
+            { x: -120, y: 200 },  // Steep down-left
+            { x: 80, y: 220 },    // Nearly vertical
+            { x: -80, y: 220 }    // Nearly vertical left
+        ];
+        const direction = directions[i % directions.length];
+        
+        // Calculate rotation angle for head-first orientation
+        // atan2 gives angle in radians, convert to degrees
+        const angle = Math.atan2(direction.y, direction.x) * (180 / Math.PI);
+        
+        shootingStar.style.setProperty('--shoot-x', `${direction.x}px`);
+        shootingStar.style.setProperty('--shoot-y', `${direction.y}px`);
+        shootingStar.style.setProperty('--shoot-angle', `${angle}deg`);
+        
+        // Staggered animation timing for natural appearance
+        shootingStar.style.animationDelay = `${Math.random() * 8}s`;
+        shootingStar.style.animationDuration = `${2.5 + Math.random() * 1.5}s`;
+        
+        starsContainer.appendChild(shootingStar);
+    }
+    
+    container.appendChild(starsContainer);
+    
+    // Create sky background
+    const sky = document.createElement('div');
+    sky.className = 'sunrise-sky';
+    container.appendChild(sky);
+    
+    // Create sun element
+    const sun = document.createElement('div');
+    sun.className = 'sunrise-sun';
+    container.appendChild(sun);
+    
+    // Create optional mountain silhouette
+    const mountains = document.createElement('div');
+    mountains.className = 'sunrise-mountains';
+    container.appendChild(mountains);
+    
+    document.body.appendChild(container);
+    elements.sunriseContainer = container;
+    
+    console.log('Sunrise & Sunset element created');
+}
+
+// Update sunrise position and colors based on song progress
+function updateSunriseElement() {
+    if (!elements.sunriseContainer || !progressState.durationMs) return;
+    
+    const { progressMs, durationMs } = progressState;
+    
+    // Speed up sunrise to complete at 98% of song duration (same as comet)
+    // This ensures the sun fully sets before the song ends/transitions
+    const completionTarget = 0.98;
+    const percentage = Math.min(Math.max(progressMs / durationMs, 0), 1) / completionTarget;
+    const clampedPercentage = Math.min(percentage, 1);
+    
+    // Get screen dimensions (accounting for rotation)
+    const effectiveWidth = (rotationState === 90 || rotationState === 270) ? window.innerHeight : window.innerWidth;
+    const effectiveHeight = (rotationState === 90 || rotationState === 270) ? window.innerWidth : window.innerHeight;
+    
+    // Calculate sun path: sunrise (left) to sunset (right) with lower, narrower arc
+    // Horizontal movement: 2% → 98% of screen width (full screen left to right)
+    const startX = 2;
+    const endX = 98;
+    const sunX = startX + (endX - startX) * clampedPercentage;
+    
+    // Vertical movement: sunrise → peak → sunset (symmetric arc)
+    // Start: 97% (mostly below horizon, only upper portion peeking above mountains)
+    // End: 97% (mostly below horizon at sunset, only upper portion visible)
+    const startY = 97;
+    const endY = 97;
+    
+    // Peak height varies by rotation (landscape vs portrait)
+    // Landscape (0° and 180°): Higher arc to clear mountains better
+    // Portrait (90° and 270°): Lower arc to stay near mountains
+    let peakY;
+    if (rotationState === 0 || rotationState === 180) {
+        peakY = 65; // Higher arc for landscape mode
+    } else {
+        peakY = 75; // Lower arc for portrait mode
+    }
+    
+    // Create symmetric arc using parabola (peaks at 50%)
+    // Arc height calculation: maximum at 50%, returns to horizon at 100%
+    const arcFactor = 4 * (startY - peakY) * clampedPercentage * (1 - clampedPercentage);
+    const sunY = startY - arcFactor;
+    
+    // Sun size increases as it rises (dawn to day)
+    const minSize = 60;
+    const maxSize = 120;
+    const sunSize = minSize + (maxSize - minSize) * clampedPercentage;
+    
+    // Sun opacity increases as it rises
+    const minOpacity = 0.6;
+    const maxOpacity = 1.0;
+    const sunOpacity = minOpacity + (maxOpacity - minOpacity) * clampedPercentage;
+    
+    // Mountain lighting based on sun Y position (lower Y = higher sun = more light)
+    // sunY ranges from ~65 (high/midday) to 97 (low/horizon)
+    // Normalize: (97 - sunY) / 32 gives 0 at horizon, 1 at peak
+    const lightIntensity = Math.max(0, Math.min(1, (97 - sunY) / 32));
+    
+    // Proximity: how close sun is to mountain (higher sunY = closer)
+    // When sun is low (high sunY ~90-97), proximity is high (localized spotlight)
+    // When sun is high (low sunY ~65-75), proximity is lower (broader light)
+    const proximity = Math.max(0, Math.min(1, (sunY - 65) / 32));
+    
+    // Brightness: 1.0 (dark) to 1.8 (bright)
+    const mountainBrightness = 1 + (lightIntensity * 0.8);
+    
+    // Sun's outer glow colors (from .sunrise-sun::after)
+    // Use the actual colors the sun is emitting
+    const sunGlowColor1 = { r: 255, g: 230, b: 124 }; // Bright golden
+    const sunGlowColor2 = { r: 255, g: 179, b: 71 };  // Orange
+    const sunGlowColor3 = { r: 255, g: 209, b: 220 }; // Peachy pink
+    
+    // Glow alpha based on light intensity and proximity
+    // Stronger when sun is closer to mountain
+    const glowAlpha1 = lightIntensity * (0.5 + proximity * 0.3);
+    const glowAlpha2 = lightIntensity * (0.4 + proximity * 0.2);
+    const glowAlpha3 = lightIntensity * (0.3 + proximity * 0.1);
+    
+    // Create RGBA strings with sun's glow colors
+    const mountainGlow1 = `rgba(${sunGlowColor1.r}, ${sunGlowColor1.g}, ${sunGlowColor1.b}, ${glowAlpha1})`;
+    const mountainGlow2 = `rgba(${sunGlowColor2.r}, ${sunGlowColor2.g}, ${sunGlowColor2.b}, ${glowAlpha2})`;
+    const mountainGlow3 = `rgba(${sunGlowColor3.r}, ${sunGlowColor3.g}, ${sunGlowColor3.b}, ${glowAlpha3})`;
+    
+    // Apply CSS custom properties for sun position
+    const container = elements.sunriseContainer;
+    container.style.setProperty('--sun-x', `${sunX}%`);
+    container.style.setProperty('--sun-y', `${sunY}%`);
+    container.style.setProperty('--sun-size', `${sunSize}px`);
+    container.style.setProperty('--sun-opacity', sunOpacity);
+    container.style.setProperty('--mountain-brightness', mountainBrightness);
+    container.style.setProperty('--mountain-glow-1', mountainGlow1);
+    container.style.setProperty('--mountain-glow-2', mountainGlow2);
+    container.style.setProperty('--mountain-glow-3', mountainGlow3);
+    
+    // Update sky gradient colors based on progress: sunrise → midday → sunset
+    let skyColor1, skyColor2, skyColor3;
+    
+    if (clampedPercentage < 0.25) {
+        // Early sunrise: warm orange and pink glow
+        const t = clampedPercentage / 0.25;
+        skyColor1 = `rgba(${Math.round(255)}, ${Math.round(140 + 67 * t)}, ${Math.round(60 + 40 * t)}, ${0.3 + 0.2 * t})`;
+        skyColor2 = `rgba(${Math.round(255)}, ${Math.round(100 + 65 * t)}, ${Math.round(50 + 30 * t)}, ${0.2 + 0.2 * t})`;
+        skyColor3 = `rgba(${Math.round(255 - 50 * t)}, ${Math.round(80 + 55 * t)}, ${Math.round(60 + 40 * t)}, ${0.15 + 0.15 * t})`;
+    } else if (clampedPercentage < 0.5) {
+        // Mid-morning to noon: bright golden to blue sky
+        const t = (clampedPercentage - 0.25) / 0.25;
+        skyColor1 = `rgba(${Math.round(255 - 120 * t)}, ${Math.round(207 + 48 * t)}, ${Math.round(100 + 135 * t)}, ${0.5 - 0.1 * t})`;
+        skyColor2 = `rgba(${Math.round(255 - 110 * t)}, ${Math.round(165 + 65 * t)}, ${Math.round(80 + 120 * t)}, ${0.4 - 0.1 * t})`;
+        skyColor3 = `rgba(${Math.round(205 - 70 * t)}, ${Math.round(135 + 95 * t)}, ${Math.round(100 + 100 * t)}, ${0.3 - 0.1 * t})`;
+    } else if (clampedPercentage < 0.75) {
+        // Afternoon to evening: blue sky to golden hour
+        const t = (clampedPercentage - 0.5) / 0.25;
+        skyColor1 = `rgba(${Math.round(135 + 120 * t)}, ${Math.round(255 - 55 * t)}, ${Math.round(235 - 135 * t)}, ${0.4 + 0.1 * t})`;
+        skyColor2 = `rgba(${Math.round(145 + 110 * t)}, ${Math.round(230 - 80 * t)}, ${Math.round(200 - 120 * t)}, ${0.3 + 0.15 * t})`;
+        skyColor3 = `rgba(${Math.round(135 + 100 * t)}, ${Math.round(230 - 110 * t)}, ${Math.round(200 - 130 * t)}, ${0.2 + 0.15 * t})`;
+    } else {
+        // Sunset: warm orange, red, and purple tones
+        const t = (clampedPercentage - 0.75) / 0.25;
+        skyColor1 = `rgba(${Math.round(255)}, ${Math.round(200 - 90 * t)}, ${Math.round(100 - 40 * t)}, ${0.5 + 0.15 * t})`;
+        skyColor2 = `rgba(${Math.round(255 - 45 * t)}, ${Math.round(150 - 70 * t)}, ${Math.round(80 + 20 * t)}, ${0.45 + 0.2 * t})`;
+        skyColor3 = `rgba(${Math.round(235 - 85 * t)}, ${Math.round(120 - 50 * t)}, ${Math.round(70 + 80 * t)}, ${0.35 + 0.2 * t})`;
+    }
+    
+    // Option to use album colors for sunrise
+    if (currentAlbumColors.length >= 3) {
+        // Use warm colors from album art if available
+        const warmColors = currentAlbumColors.filter(c => {
+            // Filter for warm colors (high red, moderate green, low blue)
+            return c.r > 150 && c.r > c.b && c.r > c.g * 0.8;
+        });
+        
+        if (warmColors.length >= 3) {
+            const brighten = (color, factor) => ({
+                r: Math.min(255, Math.round(color.r * factor)),
+                g: Math.min(255, Math.round(color.g * factor)),
+                b: Math.min(255, Math.round(color.b * factor))
+            });
+            
+            const bright1 = brighten(warmColors[0], 1.2);
+            const bright2 = brighten(warmColors[1], 1.1);
+            const bright3 = brighten(warmColors[2], 1.0);
+            
+            const intensity = 0.3 + 0.4 * clampedPercentage;
+            skyColor1 = `rgba(${bright1.r}, ${bright1.g}, ${bright1.b}, ${intensity})`;
+            skyColor2 = `rgba(${bright2.r}, ${bright2.g}, ${bright2.b}, ${intensity * 0.8})`;
+            skyColor3 = `rgba(${bright3.r}, ${bright3.g}, ${bright3.b}, ${intensity * 0.6})`;
+        }
+    }
+    
+    container.style.setProperty('--sky-color-1', skyColor1);
+    container.style.setProperty('--sky-color-2', skyColor2);
+    container.style.setProperty('--sky-color-3', skyColor3);
+    
+    // Mountain color blending - only for 'blended-sunrise' effect
+    let mountainBase1, mountainBase2;
+    
+    if (progressEffectState === 'blended-sunrise') {
+        // Mountain blends with background colors (from album art)
+        // Get background colors from CSS variables
+        const bgColor1 = getComputedStyle(document.body).getPropertyValue('--bg-color-1').trim() || 'rgb(20, 20, 20)';
+        const bgColor2 = getComputedStyle(document.body).getPropertyValue('--bg-color-2').trim() || 'rgb(15, 15, 15)';
+        
+        // Parse RGB and slightly darken for mountain silhouette
+        const parseRGB = (colorStr) => {
+            const match = colorStr.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+            if (match) {
+                return {
+                    r: parseInt(match[1]),
+                    g: parseInt(match[2]),
+                    b: parseInt(match[3])
+                };
+            }
+            return { r: 20, g: 20, b: 20 };
+        };
+        
+        const bg1 = parseRGB(bgColor1);
+        const bg2 = parseRGB(bgColor2);
+        
+        // Use background colors with slight darkening for mountain silhouette
+        // Keep fully opaque (alpha = 1) so mountain blocks sun, blend mode handles color blending
+        mountainBase1 = `rgba(${Math.round(bg1.r * 0.8)}, ${Math.round(bg1.g * 0.8)}, ${Math.round(bg1.b * 0.8)}, 1)`;
+        mountainBase2 = `rgba(${Math.round(bg2.r * 0.7)}, ${Math.round(bg2.g * 0.7)}, ${Math.round(bg2.b * 0.7)}, 1)`;
+    } else {
+        // Regular 'sunrise' effect: keep original dark mountain colors (fully opaque)
+        mountainBase1 = 'rgba(20, 20, 20, 1)';
+        mountainBase2 = 'rgba(10, 10, 10, 1)';
+    }
+    
+    container.style.setProperty('--mountain-base-1', mountainBase1);
+    container.style.setProperty('--mountain-base-2', mountainBase2);
+    
+    // Control background brightness (day/night cycle)
+    // 0% = dawn (dark), 50% = midday (full brightness), 100% = night (dark)
+    let backgroundBrightness;
+    if (clampedPercentage < 0.5) {
+        // Dawn to midday: fade from dark (0.3) to full brightness (1.0)
+        backgroundBrightness = 0.3 + (clampedPercentage * 2) * 0.7;
+    } else {
+        // Midday to dusk: fade from full brightness (1.0) to dark (0.2)
+        backgroundBrightness = 1.0 - ((clampedPercentage - 0.5) * 2) * 0.8;
+    }
+    
+    // Apply background overlay for dimming effect
+    container.style.setProperty('--background-brightness', backgroundBrightness);
+    
+    // Control star visibility (appear as sun sets after midday)
+    let starOpacity = 0;
+    if (clampedPercentage > 0.5) {
+        // Stars fade in from 50% to 100% of song
+        starOpacity = (clampedPercentage - 0.5) * 2;
+    }
+    
+    const starsContainer = container.querySelector('.sunrise-stars');
+    if (starsContainer) {
+        starsContainer.style.opacity = starOpacity;
+    }
+}
+
+// Animate sunrise with client-side interpolation
+function animateSunrise() {
+    if (!progressState.isPlaying || !progressState.lastUpdateTime) {
+        return;
+    }
+    
+    const now = Date.now();
+    const elapsed = now - progressState.lastUpdateTime;
+    
+    // Update progress with elapsed time
+    progressState.progressMs = Math.min(progressState.progressMs + elapsed, progressState.durationMs);
+    progressState.lastUpdateTime = now;
+    
+    // Update visual position
+    updateSunriseElement();
+    
+    // Continue animation loop if still playing
+    if (progressState.isPlaying && progressState.progressMs < progressState.durationMs) {
+        progressState.animationFrameId = requestAnimationFrame(animateSunrise);
+    }
+}
+
+// Show sunrise element
+function showSunriseElement() {
+    if (!elements.sunriseContainer) {
+        createSunriseElement();
+    }
+    
+    if (elements.sunriseContainer) {
+        // Update position BEFORE making visible to avoid visual jump
+        updateSunriseElement();
+        
+        elements.sunriseContainer.classList.remove('hidden');
+        
+        // Start animation loop if playing
+        if (progressState.isPlaying) {
+            if (progressState.animationFrameId) {
+                cancelAnimationFrame(progressState.animationFrameId);
+            }
+            progressState.lastUpdateTime = Date.now();
+            progressState.animationFrameId = requestAnimationFrame(animateSunrise);
+        }
+    }
+}
+
+// Hide sunrise element
+function hideSunriseElement() {
+    if (elements.sunriseContainer) {
+        elements.sunriseContainer.classList.add('hidden');
+    }
+    
+    // Stop animation loop
+    if (progressState.animationFrameId) {
+        cancelAnimationFrame(progressState.animationFrameId);
+        progressState.animationFrameId = null;
+    }
+}
+
+// Pause sunrise (keep visible but stop moving)
+function pauseSunrise() {
+    if (progressState.animationFrameId) {
+        cancelAnimationFrame(progressState.animationFrameId);
+        progressState.animationFrameId = null;
+    }
+}
+
+// Resume sunrise animation
+function resumeSunrise() {
+    if (progressState.isPlaying && elements.sunriseContainer && !elements.sunriseContainer.classList.contains('hidden')) {
+        progressState.lastUpdateTime = Date.now();
+        if (progressState.animationFrameId) {
+            cancelAnimationFrame(progressState.animationFrameId);
+        }
+        progressState.animationFrameId = requestAnimationFrame(animateSunrise);
+    }
+}
+
 // Pause progress comet (keep visible but stop moving)
 function pauseProgressComet() {
     if (progressState.animationFrameId) {
@@ -1212,6 +1611,7 @@ function updateDisplay(trackData) {
     if (!trackData) {
         showNoPlayback();
         hideProgressComet();
+        hideSunriseElement();
         return;
     }
     
@@ -1241,7 +1641,7 @@ function updateDisplay(trackData) {
         }
     }
     
-    // Update progress state for comet animation
+    // Update progress state for comet and sunrise animation
     if (trackData.progress_ms !== undefined && trackData.duration_ms !== undefined) {
         const wasProgressPlaying = progressState.isPlaying;
         progressState.progressMs = trackData.progress_ms;
@@ -1249,19 +1649,23 @@ function updateDisplay(trackData) {
         progressState.isPlaying = trackData.is_playing;
         progressState.lastUpdateTime = Date.now();
         
-        // Update comet position
+        // Update comet and sunrise position
         updateProgressComet();
+        updateSunriseElement();
         
         // Handle play/pause state changes
         if (trackData.is_playing && !wasProgressPlaying) {
             // Resumed playing
             resumeProgressComet();
+            resumeSunrise();
         } else if (!trackData.is_playing && wasProgressPlaying) {
             // Paused
             pauseProgressComet();
+            pauseSunrise();
         } else if (trackData.is_playing) {
             // Still playing, ensure animation is running
             resumeProgressComet();
+            resumeSunrise();
         }
         
         // Update equalizer fill if that effect is active
@@ -1275,9 +1679,17 @@ function updateDisplay(trackData) {
         } else {
             hideProgressComet();
         }
+        
+        // Show sunrise if we have valid duration and effect is enabled
+        if (trackData.duration_ms > 0 && (progressEffectState === 'sunrise' || progressEffectState === 'blended-sunrise')) {
+            showSunriseElement();
+        } else {
+            hideSunriseElement();
+        }
     } else {
         // No progress data available
         hideProgressComet();
+        hideSunriseElement();
         // Clear equalizer fill
         clearEqualizerFill();
     }
@@ -1319,8 +1731,9 @@ function updateDisplay(trackData) {
                 extractColors(elements.albumArt, (colors) => {
                     applyGradientBackground(colors);
                     applyGlowColors(elements.albumArt, colors);
-                    // Update comet position and colors after colors are extracted
+                    // Update comet and sunrise position and colors after colors are extracted
                     updateProgressComet();
+                    updateSunriseElement();
                 });
                 
                 // Remove handler after use
@@ -2327,7 +2740,7 @@ function applyProgressEffectState() {
     if (!progressEffectIcon) return;
     
     // Remove all effect classes
-    progressEffectIcon.classList.remove('effect-comet', 'effect-album-comet', 'effect-across-comet', 'effect-equalizer-fill');
+    progressEffectIcon.classList.remove('effect-comet', 'effect-album-comet', 'effect-across-comet', 'effect-sunrise', 'effect-blended-sunrise', 'effect-equalizer-fill');
     
     // Notify server about progress needs
     if (socket && socket.connected) {
@@ -2349,6 +2762,8 @@ function applyProgressEffectState() {
         if (progressState.durationMs > 0 && isPlaying) {
             showProgressComet();
         }
+        // Hide sunrise
+        hideSunriseElement();
         // Turn off equalizer fill
         clearEqualizerFill();
     } else if (progressEffectState === 'album-comet') {
@@ -2357,6 +2772,8 @@ function applyProgressEffectState() {
         if (progressState.durationMs > 0 && isPlaying) {
             showProgressComet();
         }
+        // Hide sunrise
+        hideSunriseElement();
         // Turn off equalizer fill
         clearEqualizerFill();
     } else if (progressEffectState === 'across-comet') {
@@ -2365,17 +2782,41 @@ function applyProgressEffectState() {
         if (progressState.durationMs > 0 && isPlaying) {
             showProgressComet();
         }
+        // Hide sunrise
+        hideSunriseElement();
+        // Turn off equalizer fill
+        clearEqualizerFill();
+    } else if (progressEffectState === 'sunrise') {
+        progressEffectIcon.classList.add('effect-sunrise');
+        // Hide comet
+        hideProgressComet();
+        // Show sunrise if there's valid progress data
+        if (progressState.durationMs > 0 && isPlaying) {
+            showSunriseElement();
+        }
+        // Turn off equalizer fill
+        clearEqualizerFill();
+    } else if (progressEffectState === 'blended-sunrise') {
+        progressEffectIcon.classList.add('effect-blended-sunrise');
+        // Hide comet
+        hideProgressComet();
+        // Show sunrise if there's valid progress data
+        if (progressState.durationMs > 0 && isPlaying) {
+            showSunriseElement();
+        }
         // Turn off equalizer fill
         clearEqualizerFill();
     } else if (progressEffectState === 'equalizer-fill') {
         progressEffectIcon.classList.add('effect-equalizer-fill');
-        // Hide comet
+        // Hide comet and sunrise
         hideProgressComet();
+        hideSunriseElement();
         // Enable border-white equalizer and show it
         enableEqualizerFillMode();
     } else {
-        // Hide comet when effect is off
+        // Hide comet and sunrise when effect is off
         hideProgressComet();
+        hideSunriseElement();
         // Turn off equalizer fill
         clearEqualizerFill();
     }
@@ -2632,15 +3073,21 @@ document.addEventListener('visibilitychange', () => {
     }
 });
 
-// Handle window resize - update comet position to match new screen dimensions
+// Handle window resize - update comet and sunrise position to match new screen dimensions
 let resizeTimeout;
 window.addEventListener('resize', () => {
     // Debounce resize events
     clearTimeout(resizeTimeout);
     resizeTimeout = setTimeout(() => {
-        if (progressState.durationMs > 0 && elements.progressComet && !elements.progressComet.classList.contains('hidden')) {
+        if (progressState.durationMs > 0) {
             // Recalculate comet position with new screen dimensions
-            updateProgressComet();
+            if (elements.progressComet && !elements.progressComet.classList.contains('hidden')) {
+                updateProgressComet();
+            }
+            // Recalculate sunrise position with new screen dimensions
+            if (elements.sunriseContainer && !elements.sunriseContainer.classList.contains('hidden')) {
+                updateSunriseElement();
+            }
         }
     }, 100); // Wait 100ms after resize stops to avoid excessive calculations
 });
