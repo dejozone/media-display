@@ -1210,11 +1210,19 @@ function updateSunriseElement() {
     
     // Vertical movement: sunrise → peak → sunset (symmetric arc)
     // Start: 97% (mostly below horizon, only upper portion peeking above mountains)
-    // Peak: 75% (at 50% progress, low arc closer to mountains)
     // End: 97% (mostly below horizon at sunset, only upper portion visible)
     const startY = 97;
-    const peakY = 75; // Low arc to avoid album art and stay near mountains
     const endY = 97;
+    
+    // Peak height varies by rotation (landscape vs portrait)
+    // Landscape (0° and 180°): Higher arc to clear mountains better
+    // Portrait (90° and 270°): Lower arc to stay near mountains
+    let peakY;
+    if (rotationState === 0 || rotationState === 180) {
+        peakY = 65; // Higher arc for landscape mode
+    } else {
+        peakY = 75; // Lower arc for portrait mode
+    }
     
     // Create symmetric arc using parabola (peaks at 50%)
     // Arc height calculation: maximum at 50%, returns to horizon at 100%
