@@ -1145,7 +1145,7 @@ function createSunriseElement() {
     }
     
     // Create shooting stars with diverse directions and trajectories
-    const shootingStarCount = 7;
+    const shootingStarCount = 3;
     for (let i = 0; i < shootingStarCount; i++) {
         const shootingStar = document.createElement('div');
         shootingStar.className = 'shooting-star';
@@ -1431,6 +1431,13 @@ function animateSunrise() {
     
     const now = Date.now();
     const elapsed = now - sunriseAnimationState.lastUpdateTime;
+
+    // **Update every 100ms instead of every frame**
+    // Sun moves slowly, 10fps is plenty smooth
+    if (elapsed < 100) {
+        sunriseAnimationState.animationFrameId = requestAnimationFrame(animateSunrise);
+        return;
+    }
     
     // Update progress with elapsed time
     progressState.progressMs = Math.min(progressState.progressMs + elapsed, progressState.durationMs);
@@ -3076,8 +3083,17 @@ if (document.readyState === 'loading') {
 // Visibility change handling (pause/resume updates when tab is hidden)
 document.addEventListener('visibilitychange', () => {
     if (!document.hidden && socket && socket.connected) {
-        console.log('Tab visible, requesting current track');
         socket.emit('request_current_track');
+    } else {
+        // Stop all animations when tab is hidden
+        if (progressState.animationFrameId) {
+            cancelAnimationFrame(progressState.animationFrameId);
+        }
+        if (sunriseAnimationState.animationFrameId) {
+            cancelAnimationFrame(sunriseAnimationState.animationFrameId);
+        }
+        // Pause CSS animations
+        document.body.style.animationPlayState = 'paused';
     }
 });
 
