@@ -2411,6 +2411,7 @@ body.rotate-270 .sunrise-container {
     --shoot-angle: 26.57deg;
 }
 
+/* Short shooting star (default) */
 .shooting-star::after {
     content: '';
     position: absolute;
@@ -2431,6 +2432,22 @@ body.rotate-270 .sunrise-container {
     transform: rotate(calc(var(--shoot-angle) + 180deg));
     transform-origin: left center;
     border-radius: 50%;
+}
+
+/* Long shooting star variant */
+.shooting-star.long::after {
+    width: 100px;
+    height: 3px;
+    background: linear-gradient(
+        to right, 
+        rgba(255, 255, 255, 1) 0%,
+        rgba(240, 245, 255, 0.9) 15%,
+        rgba(220, 230, 255, 0.7) 35%,
+        rgba(200, 220, 255, 0.4) 60%,
+        rgba(180, 210, 255, 0.2) 80%,
+        transparent 100%
+    );
+    box-shadow: 0 0 12px rgba(255, 255, 255, 0.7);
 }
 
 /* Sky gradient background */
