@@ -2613,46 +2613,52 @@ body.rotate-270 .sunrise-container {
     }
 }
 
-/* Optional mountain silhouette */
+/* 3D Mountain silhouette with rough rocky surfaces */
 .sunrise-mountains {
     position: absolute;
     left: 0;
     bottom: 0;
     width: 100%;
     height: 15%;
-    /* Mountain blends with sky colors instead of pure black */
+    /* Blended background with dynamic colors, enhanced for 3D depth */
     background: linear-gradient(
-        to bottom, 
-        var(--mountain-base-1, rgba(20, 20, 20, 0.3)) 0%, 
-        var(--mountain-base-2, rgba(10, 10, 10, 1)) 40%
+        135deg,
+        var(--mountain-base-1, rgba(20, 20, 20, 0.3)) 0%,
+        var(--mountain-base-2, rgba(10, 10, 10, 1)) 50%,
+        var(--mountain-base-2, rgba(10, 10, 10, 1)) 100%
     );
+    /* Detailed rocky polygon with irregular jagged edges */
     clip-path: polygon(
         0% 100%,
         0% 60%,
-        5% 55%,
-        10% 50%,
-        15% 46%,
-        20% 52%,
-        25% 50%,
-        30% 42%,
-        35% 48%,
-        40% 38%,
-        45% 44%,
-        50% 34%,
-        55% 40%,
-        60% 40%,
-        65% 46%,
-        70% 40%,
-        75% 48%,
-        80% 50%,
-        85% 48%,
-        90% 55%,
-        95% 52%,
-        100% 58%,
+        3% 58%, 4% 56%, 5% 55%, 6% 53%, 7% 52%,
+        8% 50%, 9% 51%, 10% 49%, 11% 47%, 12% 45%,
+        13% 47%, 14% 48%, 15% 50%, 16% 49%, 17% 48%,
+        18% 48%, 19% 46%, 20% 43%, 21% 41%, 22% 40%,
+        23% 42%, 24% 43%, 25% 44%, 26% 45%, 27% 43%,
+        28% 40%, 29% 37%, 30% 35%, 31% 36%, 32% 38%,
+        33% 39%, 34% 40%, 35% 40%, 36% 38%, 37% 35%,
+        38% 30%, 39% 32%, 40% 33%, 41% 34%, 42% 35%,
+        43% 33%, 44% 28%, 45% 25%, 46% 27%, 47% 28%,
+        48% 29%, 49% 30%, 50% 30%, 51% 29%, 52% 27%,
+        53% 24%, 54% 22%, 55% 20%, 56% 21%, 57% 23%,
+        58% 24%, 59% 25%, 60% 25%, 61% 27%, 62% 30%,
+        63% 32%, 64% 34%, 65% 35%, 66% 37%, 67% 38%,
+        68% 39%, 69% 40%, 70% 40%, 71% 42%, 72% 43%,
+        73% 44%, 74% 45%, 75% 45%, 76% 43%, 77% 40%,
+        78% 38%, 79% 36%, 80% 35%, 81% 33%, 82% 35%,
+        83% 38%, 84% 42%, 85% 45%, 86% 48%, 87% 50%,
+        88% 48%, 89% 45%, 90% 42%, 91% 40%, 92% 38%,
+        93% 40%, 94% 43%, 95% 46%, 96% 50%, 97% 52%,
+        98% 55%, 99% 58%, 100% 60%,
         100% 100%
     );
     opacity: 1;
     filter: brightness(var(--mountain-brightness, 1));
+    /* Add subtle texture overlay for rocky surface */
+    box-shadow: 
+        inset 0 -20px 40px rgba(0, 0, 0, 0.4),
+        inset 0 20px 30px rgba(255, 255, 255, 0.02);
     /* Smooth rendering for rotated states */
     -webkit-backface-visibility: hidden;
     backface-visibility: hidden;
@@ -2660,7 +2666,7 @@ body.rotate-270 .sunrise-container {
     transform: translateZ(0);
 }
 
-/* Warm sun glow overlay on mountains - follows sun position */
+/* 3D depth layer - creates shadows between rock faces */
 .sunrise-mountains::before {
     content: '';
     position: absolute;
@@ -2668,17 +2674,112 @@ body.rotate-270 .sunrise-container {
     top: 0;
     width: 100%;
     height: 100%;
-    /* Spotlight effect positioned at sun's X coordinate */
-    /* Blends sky colors with sun glow for natural lighting */
-    background: radial-gradient(
-        ellipse 40% 120% at var(--sun-x, 50%) -20%,
-        var(--sky-color-1, rgba(255, 230, 124, 0)) 0%,
-        var(--sky-color-2, rgba(255, 179, 71, 0)) 35%,
-        var(--sky-color-3, rgba(255, 209, 220, 0)) 65%,
-        transparent 100%
-    );
+    /* Multi-directional shading for 3D rock faces */
+    background: 
+        /* Horizontal ridge shadows */
+        repeating-linear-gradient(
+            175deg,
+            transparent 0px,
+            transparent 8px,
+            rgba(0, 0, 0, 0.15) 8px,
+            rgba(0, 0, 0, 0.15) 9px,
+            transparent 9px,
+            transparent 20px
+        ),
+        /* Vertical crack shadows */
+        repeating-linear-gradient(
+            95deg,
+            transparent 0px,
+            transparent 15px,
+            rgba(0, 0, 0, 0.1) 15px,
+            rgba(0, 0, 0, 0.1) 16px,
+            transparent 16px,
+            transparent 35px
+        ),
+        /* Diagonal rock face shading - left side darker */
+        linear-gradient(
+            110deg,
+            rgba(0, 0, 0, 0.3) 0%,
+            rgba(0, 0, 0, 0.15) 20%,
+            transparent 40%,
+            transparent 60%,
+            rgba(255, 255, 255, 0.03) 80%,
+            rgba(255, 255, 255, 0.05) 100%
+        ),
+        /* Sun glow - follows sun position */
+        radial-gradient(
+            ellipse 60% 120% at var(--sun-x, 10%) -20%,
+            rgba(255, 200, 100, 0.25) 0%,
+            rgba(255, 150, 80, 0.15) 30%,
+            rgba(255, 100, 60, 0.08) 50%,
+            transparent 70%
+        );
     opacity: 1;
     mix-blend-mode: screen;
+    pointer-events: none;
+}
+
+/* Rocky texture and highlights */
+.sunrise-mountains::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    /* Rock surface texture with highlights on peaks */
+    background: 
+        /* Peak highlights */
+        radial-gradient(
+            ellipse 3% 40% at 12% 45%,
+            rgba(255, 255, 255, 0.08) 0%,
+            transparent 50%
+        ),
+        radial-gradient(
+            ellipse 3% 50% at 22% 40%,
+            rgba(255, 255, 255, 0.1) 0%,
+            transparent 50%
+        ),
+        radial-gradient(
+            ellipse 3% 60% at 30% 35%,
+            rgba(255, 255, 255, 0.09) 0%,
+            transparent 50%
+        ),
+        radial-gradient(
+            ellipse 3% 70% at 38% 30%,
+            rgba(255, 255, 255, 0.12) 0%,
+            transparent 50%
+        ),
+        radial-gradient(
+            ellipse 4% 80% at 45% 25%,
+            rgba(255, 255, 255, 0.15) 0%,
+            transparent 50%
+        ),
+        radial-gradient(
+            ellipse 5% 90% at 55% 20%,
+            rgba(255, 255, 255, 0.18) 0%,
+            transparent 50%
+        ),
+        radial-gradient(
+            ellipse 4% 70% at 65% 35%,
+            rgba(255, 255, 255, 0.12) 0%,
+            transparent 50%
+        ),
+        radial-gradient(
+            ellipse 3% 60% at 75% 45%,
+            rgba(255, 255, 255, 0.1) 0%,
+            transparent 50%
+        ),
+        /* Subtle rock grain texture */
+        repeating-linear-gradient(
+            88deg,
+            transparent 0px,
+            rgba(255, 255, 255, 0.015) 1px,
+            transparent 2px,
+            transparent 4px
+        );
+    opacity: 1;
+    mix-blend-mode: overlay;
     pointer-events: none;
 }
 
