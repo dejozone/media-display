@@ -130,6 +130,9 @@ current_track_data = None
 connected_clients = 0
 active_monitors = []  # Track which monitors are running
 clients_needing_progress = set()  # Track which clients need progress updates
+desired_services = set()  # Services that should be active based on MEDIA_SERVICE_METHOD
+recovery_thread = None  # Background thread for service recovery
+recovery_running = False  # Control flag for recovery thread
 
 class OAuth2CallbackHandler(BaseHTTPRequestHandler):
     """Handle the OAuth2 callback"""
@@ -757,17 +760,49 @@ class SpotifyMonitor:
         print("Spotify monitor stopped")
 
 # WebSocket event handlers
+def get_active_services():
+    """Get dictionary of currently active services"""
+    return {
+        'sonos': any(isinstance(m, DeviceMonitor) and m.is_ready and m.is_running for m in active_monitors),
+        'spotify': any(isinstance(m, SpotifyMonitor) and m.is_ready and m.is_running for m in active_monitors)
+    }
+
+def broadcast_service_status():
+    """Broadcast service status to all connected clients"""
+    active_services = get_active_services()
+    try:
+        socketio.emit('service_status', active_services, namespace='/')
+    except Exception as e:
+        print(f"⚠️  Error broadcasting service status: {e}")
+
+def is_service_active(service_name):
+    """Check if a specific service is currently active"""
+    if service_name == 'sonos':
+        return any(isinstance(m, DeviceMonitor) and m.is_ready and m.is_running for m in active_monitors)
+    elif service_name == 'spotify':
+        return any(isinstance(m, SpotifyMonitor) and m.is_ready and m.is_running for m in active_monitors)
+    return False
+
+def get_service_monitor(service_name):
+    """Get the monitor instance for a specific service"""
+    if service_name == 'sonos':
+        for m in active_monitors:
+            if isinstance(m, DeviceMonitor):
+                return m
+    elif service_name == 'spotify':
+        for m in active_monitors:
+            if isinstance(m, SpotifyMonitor):
+                return m
+    return None
+
 @socketio.on('connect')
 def handle_connect():
     global connected_clients
     connected_clients += 1
     print(f"Client connected. Total clients: {connected_clients}")
     
-    # Check if monitors are actually ready
-    active_services = {
-        'sonos': any(isinstance(m, DeviceMonitor) and m.is_ready and m.is_running for m in active_monitors),
-        'spotify': any(isinstance(m, SpotifyMonitor) and m.is_ready and m.is_running for m in active_monitors)
-    }
+    # Send current service status
+    active_services = get_active_services()
     emit('service_status', active_services)
     
     # Send current track immediately upon connection
@@ -994,13 +1029,112 @@ def initialize_spotify():
     
     return monitor
 
+def try_start_sonos():
+    """Attempt to start Sonos monitoring, return True if successful"""
+    global active_monitors
+    
+    if not SONOS_AVAILABLE:
+        return False
+    
+    try:
+        # Check if already active
+        if is_service_active('sonos'):
+            return True
+        
+        # Remove any old inactive Sonos monitor
+        active_monitors = [m for m in active_monitors if not isinstance(m, DeviceMonitor)]
+        
+        # Try to start new monitor
+        device_monitor = DeviceMonitor()
+        if device_monitor.start():
+            active_monitors.append(device_monitor)
+            print("✅ Sonos service recovered and activated")
+            broadcast_service_status()
+            return True
+        else:
+            return False
+    except Exception as e:
+        print(f"⚠️  Sonos recovery attempt failed: {e}")
+        return False
+
+def try_start_spotify():
+    """Attempt to start Spotify monitoring, return True if successful"""
+    global active_monitors
+    
+    try:
+        # Check if already active
+        if is_service_active('spotify'):
+            return True
+        
+        # Remove any old inactive Spotify monitor
+        active_monitors = [m for m in active_monitors if not isinstance(m, SpotifyMonitor)]
+        
+        # Try to start new monitor
+        monitor = initialize_spotify()
+        active_monitors.append(monitor)
+        print("✅ Spotify service recovered and activated")
+        broadcast_service_status()
+        return True
+    except Exception as e:
+        print(f"⚠️  Spotify recovery attempt failed: {e}")
+        return False
+
+def service_recovery_loop():
+    """Background thread that continuously monitors and recovers failed services"""
+    global recovery_running, desired_services
+    
+    retry_count = {'sonos': 0, 'spotify': 0}
+    
+    print("🔄 Service recovery thread started")
+    print(f"   Monitoring services: {', '.join(sorted(desired_services))}")
+    
+    while recovery_running:
+        try:
+            # Check each desired service
+            for service in desired_services:
+                if not is_service_active(service):
+                    retry_count[service] += 1
+                    print(f"🔄 Attempting to recover {service.upper()} service (attempt #{retry_count[service]})...")
+                    
+                    success = False
+                    if service == 'sonos':
+                        success = try_start_sonos()
+                    elif service == 'spotify':
+                        success = try_start_spotify()
+                    
+                    if success:
+                        retry_count[service] = 0  # Reset counter on success
+                    else:
+                        print(f"⚠️  {service.upper()} recovery failed. Will retry in 10 seconds...")
+                else:
+                    # Service is active, verify it's still healthy
+                    monitor = get_service_monitor(service)
+                    if monitor:
+                        # Check if monitor is still running
+                        if not monitor.is_running or not monitor.is_ready:
+                            print(f"⚠️  {service.upper()} service detected as unhealthy, marking for recovery...")
+                            monitor.is_ready = False
+                            # Remove from active monitors to trigger recovery
+                            if monitor in active_monitors:
+                                active_monitors.remove(monitor)
+                            broadcast_service_status()
+            
+            # Sleep for 10 seconds before next check
+            time.sleep(10)
+            
+        except Exception as e:
+            print(f"⚠️  Error in service recovery loop: {e}")
+            time.sleep(10)
+    
+    print("🔄 Service recovery thread stopped")
+
 def main():
     """Main entry point"""
     print("=" * 60)
     print("Now Playing Server (Multi-Source Monitor)")
     print("=" * 60)
     
-    global active_monitors
+    global active_monitors, desired_services, recovery_running, recovery_thread
     
     try:
         service_method = os.getenv('MEDIA_SERVICE_METHOD', 'all').lower().strip()
@@ -1010,6 +1144,14 @@ def main():
             print("Valid options: 'sonos', 'spotify', 'all'")
             print("Defaulting to 'all'\n")
             service_method = 'all'
+        
+        # Set desired services based on configuration
+        if service_method == 'spotify':
+            desired_services = {'spotify'}
+        elif service_method == 'sonos':
+            desired_services = {'sonos'}
+        else:  # 'all'
+            desired_services = {'sonos', 'spotify'}
         
         print("\n🔧 Initializing playback monitoring...")
         print(f"Configuration: MEDIA_SERVICE_METHOD={service_method.upper()}\n")
@@ -1121,6 +1263,11 @@ def main():
             else:
                 print("✅ Spotify monitoring active")
         
+        # Start service recovery thread
+        recovery_running = True
+        recovery_thread = threading.Thread(target=service_recovery_loop, daemon=True)
+        recovery_thread.start()
+        
         # Get server configuration
         host = os.getenv('SERVER_HOST', '0.0.0.0')
         port = int(os.getenv('WEBSOCKET_SERVER_PORT', 5001))
@@ -1141,6 +1288,9 @@ def main():
         
     except KeyboardInterrupt:
         print("\n\nShutting down...")
+        recovery_running = False
+        if recovery_thread:
+            recovery_thread.join(timeout=2)
         for monitor in active_monitors:
             monitor.stop()
     except Exception as e:
@@ -1162,9 +1312,19 @@ import atexit
 
 def initialize_for_gunicorn():
     """Initialize monitors when running under gunicorn"""
+    global desired_services, recovery_running, recovery_thread
+    
     if not active_monitors:  # Only initialize if not already done
         try:
             service_method = os.getenv('MEDIA_SERVICE_METHOD', 'all').lower().strip()
+            
+            # Set desired services based on configuration
+            if service_method == 'spotify':
+                desired_services = {'spotify'}
+            elif service_method == 'sonos':
+                desired_services = {'sonos'}
+            else:  # 'all'
+                desired_services = {'sonos', 'spotify'}
             
             print("\n🔧 Initializing playback monitoring (Gunicorn mode)...")
             print(f"Configuration: MEDIA_SERVICE_METHOD={service_method.upper()}\n")
@@ -1221,6 +1381,12 @@ def initialize_for_gunicorn():
                 
                 if sonos_result['started'] or spotify_result['started']:
                     print("✅ Monitoring services initialized")
+            
+            # Start service recovery thread
+            if not recovery_running:
+                recovery_running = True
+                recovery_thread = threading.Thread(target=service_recovery_loop, daemon=True)
+                recovery_thread.start()
                     
         except Exception as e:
             print(f"⚠️  Error initializing monitors: {e}")
@@ -1228,6 +1394,17 @@ def initialize_for_gunicorn():
 # Register cleanup handler
 def cleanup_monitors():
     """Clean up monitors on shutdown"""
+    global recovery_running, recovery_thread
+    
+    # Stop recovery thread
+    recovery_running = False
+    if recovery_thread:
+        try:
+            recovery_thread.join(timeout=2)
+        except:
+            pass
+    
+    # Stop all monitors
     for monitor in active_monitors:
         try:
             monitor.stop()

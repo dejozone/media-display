@@ -172,7 +172,7 @@ body.connected::before {
 }
 
 .container {
-    display: flex;
+    display: grid;
     flex-direction: column;
     justify-content: center;
     align-items: center;
@@ -743,10 +743,13 @@ body.rotate-270 .no-playback-state .icon-container {
     display: flex;
     flex-direction: column;
     align-items: center;
+    justify-content: center;
     width: 100%;
     max-width: 1200px;
     gap: 2rem;
     animation: fadeIn 0.5s ease-in;
+    /* Ensure proper centering in all viewport sizes */
+    margin: auto;
 }
 
 @keyframes fadeIn {
@@ -924,6 +927,8 @@ body:not(:has(.playback-status.playing)) .album-art.bass-color-glow {
     hyphens: auto;
     max-width: min(200px, 15vw);
     max-height: 60px;
+    /* Ensure it doesn't affect layout when removed */
+    flex-shrink: 0;
 }
 
 .device-info span {
@@ -933,6 +938,12 @@ body:not(:has(.playback-status.playing)) .album-art.bass-color-glow {
 
 .device-info span:hover {
     opacity: 1;
+}
+
+/* Ensure now-playing remains centered even without device-info */
+.now-playing:has(.album-art-container):not(:has(.device-info)),
+.now-playing:has(.album-art-container):has(.device-info:empty) {
+    justify-content: center;
 }
 
 /* Service status */
@@ -2155,6 +2166,31 @@ body:not(:has(.playback-status.playing)) .equalizer-bar {
         font-size: 0.8rem;
         padding: 0.4rem 0.8rem;
     }
+    
+    /* Ensure icons remain usable on small mobile screens */
+    .service-icon,
+    .playback-status {
+        width: min(1.75rem, calc((95vw - 8.5rem) / 9)) !important;
+        height: min(1.75rem, calc((95vw - 8.5rem) / 9)) !important;
+    }
+    
+    .app-settings .icons-container {
+        gap: 0.75rem;
+    }
+}
+
+/* Extra small mobile devices */
+@media (max-width: 375px) {
+    .service-icon,
+    .playback-status {
+        width: 1.5rem !important;
+        height: 1.5rem !important;
+    }
+    
+    .app-settings .icons-container {
+        gap: 0.6rem;
+        padding: 0.75rem;
+    }
 }
 
 /* Fullscreen mode */
@@ -2613,44 +2649,38 @@ body.rotate-270 .sunrise-container {
     }
 }
 
-/* 3D Mountain silhouette with rough rocky surfaces */
+/* 3D Mountain silhouette with multiple layers for depth perspective */
 .sunrise-mountains {
     position: absolute;
     left: 0;
     bottom: 0;
     width: 100%;
-    height: 15%;
-    /* Blended background with dynamic colors, enhanced for 3D depth */
+    height: 18%;
+    /* Foreground mountain - tallest and darkest */
     background: linear-gradient(
         135deg,
-        var(--mountain-base-1, rgba(20, 20, 20, 0.3)) 0%,
-        var(--mountain-base-2, rgba(10, 10, 10, 1)) 50%,
-        var(--mountain-base-2, rgba(10, 10, 10, 1)) 100%
+        var(--mountain-base-1, rgba(25, 25, 25, 0.4)) 0%,
+        var(--mountain-base-2, rgba(15, 15, 15, 1)) 50%,
+        var(--mountain-base-2, rgba(15, 15, 15, 1)) 100%
     );
-    /* Detailed rocky polygon with irregular jagged edges */
+    /* Tallest peaks - front mountain range */
     clip-path: polygon(
         0% 100%,
-        0% 60%,
-        3% 58%, 4% 56%, 5% 55%, 6% 53%, 7% 52%,
-        8% 50%, 9% 51%, 10% 49%, 11% 47%, 12% 45%,
-        13% 47%, 14% 48%, 15% 50%, 16% 49%, 17% 48%,
-        18% 48%, 19% 46%, 20% 43%, 21% 41%, 22% 40%,
-        23% 42%, 24% 43%, 25% 44%, 26% 45%, 27% 43%,
-        28% 40%, 29% 37%, 30% 35%, 31% 36%, 32% 38%,
-        33% 39%, 34% 40%, 35% 40%, 36% 38%, 37% 35%,
-        38% 30%, 39% 32%, 40% 33%, 41% 34%, 42% 35%,
-        43% 33%, 44% 28%, 45% 25%, 46% 27%, 47% 28%,
-        48% 29%, 49% 30%, 50% 30%, 51% 29%, 52% 27%,
-        53% 24%, 54% 22%, 55% 20%, 56% 21%, 57% 23%,
-        58% 24%, 59% 25%, 60% 25%, 61% 27%, 62% 30%,
-        63% 32%, 64% 34%, 65% 35%, 66% 37%, 67% 38%,
-        68% 39%, 69% 40%, 70% 40%, 71% 42%, 72% 43%,
-        73% 44%, 74% 45%, 75% 45%, 76% 43%, 77% 40%,
-        78% 38%, 79% 36%, 80% 35%, 81% 33%, 82% 35%,
-        83% 38%, 84% 42%, 85% 45%, 86% 48%, 87% 50%,
-        88% 48%, 89% 45%, 90% 42%, 91% 40%, 92% 38%,
-        93% 40%, 94% 43%, 95% 46%, 96% 50%, 97% 52%,
-        98% 55%, 99% 58%, 100% 60%,
+        0% 55%,
+        3% 53%, 5% 50%, 7% 48%,
+        10% 45%, 12% 43%, 15% 42%,
+        18% 40%, 20% 38%, 22% 35%,
+        25% 32%, 28% 30%, 30% 28%,
+        32% 30%, 35% 33%, 37% 35%,
+        40% 32%, 42% 28%, 45% 25%,
+        48% 27%, 50% 30%, 52% 28%,
+        55% 25%, 57% 22%, 60% 20%,
+        62% 23%, 65% 28%, 67% 32%,
+        70% 35%, 72% 38%, 75% 40%,
+        77% 38%, 80% 35%, 82% 33%,
+        85% 38%, 87% 42%, 90% 45%,
+        92% 43%, 95% 48%, 97% 52%,
+        100% 55%,
         100% 100%
     );
     opacity: 1;
@@ -2682,6 +2712,42 @@ body.rotate-270 .sunrise-container {
     opacity: 1;
     mix-blend-mode: screen;
     pointer-events: none;
+}
+
+/* Middle mountain layer - medium height and slightly lighter */
+.sunrise-mountains::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(
+        135deg,
+        var(--mountain-base-1, rgba(40, 40, 40, 0.35)) 0%,
+        var(--mountain-base-2, rgba(30, 30, 30, 0.85)) 50%,
+        var(--mountain-base-2, rgba(30, 30, 30, 0.85)) 100%
+    );
+    /* Medium height peaks - middle layer */
+    clip-path: polygon(
+        0% 100%,
+        0% 68%,
+        5% 66%, 8% 64%, 12% 63%,
+        15% 61%, 18% 59%, 22% 58%,
+        25% 56%, 28% 55%, 32% 54%,
+        35% 56%, 38% 58%, 42% 60%,
+        45% 58%, 48% 55%, 52% 53%,
+        55% 51%, 58% 50%, 62% 51%,
+        65% 53%, 68% 56%, 72% 58%,
+        75% 60%, 78% 62%, 82% 63%,
+        85% 61%, 88% 58%, 92% 56%,
+        95% 59%, 98% 63%, 100% 68%,
+        100% 100%
+    );
+    opacity: 1;
+    filter: brightness(calc(var(--mountain-brightness, 1) * 1.2));
+    pointer-events: none;
+    z-index: -1;
 }
 
 /* Animations */
