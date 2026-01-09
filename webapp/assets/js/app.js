@@ -223,7 +223,7 @@ const PROGRESS_EFFECT_NAMES = {
     'comet': 'Edge Comet',
     'album-comet': 'Album Comet',
     'across-comet': 'Across Comet',
-    'sunrise': 'Sunrise',
+    'sunrise': 'Sunrise & Sunset',
     'equalizer-fill': 'Equalizer Fill'
 };
 
@@ -1188,7 +1188,7 @@ function createSunriseElement() {
     document.body.appendChild(container);
     elements.sunriseContainer = container;
     
-    console.log('Sunrise element created');
+    console.log('Sunrise & Sunset element created');
 }
 
 // Update sunrise position and colors based on song progress
@@ -1239,12 +1239,35 @@ function updateSunriseElement() {
     const maxOpacity = 1.0;
     const sunOpacity = minOpacity + (maxOpacity - minOpacity) * percentage;
     
+    // Mountain lighting based on sun Y position (lower Y = higher sun = more light)
+    // sunY ranges from ~65 (high/midday) to 97 (low/horizon)
+    // Normalize: (97 - sunY) / 32 gives 0 at horizon, 1 at peak
+    const lightIntensity = Math.max(0, Math.min(1, (97 - sunY) / 32));
+    
+    // Proximity: how close sun is to mountain (higher sunY = closer)
+    // When sun is low (high sunY ~90-97), proximity is high (localized spotlight)
+    // When sun is high (low sunY ~65-75), proximity is lower (broader light)
+    const proximity = Math.max(0, Math.min(1, (sunY - 65) / 32));
+    
+    // Brightness: 1.0 (dark) to 1.8 (bright)
+    const mountainBrightness = 1 + (lightIntensity * 0.8);
+    
+    // Glow colors with calculated alpha based on light intensity
+    // Stronger when sun is closer to mountain
+    const glowAlpha1 = lightIntensity * (0.5 + proximity * 0.3);
+    const glowAlpha2 = lightIntensity * (0.4 + proximity * 0.2);
+    const glowAlpha3 = lightIntensity * (0.3 + proximity * 0.1);
+    
     // Apply CSS custom properties for sun position
     const container = elements.sunriseContainer;
     container.style.setProperty('--sun-x', `${sunX}%`);
     container.style.setProperty('--sun-y', `${sunY}%`);
     container.style.setProperty('--sun-size', `${sunSize}px`);
     container.style.setProperty('--sun-opacity', sunOpacity);
+    container.style.setProperty('--mountain-brightness', mountainBrightness);
+    container.style.setProperty('--mountain-glow-alpha-1', glowAlpha1);
+    container.style.setProperty('--mountain-glow-alpha-2', glowAlpha2);
+    container.style.setProperty('--mountain-glow-alpha-3', glowAlpha3);
     
     // Update sky gradient colors based on progress: sunrise → midday → sunset
     let skyColor1, skyColor2, skyColor3;
