@@ -743,10 +743,13 @@ body.rotate-270 .no-playback-state .icon-container {
     display: flex;
     flex-direction: column;
     align-items: center;
+    justify-content: center;
     width: 100%;
     max-width: 1200px;
     gap: 2rem;
     animation: fadeIn 0.5s ease-in;
+    /* Ensure proper centering in all viewport sizes */
+    margin: auto;
 }
 
 @keyframes fadeIn {
