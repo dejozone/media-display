@@ -1925,6 +1925,25 @@ function updateDisplay(trackData) {
         elements.playbackStatus.classList.remove('playing');
     }
     
+    // Update the popup label if it's currently visible for playback status
+    const label = document.getElementById('service-label');
+    if (label.classList.contains('show')) {
+        // Check if the label is positioned relative to playback status
+        const labelText = label.textContent;
+        if (labelText.includes('Playing on') || labelText.includes('Paused on') || labelText === 'Playing' || labelText === 'Paused') {
+            // Update the label with current status
+            const statusText = isPlaying ? 'Playing on' : 'Paused on';
+            if (currentDeviceList.length > 0) {
+                const deviceDisplay = currentDeviceList.length === 1 
+                    ? currentDeviceList[0] 
+                    : `${currentDeviceList[0]} +${currentDeviceList.length - 1} more`;
+                label.textContent = `${statusText} ${deviceDisplay}`;
+            } else {
+                label.textContent = isPlaying ? 'Playing' : 'Paused';
+            }
+        }
+    }
+    
     // Update device info
     if (trackData.device) {
         // Format device names for display
@@ -1949,7 +1968,10 @@ function updateDisplay(trackData) {
             deviceDisplay = 'Unknown Device';
         }
         
-        elements.deviceName.textContent = `Playing on ${deviceDisplay}`;
+        if (elements.deviceName) {
+            const statusText = isPlaying ? 'Playing on' : 'Paused on';
+            elements.deviceName.textContent = `${statusText} ${deviceDisplay}`;
+        }
     }
     
     // Show the display
@@ -2217,33 +2239,38 @@ function setupServiceIconHandlers() {
     });
     
     // Show all devices when clicking or hovering device name
-    elements.deviceName.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (currentDeviceList.length > 0) {
-            const allDevices = currentDeviceList.join('\n');
-            showServiceLabel(`Playing on:\n${allDevices}`, elements.deviceName, true);
-        }
-    });
-    
-    elements.deviceName.addEventListener('touchend', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (currentDeviceList.length > 0) {
-            const allDevices = currentDeviceList.join('\n');
-            showServiceLabel(`Playing on:\n${allDevices}`, elements.deviceName, true);
-        }
-    });
-    
-    elements.deviceName.addEventListener('mouseenter', () => {
-        if (currentDeviceList.length > 0) {
-            const allDevices = currentDeviceList.join('\n');
-            showServiceLabel(`Playing on:\n${allDevices}`, elements.deviceName, true);
-        }
-    });
-    
-    elements.deviceName.addEventListener('mouseleave', () => {
-        hideServiceLabel();
-    });
+    if (elements.deviceName) {
+        elements.deviceName.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (currentDeviceList.length > 0) {
+                const statusText = isPlaying ? 'Playing on' : 'Paused on';
+                const allDevices = currentDeviceList.join('\n');
+                showServiceLabel(`${statusText}:\n${allDevices}`, elements.deviceName, true);
+            }
+        });
+        
+        elements.deviceName.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (currentDeviceList.length > 0) {
+                const statusText = isPlaying ? 'Playing on' : 'Paused on';
+                const allDevices = currentDeviceList.join('\n');
+                showServiceLabel(`${statusText}:\n${allDevices}`, elements.deviceName, true);
+            }
+        });
+        
+        elements.deviceName.addEventListener('mouseenter', () => {
+            if (currentDeviceList.length > 0) {
+                const statusText = isPlaying ? 'Playing on' : 'Paused on';
+                const allDevices = currentDeviceList.join('\n');
+                showServiceLabel(`${statusText}:\n${allDevices}`, elements.deviceName, true);
+            }
+        });
+        
+        elements.deviceName.addEventListener('mouseleave', () => {
+            hideServiceLabel();
+        });
+    }
     
     // Service icon handlers
     sonosIcon.addEventListener('click', (e) => {
@@ -2302,8 +2329,19 @@ function setupServiceIconHandlers() {
     
     playbackStatus.addEventListener('click', (e) => {
         e.stopPropagation();
-        const status = playbackStatus.classList.contains('paused') ? 'Paused' : 'Playing';
-        showServiceLabel(status, playbackStatus);
+        const statusText = isPlaying ? 'Playing on' : 'Paused on';
+        
+        // Add device info if available
+        if (currentDeviceList.length > 0) {
+            const deviceDisplay = currentDeviceList.length === 1 
+                ? currentDeviceList[0] 
+                : `${currentDeviceList[0]} +${currentDeviceList.length - 1} more`;
+            showServiceLabel(`${statusText} ${deviceDisplay}`, playbackStatus);
+        } else {
+            // If no device info, show just the status
+            showServiceLabel(isPlaying ? 'Playing' : 'Paused', playbackStatus);
+        }
+        
         // Reset timer when icon is clicked
         if (appSettings.classList.contains('expanded')) {
             startAutoCollapseTimer();
@@ -2313,8 +2351,19 @@ function setupServiceIconHandlers() {
     playbackStatus.addEventListener('touchend', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        const status = playbackStatus.classList.contains('paused') ? 'Paused' : 'Playing';
-        showServiceLabel(status, playbackStatus);
+        const statusText = isPlaying ? 'Playing on' : 'Paused on';
+        
+        // Add device info if available
+        if (currentDeviceList.length > 0) {
+            const deviceDisplay = currentDeviceList.length === 1 
+                ? currentDeviceList[0] 
+                : `${currentDeviceList[0]} +${currentDeviceList.length - 1} more`;
+            showServiceLabel(`${statusText} ${deviceDisplay}`, playbackStatus);
+        } else {
+            // If no device info, show just the status
+            showServiceLabel(isPlaying ? 'Playing' : 'Paused', playbackStatus);
+        }
+        
         // Reset timer when icon is touched
         if (appSettings.classList.contains('expanded')) {
             startAutoCollapseTimer();
@@ -2322,8 +2371,18 @@ function setupServiceIconHandlers() {
     });
     
     playbackStatus.addEventListener('mouseenter', () => {
-        const status = playbackStatus.classList.contains('paused') ? 'Paused' : 'Playing';
-        showServiceLabel(status, playbackStatus);
+        const statusText = isPlaying ? 'Playing on' : 'Paused on';
+        
+        // Add device info if available
+        if (currentDeviceList.length > 0) {
+            const deviceDisplay = currentDeviceList.length === 1 
+                ? currentDeviceList[0] 
+                : `${currentDeviceList[0]} +${currentDeviceList.length - 1} more`;
+            showServiceLabel(`${statusText} ${deviceDisplay}`, playbackStatus);
+        } else {
+            // If no device info, show just the status
+            showServiceLabel(isPlaying ? 'Playing' : 'Paused', playbackStatus);
+        }
     });
     
     playbackStatus.addEventListener('mouseleave', () => {
