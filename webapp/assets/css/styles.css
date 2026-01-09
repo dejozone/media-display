@@ -2183,7 +2183,9 @@ body.fullscreen .app-settings.expanded {
     pointer-events: none;
     z-index: 5;
     transform: translate(-50%, -50%) rotate(var(--comet-rotation, 0deg));
-    transition: opacity 0.3s ease;
+    /* transition: opacity 0.3s ease; */
+    /* Let CSS handle smooth movement between updates */
+    transition: left 0.1s linear, top 0.1s linear;
     filter: drop-shadow(0 0 3px var(--comet-color-1, rgba(255, 255, 255, 0.7)))
             drop-shadow(0 0 6px var(--comet-color-2, rgba(255, 255, 255, 0.5)));
     /* Add performance optimizations */
