@@ -1320,6 +1320,9 @@ body.rotate-270 .app-settings {
     z-index: 10;
     pointer-events: none;
     height: 80px;
+    /* Add these performance hints */
+    contain: layout style paint;
+    will-change: height;
 }
 
 /* Force hide all equalizer bars when bass glow effects are active */
@@ -1376,6 +1379,7 @@ body.rotate-270 .equalizer {
     will-change: height;
     transform: translateZ(0);
     backface-visibility: hidden;
+    --bar-hue: 0; /* Set dynamically */
 }
 
 /* Pause animations when music is paused (pure CSS - checks if playback-status is not playing) */
