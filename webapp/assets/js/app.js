@@ -253,7 +253,9 @@ let progressState = {
 // Separate animation state for sunrise (to avoid conflicts with comet)
 let sunriseAnimationState = {
     animationFrameId: null,
-    lastUpdateTime: null
+    lastUpdateTime: null,
+    shootingStarInterval: null,
+    activeShootingStars: [] // Track which stars are currently animating
 };
 
 // Initialize WebSocket connection
@@ -1052,21 +1054,23 @@ function updateProgressComet() {
 
 // Animate progress comet with client-side interpolation
 function animateProgressComet() {
-    if (!progressState.isPlaying || !progressState.lastUpdateTime) {
-        return;
-    }
+    if (!progressState.isPlaying || !progressState.lastUpdateTime) return;
     
     const now = Date.now();
     const elapsed = now - progressState.lastUpdateTime;
     
-    // Update progress with elapsed time
+    // **OPTIMIZATION: Only update every 50ms instead of every frame**
+    // Reduces from 60fps to 20fps - still smooth but 66% less CPU
+    if (elapsed < 50) {
+        progressState.animationFrameId = requestAnimationFrame(animateProgressComet);
+        return;
+    }
+    
     progressState.progressMs = Math.min(progressState.progressMs + elapsed, progressState.durationMs);
     progressState.lastUpdateTime = now;
     
-    // Update visual position
     updateProgressComet();
     
-    // Continue animation loop if still playing
     if (progressState.isPlaying && progressState.progressMs < progressState.durationMs) {
         progressState.animationFrameId = requestAnimationFrame(animateProgressComet);
     }
@@ -1142,40 +1146,18 @@ function createSunriseElement() {
         starsContainer.appendChild(star);
     }
     
-    // Create shooting stars with diverse directions and trajectories
-    const shootingStarCount = 7;
+    // Create shooting stars (will be triggered randomly via JavaScript)
+    const shootingStarCount = 6; // Create a pool of 6 stars (mix of short and long)
     for (let i = 0; i < shootingStarCount; i++) {
         const shootingStar = document.createElement('div');
         shootingStar.className = 'shooting-star';
+        shootingStar.dataset.starIndex = i;
+        // Mark some stars as long variants (40% chance)
+        shootingStar.dataset.starType = Math.random() < 0.4 ? 'long' : 'short';
         
-        // Random starting position (top 60% of screen)
-        shootingStar.style.left = `${Math.random() * 100}%`;
-        shootingStar.style.top = `${Math.random() * 60}%`;
-        
-        // Diverse direction vectors covering all quadrants
-        const directions = [
-            { x: 220, y: 80 },    // Shallow down-right
-            { x: -220, y: 80 },   // Shallow down-left
-            { x: 180, y: 140 },   // Diagonal down-right
-            { x: -180, y: 140 },  // Diagonal down-left
-            { x: 120, y: 200 },   // Steep down-right
-            { x: -120, y: 200 },  // Steep down-left
-            { x: 80, y: 220 },    // Nearly vertical
-            { x: -80, y: 220 }    // Nearly vertical left
-        ];
-        const direction = directions[i % directions.length];
-        
-        // Calculate rotation angle for head-first orientation
-        // atan2 gives angle in radians, convert to degrees
-        const angle = Math.atan2(direction.y, direction.x) * (180 / Math.PI);
-        
-        shootingStar.style.setProperty('--shoot-x', `${direction.x}px`);
-        shootingStar.style.setProperty('--shoot-y', `${direction.y}px`);
-        shootingStar.style.setProperty('--shoot-angle', `${angle}deg`);
-        
-        // Staggered animation timing for natural appearance
-        shootingStar.style.animationDelay = `${Math.random() * 8}s`;
-        shootingStar.style.animationDuration = `${2.5 + Math.random() * 1.5}s`;
+        // Stars start invisible and positioned randomly when triggered
+        shootingStar.style.opacity = '0';
+        shootingStar.style.animation = 'none'; // No automatic animation
         
         starsContainer.appendChild(shootingStar);
     }
@@ -1201,6 +1183,123 @@ function createSunriseElement() {
     elements.sunriseContainer = container;
     
     console.log('Sunrise & Sunset element created');
+}
+
+// Trigger a random shooting star animation
+function triggerShootingStar() {
+    if (!elements.sunriseContainer) return;
+    
+    const starsContainer = elements.sunriseContainer.querySelector('.sunrise-stars');
+    if (!starsContainer) return;
+    
+    const shootingStars = starsContainer.querySelectorAll('.shooting-star');
+    if (shootingStars.length === 0) return;
+    
+    // Find an available (not currently animating) shooting star
+    let availableStars = [];
+    shootingStars.forEach((star, index) => {
+        if (!sunriseAnimationState.activeShootingStars.includes(index)) {
+            availableStars.push({ star, index });
+        }
+    });
+    
+    if (availableStars.length === 0) return; // All stars are currently animating
+    
+    // Pick a random available star
+    const { star, index } = availableStars[Math.floor(Math.random() * availableStars.length)];
+    
+    // Mark as active
+    sunriseAnimationState.activeShootingStars.push(index);
+    
+    // Random starting positions (from edges)
+    const edge = Math.floor(Math.random() * 4); // 0=top, 1=right, 2=bottom, 3=left
+    let startX, startY, shootX, shootY, angle;
+    
+    if (edge === 0) { // From top
+        startX = Math.random() * 100;
+        startY = 0;
+        shootX = (Math.random() * 60 - 30);
+        shootY = Math.random() * 40 + 20;
+    } else if (edge === 1) { // From right
+        startX = 100;
+        startY = Math.random() * 50;
+        shootX = -(Math.random() * 40 + 20);
+        shootY = Math.random() * 60 - 30;
+    } else if (edge === 2) { // From bottom (rare)
+        startX = Math.random() * 100;
+        startY = 100;
+        shootX = (Math.random() * 60 - 30);
+        shootY = -(Math.random() * 30 + 10);
+    } else { // From left
+        startX = 0;
+        startY = Math.random() * 50;
+        shootX = Math.random() * 40 + 20;
+        shootY = Math.random() * 60 - 30;
+    }
+    
+    // Set position and trajectory
+    star.style.left = `${startX}%`;
+    star.style.top = `${startY}%`;
+    star.style.setProperty('--shoot-x', `${shootX}vw`);
+    star.style.setProperty('--shoot-y', `${shootY}vh`);
+    star.style.setProperty('--shoot-angle', `${Math.atan2(shootY, shootX) * (180 / Math.PI)}deg`);
+    
+    // Apply long class if this is a long shooting star
+    if (star.dataset.starType === 'long') {
+        star.classList.add('long');
+    } else {
+        star.classList.remove('long');
+    }
+    
+    // Reset and restart animation
+    star.style.animation = 'none';
+    // Force reflow to restart animation
+    star.offsetHeight;
+    star.style.animation = 'shoot 3s linear forwards';
+    
+    // Remove from active list after animation completes
+    setTimeout(() => {
+        const activeIndex = sunriseAnimationState.activeShootingStars.indexOf(index);
+        if (activeIndex > -1) {
+            sunriseAnimationState.activeShootingStars.splice(activeIndex, 1);
+        }
+    }, 3000); // Match animation duration
+}
+
+// Start random shooting star spawning
+function startShootingStarSpawning() {
+    if (sunriseAnimationState.shootingStarInterval) return; // Already running
+    
+    // Trigger shooting stars at random intervals between 2-8 seconds
+    const scheduleNextBatch = () => {
+        const delay = Math.random() * 6000 + 2000; // 2-8 seconds
+        sunriseAnimationState.shootingStarInterval = setTimeout(() => {
+            // Randomly spawn 1, 2, or 3 stars at a time
+            const numStars = Math.floor(Math.random() * 3) + 1; // 1-3 stars
+            for (let i = 0; i < numStars; i++) {
+                // Add slight delay between multiple stars for natural effect
+                setTimeout(() => triggerShootingStar(), i * 100);
+            }
+            scheduleNextBatch(); // Schedule the next batch
+        }, delay);
+    };
+    
+    // Trigger first batch immediately (1-3 stars)
+    const initialStars = Math.floor(Math.random() * 3) + 1;
+    for (let i = 0; i < initialStars; i++) {
+        setTimeout(() => triggerShootingStar(), i * 100);
+    }
+    // Schedule subsequent batches
+    scheduleNextBatch();
+}
+
+// Stop shooting star spawning
+function stopShootingStarSpawning() {
+    if (sunriseAnimationState.shootingStarInterval) {
+        clearTimeout(sunriseAnimationState.shootingStarInterval);
+        sunriseAnimationState.shootingStarInterval = null;
+    }
+    sunriseAnimationState.activeShootingStars = [];
 }
 
 // Update sunrise position and colors based on song progress
@@ -1429,6 +1528,13 @@ function animateSunrise() {
     
     const now = Date.now();
     const elapsed = now - sunriseAnimationState.lastUpdateTime;
+
+    // **Update every 100ms instead of every frame**
+    // Sun moves slowly, 10fps is plenty smooth
+    if (elapsed < 100) {
+        sunriseAnimationState.animationFrameId = requestAnimationFrame(animateSunrise);
+        return;
+    }
     
     // Update progress with elapsed time
     progressState.progressMs = Math.min(progressState.progressMs + elapsed, progressState.durationMs);
@@ -1463,6 +1569,11 @@ function showSunriseElement() {
             sunriseAnimationState.lastUpdateTime = Date.now();
             sunriseAnimationState.animationFrameId = requestAnimationFrame(animateSunrise);
         }
+        
+        // Start random shooting star spawning
+        startShootingStarSpawning();
+        
+        console.log('Sunrise element shown');
     }
 }
 
@@ -1477,6 +1588,9 @@ function hideSunriseElement() {
         cancelAnimationFrame(sunriseAnimationState.animationFrameId);
         sunriseAnimationState.animationFrameId = null;
     }
+    
+    // Stop shooting star spawning
+    stopShootingStarSpawning();
 }
 
 // Pause sunrise (keep visible but stop moving)
@@ -1485,6 +1599,8 @@ function pauseSunrise() {
         cancelAnimationFrame(sunriseAnimationState.animationFrameId);
         sunriseAnimationState.animationFrameId = null;
     }
+    // Stop shooting star spawning when paused
+    stopShootingStarSpawning();
 }
 
 // Resume sunrise animation
@@ -1495,6 +1611,9 @@ function resumeSunrise() {
             cancelAnimationFrame(sunriseAnimationState.animationFrameId);
         }
         sunriseAnimationState.animationFrameId = requestAnimationFrame(animateSunrise);
+        // Resume shooting star spawning
+        startShootingStarSpawning();
+        console.log('Sunrise animation resumed');
     }
 }
 
@@ -3074,8 +3193,17 @@ if (document.readyState === 'loading') {
 // Visibility change handling (pause/resume updates when tab is hidden)
 document.addEventListener('visibilitychange', () => {
     if (!document.hidden && socket && socket.connected) {
-        console.log('Tab visible, requesting current track');
         socket.emit('request_current_track');
+    } else {
+        // Stop all animations when tab is hidden
+        if (progressState.animationFrameId) {
+            cancelAnimationFrame(progressState.animationFrameId);
+        }
+        if (sunriseAnimationState.animationFrameId) {
+            cancelAnimationFrame(sunriseAnimationState.animationFrameId);
+        }
+        // Pause CSS animations
+        document.body.style.animationPlayState = 'paused';
     }
 });
 
