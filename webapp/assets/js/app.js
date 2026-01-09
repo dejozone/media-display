@@ -378,8 +378,12 @@ function showLoading(message = 'Connecting...') {
         elements.connectionStatus.style.display = 'none';
     }
     
-    // Hide progress comet during loading
+    // Hide all progress effects during loading/error state
     hideProgressComet();
+    hideSunriseElement();
+    
+    // Clear equalizer fill if active
+    clearEqualizerFill();
     
     stopScreensaverCycle();
 }
