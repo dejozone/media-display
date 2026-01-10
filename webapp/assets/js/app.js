@@ -758,8 +758,19 @@ function applyGradientBackground(colors) {
         return `rgb(${Math.min(255, nr)}, ${Math.min(255, ng)}, ${Math.min(255, nb)})`;
     });
     
-    // Create gradient
-    const gradient = `linear-gradient(135deg, ${bgColors[0]}, ${bgColors[1] || bgColors[0]}, ${bgColors[2] || bgColors[1] || bgColors[0]})`;
+    // Adjust gradient angle based on rotation state
+    // Default is 135deg, subtract rotation amount to keep gradient visually consistent
+    let gradientAngle = 135;
+    if (rotationState === 90) {
+        gradientAngle = 45;  // 135 - 90
+    } else if (rotationState === 180) {
+        gradientAngle = 315; // 135 - 180 = -45, or 315
+    } else if (rotationState === 270) {
+        gradientAngle = 225; // 135 - 270 = -135, or 225
+    }
+    
+    // Create gradient with adjusted angle
+    const gradient = `linear-gradient(${gradientAngle}deg, ${bgColors[0]}, ${bgColors[1] || bgColors[0]}, ${bgColors[2] || bgColors[1] || bgColors[0]})`;
     document.body.style.transition = 'background 1s ease';
     document.body.style.background = gradient;
     
@@ -2673,6 +2684,11 @@ function rotateDisplay() {
     
     // Save rotation state to localStorage
     localStorage.setItem('displayRotation', rotationState);
+    
+    // Reapply background gradient with new rotation angle if album colors are loaded
+    if (currentAlbumColors.length > 0) {
+        applyGradientBackground(currentAlbumColors);
+    }
     
     console.log('Display rotated to:', rotationState, 'degrees');
 }

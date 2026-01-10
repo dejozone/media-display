@@ -52,6 +52,19 @@ body.no-playback-active {
     animation: backgroundCycle 30s ease-in-out infinite;
 }
 
+/* Rotation-specific background animations for screensaver mode */
+body.no-playback-active.rotate-90 {
+    animation: backgroundCycle90 30s ease-in-out infinite;
+}
+
+body.no-playback-active.rotate-180 {
+    animation: backgroundCycle180 30s ease-in-out infinite;
+}
+
+body.no-playback-active.rotate-270 {
+    animation: backgroundCycle270 30s ease-in-out infinite;
+}
+
 @keyframes backgroundCycle {
     0% {
         background: linear-gradient(135deg, #4a1942, #1f0a1f, #3d1f47);
@@ -76,6 +89,87 @@ body.no-playback-active {
     }
     100% {
         background: linear-gradient(135deg, #4a1942, #1f0a1f, #3d1f47);
+    }
+}
+
+@keyframes backgroundCycle90 {
+    0% {
+        background: linear-gradient(45deg, #4a1942, #1f0a1f, #3d1f47);
+    }
+    14% {
+        background: linear-gradient(45deg, #4a1f0a, #1f0a00, #3d2a1f);
+    }
+    28% {
+        background: linear-gradient(45deg, #4a4a0a, #1f1f00, #3d3d1f);
+    }
+    42% {
+        background: linear-gradient(45deg, #0a4a0a, #001f00, #1f3d1f);
+    }
+    56% {
+        background: linear-gradient(45deg, #0a1f4a, #001f1f, #1f2a3d);
+    }
+    70% {
+        background: linear-gradient(45deg, #2a0a4a, #0f001f, #2f1f3d);
+    }
+    84% {
+        background: linear-gradient(45deg, #4a0a2a, #1f000f, #3d1f2f);
+    }
+    100% {
+        background: linear-gradient(45deg, #4a1942, #1f0a1f, #3d1f47);
+    }
+}
+
+@keyframes backgroundCycle180 {
+    0% {
+        background: linear-gradient(315deg, #4a1942, #1f0a1f, #3d1f47);
+    }
+    14% {
+        background: linear-gradient(315deg, #4a1f0a, #1f0a00, #3d2a1f);
+    }
+    28% {
+        background: linear-gradient(315deg, #4a4a0a, #1f1f00, #3d3d1f);
+    }
+    42% {
+        background: linear-gradient(315deg, #0a4a0a, #001f00, #1f3d1f);
+    }
+    56% {
+        background: linear-gradient(315deg, #0a1f4a, #001f1f, #1f2a3d);
+    }
+    70% {
+        background: linear-gradient(315deg, #2a0a4a, #0f001f, #2f1f3d);
+    }
+    84% {
+        background: linear-gradient(315deg, #4a0a2a, #1f000f, #3d1f2f);
+    }
+    100% {
+        background: linear-gradient(315deg, #4a1942, #1f0a1f, #3d1f47);
+    }
+}
+
+@keyframes backgroundCycle270 {
+    0% {
+        background: linear-gradient(225deg, #4a1942, #1f0a1f, #3d1f47);
+    }
+    14% {
+        background: linear-gradient(225deg, #4a1f0a, #1f0a00, #3d2a1f);
+    }
+    28% {
+        background: linear-gradient(225deg, #4a4a0a, #1f1f00, #3d3d1f);
+    }
+    42% {
+        background: linear-gradient(225deg, #0a4a0a, #001f00, #1f3d1f);
+    }
+    56% {
+        background: linear-gradient(225deg, #0a1f4a, #001f1f, #1f2a3d);
+    }
+    70% {
+        background: linear-gradient(225deg, #2a0a4a, #0f001f, #2f1f3d);
+    }
+    84% {
+        background: linear-gradient(225deg, #4a0a2a, #1f000f, #3d1f2f);
+    }
+    100% {
+        background: linear-gradient(225deg, #4a1942, #1f0a1f, #3d1f47);
     }
 }
 
