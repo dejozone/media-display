@@ -1086,10 +1086,10 @@ function animateProgressComet() {
     
     // **OPTIMIZATION: Only update every 50ms instead of every frame**
     // Reduces from 60fps to 20fps - still smooth but 66% less CPU
-    if (elapsed < 50) {
-        progressState.animationFrameId = requestAnimationFrame(animateProgressComet);
-        return;
-    }
+    // if (elapsed < 50) {
+    //     progressState.animationFrameId = requestAnimationFrame(animateProgressComet);
+    //     return;
+    // }
     
     progressState.progressMs = Math.min(progressState.progressMs + elapsed, progressState.durationMs);
     progressState.lastUpdateTime = now;
@@ -1295,27 +1295,19 @@ function triggerShootingStar() {
 function startShootingStarSpawning() {
     if (sunriseAnimationState.shootingStarInterval) return; // Already running
     
-    // Trigger shooting stars at random intervals between 2-8 seconds
-    const scheduleNextBatch = () => {
+    // Trigger one shooting star at random intervals between 2-8 seconds
+    const scheduleNextStar = () => {
         const delay = Math.random() * 6000 + 2000; // 2-8 seconds
         sunriseAnimationState.shootingStarInterval = setTimeout(() => {
-            // Randomly spawn 1, 2, or 3 stars at a time
-            const numStars = Math.floor(Math.random() * 3) + 1; // 1-3 stars
-            for (let i = 0; i < numStars; i++) {
-                // Add slight delay between multiple stars for natural effect
-                setTimeout(() => triggerShootingStar(), i * 100);
-            }
-            scheduleNextBatch(); // Schedule the next batch
+            triggerShootingStar(); // Spawn a single star
+            scheduleNextStar(); // Schedule the next star
         }, delay);
     };
     
-    // Trigger first batch immediately (1-3 stars)
-    const initialStars = Math.floor(Math.random() * 3) + 1;
-    for (let i = 0; i < initialStars; i++) {
-        setTimeout(() => triggerShootingStar(), i * 100);
-    }
-    // Schedule subsequent batches
-    scheduleNextBatch();
+    // Trigger first star immediately
+    triggerShootingStar();
+    // Schedule subsequent stars
+    scheduleNextStar();
 }
 
 // Stop shooting star spawning
