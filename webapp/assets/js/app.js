@@ -123,7 +123,7 @@ async function loadScreensaverImages() {
     } catch (error) {
         console.error('Error loading screensaver images:', error);
         // Fallback to default image
-        screensaverImages = ['assets/cat.jpg'];
+        screensaverImages = ['assets/images/cat.jpg'];
         screensaverImagesLoaded = true;
         return screensaverImages;
     }

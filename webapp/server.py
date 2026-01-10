@@ -10,8 +10,9 @@ import sys
 import signal
 import threading
 import socket
+import json
 from dotenv import load_dotenv
-from flask import Flask, send_from_directory, send_file, request
+from flask import Flask, send_from_directory, send_file, request, jsonify
 from flask_cors import CORS
 # Utility function to get local IP addresses
 def get_local_ip():
@@ -62,10 +63,25 @@ def index():
 
 @app.route('/<path:path>')
 def serve_static(path):
-    """Serve static files"""
+    """Serve static files or directory listings"""
+    # Check if it's a directory
+    if os.path.isdir(path):
+        # Return JSON list of files in directory
+        try:
+            files = []
+            for filename in os.listdir(path):
+                filepath = os.path.join(path, filename)
+                if os.path.isfile(filepath):
+                    files.append(filename)
+            return jsonify(files)
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+    
+    # If it's a file, serve it
     if os.path.isfile(path):
         return send_from_directory('.', path)
-    # If file not found, return 404
+    
+    # If neither file nor directory found, return 404
     return "File not found", 404
 
 @app.after_request
