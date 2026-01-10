@@ -184,72 +184,52 @@ body::before {
     z-index: 9999;
     opacity: 0;
     transition: opacity 0.5s ease;
+    /* GPU acceleration for better performance */
+    will-change: opacity;
+    transform: translateZ(0);
+    backface-visibility: hidden;
 }
 
 body.disconnected::before,
 body.connecting::before {
     opacity: 1;
     box-shadow: 
-        inset 0 0 30px rgba(255, 182, 193, 0.4),
-        inset 0 0 60px rgba(176, 224, 230, 0.3),
-        inset 0 0 90px rgba(221, 160, 221, 0.3),
-        0 0 30px rgba(255, 182, 193, 0.4),
-        0 0 60px rgba(176, 224, 230, 0.3),
-        0 0 90px rgba(221, 160, 221, 0.3);
+        inset 0 0 25px rgba(239, 68, 68, 0.4),
+        0 0 25px rgba(220, 38, 38, 0.4);
     animation: borderGlow 3s ease-in-out infinite;
 }
 
 body.connected::before {
     opacity: 1;
     box-shadow: 
-        inset 0 0 30px rgba(144, 238, 144, 0.4),
-        inset 0 0 60px rgba(152, 251, 152, 0.3),
-        inset 0 0 90px rgba(34, 139, 34, 0.3),
-        0 0 30px rgba(144, 238, 144, 0.4),
-        0 0 60px rgba(152, 251, 152, 0.3),
-        0 0 90px rgba(34, 139, 34, 0.3);
+        inset 0 0 25px rgba(255, 255, 255, 0.3),
+        0 0 25px rgba(255, 255, 255, 0.3);
     animation: borderGlowGreen 3s ease-in-out infinite, fadeOutGlow 10s ease-out forwards;
 }
 
 @keyframes borderGlow {
     0%, 100% {
         box-shadow: 
-            inset 0 0 15px rgba(255, 182, 193, 0.25),
-            inset 0 0 25px rgba(176, 224, 230, 0.2),
-            inset 0 0 35px rgba(221, 160, 221, 0.15),
-            0 0 15px rgba(255, 182, 193, 0.25),
-            0 0 25px rgba(176, 224, 230, 0.2),
-            0 0 35px rgba(221, 160, 221, 0.15);
+            inset 0 0 20px rgba(239, 68, 68, 0.35),
+            0 0 20px rgba(220, 38, 38, 0.35);
     }
     50% {
         box-shadow: 
-            inset 0 0 20px rgba(255, 182, 193, 0.35),
-            inset 0 0 35px rgba(176, 224, 230, 0.3),
-            inset 0 0 45px rgba(221, 160, 221, 0.25),
-            0 0 20px rgba(255, 182, 193, 0.35),
-            0 0 35px rgba(176, 224, 230, 0.3),
-            0 0 45px rgba(221, 160, 221, 0.25);
+            inset 0 0 25px rgba(239, 68, 68, 0.45),
+            0 0 25px rgba(220, 38, 38, 0.45);
     }
 }
 
 @keyframes borderGlowGreen {
     0%, 100% {
         box-shadow: 
-            inset 0 0 15px rgba(144, 238, 144, 0.25),
-            inset 0 0 25px rgba(152, 251, 152, 0.2),
-            inset 0 0 35px rgba(34, 139, 34, 0.15),
-            0 0 15px rgba(144, 238, 144, 0.25),
-            0 0 25px rgba(152, 251, 152, 0.2),
-            0 0 35px rgba(34, 139, 34, 0.15);
+            inset 0 0 20px rgba(255, 255, 255, 0.25),
+            0 0 20px rgba(255, 255, 255, 0.25);
     }
     50% {
         box-shadow: 
-            inset 0 0 20px rgba(144, 238, 144, 0.35),
-            inset 0 0 35px rgba(152, 251, 152, 0.3),
-            inset 0 0 45px rgba(34, 139, 34, 0.25),
-            0 0 20px rgba(144, 238, 144, 0.35),
-            0 0 35px rgba(152, 251, 152, 0.3),
-            0 0 45px rgba(34, 139, 34, 0.25);
+            inset 0 0 25px rgba(255, 255, 255, 0.3),
+            0 0 25px rgba(255, 255, 255, 0.3);
     }
 }
 
