@@ -1,27 +1,70 @@
-// Environment config
-const PROD_ENV = 'media-display.projecttechcycle.org'; // production hostname
-
-const LOCAL_CONFIG = {
-    WEBSOCKET_URL: null,
-    WEBSOCKET_PORT: 5001,
-    WEBSOCKET_SSL_CERT_VERIFY: false, // For local testing with self-signed certs
-    WEBSOCKET_SUB_PATH: '/notis/media-display/socket.io',
-    DEF_ALBUM_ART_PATH: 'assets/images/cat.jpg',
+// ===== CONSTANTS =====
+const CONFIG = {
+    PROD_ENV: 'media-display.projecttechcycle.org',
+    LOCAL: {
+        WEBSOCKET_URL: null,
+        WEBSOCKET_PORT: 5001,
+        WEBSOCKET_SSL_CERT_VERIFY: false,
+        WEBSOCKET_SUB_PATH: '/notis/media-display/socket.io',
+        DEF_ALBUM_ART_PATH: 'assets/images/cat.jpg',
+    },
+    PROD: {
+        WEBSOCKET_URL: null,
+        WEBSOCKET_PORT: null,
+        WEBSOCKET_SSL_CERT_VERIFY: true,
+        WEBSOCKET_SUB_PATH: '/notis/media-display/socket.io',
+        DEF_ALBUM_ART_PATH: 'assets/images/cat.jpg',
+    },
+    MAX_RECONNECT_ATTEMPTS: 10,
+    CURSOR_HIDE_DELAY: 3000,
+    SCREENSAVER_REFRESH_INTERVAL: 300000,
+    LABEL_TIMEOUT: 5000,
+    AUTO_COLLAPSE_TIMEOUT: 10000,
+    TRIPLE_CLICK_TIMEOUT: 600
 };
 
-const PROD_CONFIG = {
-    WEBSOCKET_URL: null, // Will be determined dynamically if not set
-    WEBSOCKET_PORT: null,
-    WEBSOCKET_SSL_CERT_VERIFY: true, // MUST set to true in production
-    WEBSOCKET_SUB_PATH: '/notis/media-display/socket.io',
-    DEF_ALBUM_ART_PATH: 'assets/images/cat.jpg',
-}
+const EFFECT_STATES = {
+    GLOW: ['off', 'all-colors', 'white', 'white-fast', 'all-colors-fast', 'album-colors', 'album-colors-fast'],
+    EQUALIZER: ['off', 'normal', 'border-white', 'white', 'navy', 'blue-spectrum', 'colors', 'spectrum', 'bass-white-glow', 'bass-color-glow'],
+    PROGRESS: ['off', 'comet', 'album-comet', 'across-comet', 'sunrise', 'blended-sunrise', 'equalizer-fill']
+};
 
-// Auto-detect environment based on hostname
+const EFFECT_NAMES = {
+    GLOW: {
+        'off': 'Off',
+        'all-colors': 'Colors',
+        'white': 'White',
+        'white-fast': 'Fast White',
+        'all-colors-fast': 'Fast Colors',
+        'album-colors': 'Album Colors',
+        'album-colors-fast': 'Fast Album Colors'
+    },
+    EQUALIZER: {
+        'off': 'Off',
+        'normal': 'Normal',
+        'border-white': 'White Border',
+        'white': 'White',
+        'navy': 'Navy',
+        'blue-spectrum': 'Blue Spectrum',
+        'colors': 'Colors',
+        'spectrum': 'Color Spectrum',
+        'bass-white-glow': 'Fast White Album Glow',
+        'bass-color-glow': 'Fast Color Album Glow'
+    },
+    PROGRESS: {
+        'off': 'Off',
+        'comet': 'Edge Comet',
+        'album-comet': 'Album Comet',
+        'across-comet': 'Across Comet',
+        'sunrise': 'Sunrise & Sunset',
+        'blended-sunrise': 'Blended Sunrise & Sunset',
+        'equalizer-fill': 'Equalizer Fill'
+    }
+};
+
+// ===== CONFIGURATION SETUP =====
 const hostname = window.location.hostname;
-
-// Select configuration based on environment
-const selectedConfig = hostname === PROD_ENV ? PROD_CONFIG : LOCAL_CONFIG;
+const selectedConfig = hostname === CONFIG.PROD_ENV ? CONFIG.PROD : CONFIG.LOCAL;
 
 // Determine WebSocket URL
 let WEBSOCKET_URL;
@@ -190,66 +233,72 @@ function hideScreensaverError() {
     // This will be called when ready to retry images
 }
 
-// Glow effect state management
-let glowState = 'off'; // 'off', 'all-colors', 'white', 'white-fast', 'all-colors-fast', 'album-colors', 'album-colors-fast'
-const GLOW_STATES = ['off', 'all-colors', 'white', 'white-fast', 'all-colors-fast', 'album-colors', 'album-colors-fast'];
-
-// Equalizer state management
-let equalizerState = 'off'; // 'off', 'normal', 'colors', 'white'
-const EQUALIZER_STATES = ['off', 'normal', 'border-white', 'white', 'navy', 'blue-spectrum', 'colors', 'spectrum',  'bass-white-glow', 'bass-color-glow'];
-let isPlaying = false; // Track current playback state
-let equalizerAutoEnabled = false; // Track if equalizer was auto-enabled by progress effect
-
-// Progress effect state management
-let progressEffectState = 'off'; // 'off', 'comet', 'album-comet', 'across-comet', 'sunrise', 'blended-sunrise', 'equalizer-fill'
-const PROGRESS_EFFECT_STATES = ['off', 'comet', 'album-comet', 'across-comet', 'sunrise', 'blended-sunrise', 'equalizer-fill'];
-
-// Effect name mappings for UI labels
-const GLOW_EFFECT_NAMES = {
-    'off': 'Off',
-    'all-colors': 'Colors',
-    'white': 'White',
-    'white-fast': 'Fast White',
-    'all-colors-fast': 'Fast Colors',
-    'album-colors': 'Album Colors',
-    'album-colors-fast': 'Fast Album Colors'
+// ===== UTILITY FUNCTIONS =====
+const utils = {
+    color: {
+        getLuminance(r, g, b) {
+            const [rs, gs, bs] = [r, g, b].map(val => {
+                val = val / 255;
+                return val <= 0.03928 ? val / 12.92 : Math.pow((val + 0.055) / 1.055, 2.4);
+            });
+            return 0.2126 * rs + 0.7152 * gs + 0.0722 * bs;
+        },
+        
+        brighten(color, factor = 2.5) {
+            const brightness = (color.r + color.g + color.b) / 3;
+            let adjustFactor = factor;
+            
+            if (brightness < 60) {
+                adjustFactor = Math.max(3.5, 200 / brightness);
+            } else if (brightness < 100) {
+                adjustFactor = Math.max(2.8, 150 / brightness);
+            }
+            
+            return {
+                r: Math.min(255, Math.round(color.r * adjustFactor)),
+                g: Math.min(255, Math.round(color.g * adjustFactor)),
+                b: Math.min(255, Math.round(color.b * adjustFactor))
+            };
+        },
+        
+        toRGBA(color, alpha = 1) {
+            return `rgba(${color.r}, ${color.g}, ${color.b}, ${alpha})`;
+        }
+    },
+    
+    storage: {
+        get(key) {
+            return localStorage.getItem(key);
+        },
+        
+        set(key, value) {
+            localStorage.setItem(key, value);
+        },
+        
+        getInt(key, defaultValue = 0) {
+            const value = localStorage.getItem(key);
+            return value ? parseInt(value) : defaultValue;
+        }
+    }
 };
 
-const EQUALIZER_EFFECT_NAMES = {
-    'off': 'Off',
-    'normal': 'Normal',
-    'border-white': 'White Border',
-    'white': 'White',
-    'navy': 'Navy',
-    'blue-spectrum': 'Blue Spectrum',
-    'colors': 'Colors',
-    'spectrum': 'Color Spectrum',
-    'bass-white-glow': 'Fast White Album Glow',
-    'bass-color-glow': 'Fast Color Album Glow'
-};
-
-const PROGRESS_EFFECT_NAMES = {
-    'off': 'Off',
-    'comet': 'Edge Comet',
-    'album-comet': 'Album Comet',
-    'across-comet': 'Across Comet',
-    'sunrise': 'Sunrise & Sunset',
-    'blended-sunrise': 'Blended Sunrise & Sunset',
-    'equalizer-fill': 'Equalizer Fill'
-};
+// ===== STATE MANAGEMENT =====
+let glowState = 'off';
+let equalizerState = 'off';
+let isPlaying = false;
+let equalizerAutoEnabled = false;
+let progressEffectState = 'off';
 
 // WebSocket connection
 let socket = null;
 let reconnectAttempts = 0;
-const MAX_RECONNECT_ATTEMPTS = 10;
-let currentDeviceList = []; // Store full device list
-let currentAlbumName = ''; // Store current album name
-let currentAlbumColors = []; // Store colors extracted from album art
-let rotationState = 0; // 0, 90, 180, 270 degrees
+let currentDeviceList = [];
+let currentAlbumName = '';
+let currentAlbumColors = [];
+let rotationState = 0;
 
 // Cursor auto-hide in fullscreen
 let cursorHideTimeout = null;
-const CURSOR_HIDE_DELAY = 3000; // Hide cursor after 3 seconds of inactivity
 
 // Progress tracking for comet animation
 let progressState = {
@@ -282,7 +331,7 @@ function connectWebSocket() {
         reconnection: true,
         reconnectionDelay: 1000,
         reconnectionDelayMax: 5000,
-        reconnectionAttempts: MAX_RECONNECT_ATTEMPTS
+        reconnectionAttempts: CONFIG.MAX_RECONNECT_ATTEMPTS
     });
     
     // Connection events
@@ -323,7 +372,7 @@ function connectWebSocket() {
             elements.equalizer.classList.add('hidden');
         }
         
-        if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+        if (reconnectAttempts >= CONFIG.MAX_RECONNECT_ATTEMPTS) {
             showLoading('Connection failed. Refresh to retry.');
         }
     });
@@ -613,14 +662,7 @@ function showNowPlaying() {
 
 // Calculate relative luminance (WCAG formula)
 function getLuminance(r, g, b) {
-    // Normalize RGB values
-    const [rs, gs, bs] = [r, g, b].map(val => {
-        val = val / 255;
-        return val <= 0.03928 ? val / 12.92 : Math.pow((val + 0.055) / 1.055, 2.4);
-    });
-    
-    // Calculate luminance
-    return 0.2126 * rs + 0.7152 * gs + 0.0722 * bs;
+    return utils.color.getLuminance(r, g, b);
 }
 
 // Extract dominant colors from image
@@ -2111,57 +2153,102 @@ function hideServiceLabel() {
 
 // Setup service icon click handlers
 function setupServiceIconHandlers() {
-    const sonosIcon = document.getElementById('service-sonos');
-    const spotifyIcon = document.getElementById('service-spotify');
-    const playbackStatus = document.getElementById('playback-status');
     const appSettings = document.getElementById('app-settings');
     const label = document.getElementById('service-label');
     let autoCollapseTimer = null;
     
-    // Function to stop auto-collapse timer
-    function stopAutoCollapseTimer() {
-        if (autoCollapseTimer) {
-            clearTimeout(autoCollapseTimer);
-            autoCollapseTimer = null;
+    // Dock timer management functions
+    const dockTimer = {
+        stop: () => {
+            if (autoCollapseTimer) {
+                clearTimeout(autoCollapseTimer);
+                autoCollapseTimer = null;
+            }
+        },
+        start: () => {
+            dockTimer.stop();
+            autoCollapseTimer = setTimeout(() => {
+                if (appSettings.classList.contains('expanded')) {
+                    dockTimer.collapse();
+                }
+            }, 10000);
+        },
+        collapse: () => {
+            appSettings.classList.remove('expanded');
+            dockTimer.stop();
+        },
+        expand: () => {
+            appSettings.classList.add('expanded');
+            dockTimer.start();
+        },
+        reset: () => {
+            if (appSettings.classList.contains('expanded')) {
+                dockTimer.start();
+            }
         }
-    }
+    };
     
-    // Function to collapse dock
-    function collapseSettings() {
-        appSettings.classList.remove('expanded');
-        stopAutoCollapseTimer();
-    }
-    
-    // Function to expand dock
-    function expandSettings() {
-        appSettings.classList.add('expanded');
-        startAutoCollapseTimer();
-    }
-    
-    // Function to start auto-collapse timer
-    function startAutoCollapseTimer() {
-        // Clear any existing timer
-        if (autoCollapseTimer) {
-            clearTimeout(autoCollapseTimer);
+    // Event handler factory - creates all event listeners for an icon
+    const createIconHandlers = (element, config) => {
+        if (!element) return;
+        
+        const {
+            onClick,
+            onHover,
+            label: getLabel,
+            preventClick = false
+        } = config;
+        
+        // Click handler
+        if (onClick || preventClick) {
+            element.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (!preventClick && onClick) {
+                    onClick(e);
+                }
+                if (getLabel) {
+                    showServiceLabel(typeof getLabel === 'function' ? getLabel() : getLabel, element);
+                }
+                dockTimer.reset();
+            });
         }
         
-        // Set new timer for 10 seconds
-        autoCollapseTimer = setTimeout(() => {
-            if (appSettings.classList.contains('expanded')) {
-                collapseSettings();
-            }
-        }, 10000);
-    }
+        // Touch handler
+        if (onClick || preventClick) {
+            element.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (!preventClick && onClick) {
+                    onClick(e);
+                }
+                if (getLabel) {
+                    showServiceLabel(typeof getLabel === 'function' ? getLabel() : getLabel, element);
+                }
+                dockTimer.reset();
+            });
+        }
+        
+        // Hover handlers
+        if (onHover !== false) {
+            element.addEventListener('mouseenter', () => {
+                const labelText = onHover 
+                    ? (typeof onHover === 'function' ? onHover() : onHover)
+                    : (typeof getLabel === 'function' ? getLabel() : getLabel);
+                if (labelText) {
+                    showServiceLabel(labelText, element);
+                }
+            });
+            
+            element.addEventListener('mouseleave', () => {
+                hideServiceLabel();
+            });
+        }
+    };
     
-    // Flag to prevent double-firing on touch devices
+    // Touch handling for dock toggle
     let touchHandled = false;
+    let touchStartX = 0, touchStartY = 0, touchStartTime = 0;
     
-    // Track touch start position to distinguish taps from swipes
-    let touchStartX = 0;
-    let touchStartY = 0;
-    let touchStartTime = 0;
-    
-    // Listen for touch start to record initial position
     document.body.addEventListener('touchstart', (e) => {
         const touch = e.touches[0];
         touchStartX = touch.clientX;
@@ -2169,93 +2256,53 @@ function setupServiceIconHandlers() {
         touchStartTime = Date.now();
     }, { passive: true });
     
-    // Canvas-wide touch handler (fires first on touch devices)
     document.body.addEventListener('touchend', (e) => {
         const touch = e.changedTouches[0];
-        const touchEndX = touch.clientX;
-        const touchEndY = touch.clientY;
-        const touchEndTime = Date.now();
-        
-        // Calculate movement distance
-        const deltaX = Math.abs(touchEndX - touchStartX);
-        const deltaY = Math.abs(touchEndY - touchStartY);
-        const duration = touchEndTime - touchStartTime;
-        
-        // Determine if this was a tap or a swipe
-        // A tap should have minimal movement (< 10px) and be quick (< 300ms)
+        const deltaX = Math.abs(touch.clientX - touchStartX);
+        const deltaY = Math.abs(touch.clientY - touchStartY);
+        const duration = Date.now() - touchStartTime;
         const isTap = deltaX < 10 && deltaY < 10 && duration < 300;
         
-        // If this was a swipe, ignore it
-        if (!isTap) {
-            return;
-        }
+        if (!isTap) return;
         
         touchHandled = true;
         
-        // If touching inside the dock, reset the timer but don't toggle
         if (e.target.closest('#app-settings')) {
-            if (appSettings.classList.contains('expanded')) {
-                startAutoCollapseTimer();
-            }
-            // Reset flag after delay
+            dockTimer.reset();
             setTimeout(() => { touchHandled = false; }, 500);
             return;
         }
         
-        // If touching service label, don't toggle
         if (e.target === label || e.target.closest('.service-label')) {
-            // Reset flag after delay
             setTimeout(() => { touchHandled = false; }, 500);
             return;
         }
         
-        // Toggle dock visibility
-        if (appSettings.classList.contains('expanded')) {
-            collapseSettings();
-        } else {
-            expandSettings();
-        }
-        
-        // Reset flag after a short delay
+        appSettings.classList.contains('expanded') ? dockTimer.collapse() : dockTimer.expand();
         setTimeout(() => { touchHandled = false; }, 500);
     });
     
-    // Canvas-wide click handler (for mouse or as fallback)
+    // Click handling for dock toggle
     document.body.addEventListener('click', (e) => {
-        // Skip if this was a touch event
-        if (touchHandled) {
-            return;
-        }
+        if (touchHandled) return;
         
-        // If clicking inside the dock, reset the timer but don't toggle
         if (e.target.closest('#app-settings')) {
-            if (appSettings.classList.contains('expanded')) {
-                startAutoCollapseTimer();
-            }
+            dockTimer.reset();
             return;
         }
         
-        // If clicking on service label, don't toggle
         if (e.target === label || e.target.closest('.service-label')) {
             return;
         }
         
-        // Toggle dock visibility
-        if (appSettings.classList.contains('expanded')) {
-            collapseSettings();
-        } else {
-            expandSettings();
-        }
+        appSettings.classList.contains('expanded') ? dockTimer.collapse() : dockTimer.expand();
     });
     
-    // Prevent label clicks from closing itself
-    label.addEventListener('click', (e) => {
-        e.stopPropagation();
-    });
+    // Prevent label from closing itself
+    label.addEventListener('click', (e) => e.stopPropagation());
     
-    // Close label when clicking anywhere on the page
+    // Close label when clicking elsewhere
     document.addEventListener('click', (e) => {
-        // Check if label is visible and click is not on service status icons or device name
         if (label.classList.contains('show') && 
             !e.target.closest('#app-settings') &&
             !e.target.closest('.device-info') &&
@@ -2264,396 +2311,114 @@ function setupServiceIconHandlers() {
         }
     });
     
-    // Show all devices when clicking or hovering device name
-    if (elements.deviceName) {
-        elements.deviceName.addEventListener('click', (e) => {
-            e.stopPropagation();
+    // Setup all icon handlers using factory
+    createIconHandlers(document.getElementById('service-sonos'), {
+        label: 'Sonos Enabled'
+    });
+    
+    createIconHandlers(document.getElementById('service-spotify'), {
+        label: 'Spotify Enabled'
+    });
+    
+    createIconHandlers(document.getElementById('playback-status'), {
+        label: () => {
+            const statusText = isPlaying ? 'Playing on' : 'Paused on';
+            if (currentDeviceList.length > 0) {
+                const deviceDisplay = currentDeviceList.length === 1 
+                    ? currentDeviceList[0] 
+                    : `${currentDeviceList[0]} +${currentDeviceList.length - 1} more`;
+                return `${statusText} ${deviceDisplay}`;
+            }
+            return isPlaying ? 'Playing' : 'Paused';
+        }
+    });
+    
+    createIconHandlers(document.querySelector('#now-playing .album-art-container'), {
+        label: () => currentAlbumName
+    });
+    
+    createIconHandlers(document.getElementById('rotation-icon'), {
+        onClick: () => rotateDisplay(),
+        label: () => {
+            const degrees = rotationState === 0 ? '0°' : `${rotationState}°`;
+            return `Rotation: ${degrees}`;
+        }
+    });
+    
+    createIconHandlers(document.getElementById('glow-icon'), {
+        onClick: () => cycleGlowState(),
+        onHover: () => EFFECT_NAMES.GLOW[glowState]
+    });
+    
+    createIconHandlers(document.getElementById('equalizer-icon'), {
+        onClick: (e) => {
+            if (document.body.classList.contains('no-playback-active')) {
+                showServiceLabel('Equalizer unavailable in screensaver mode', e.target);
+                return;
+            }
+            cycleEqualizerState();
+        },
+        onHover: () => EFFECT_NAMES.EQUALIZER[equalizerState]
+    });
+    
+    createIconHandlers(document.getElementById('progress-effect-icon'), {
+        onClick: (e) => {
+            if (document.body.classList.contains('no-playback-active')) {
+                showServiceLabel('Progress effects unavailable in screensaver mode', e.target);
+                return;
+            }
+            cycleProgressEffectState();
+        },
+        onHover: () => EFFECT_NAMES.PROGRESS[progressEffectState]
+    });
+    
+    createIconHandlers(document.getElementById('reset-icon'), {
+        onClick: () => resetAllEffects(),
+        label: 'Reset All Effects'
+    });
+    
+    createIconHandlers(document.getElementById('fullscreen-icon'), {
+        onClick: () => toggleFullscreen(),
+        onHover: () => {
+            const isFullscreen = document.fullscreenElement || document.webkitFullscreenElement;
+            return isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen';
+        }
+    });
+    
+    // Device name handlers
+    const deviceName = elements.deviceName;
+    if (deviceName) {
+        const getDeviceLabel = () => {
             if (currentDeviceList.length > 0) {
                 const statusText = isPlaying ? 'Playing on' : 'Paused on';
-                const allDevices = currentDeviceList.join('\n');
-                showServiceLabel(`${statusText}:\n${allDevices}`, elements.deviceName, true);
+                return `${statusText}:\n${currentDeviceList.join('\n')}`;
             }
+            return null;
+        };
+        
+        deviceName.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const labelText = getDeviceLabel();
+            if (labelText) showServiceLabel(labelText, deviceName, true);
         });
         
-        elements.deviceName.addEventListener('touchend', (e) => {
+        deviceName.addEventListener('touchend', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            if (currentDeviceList.length > 0) {
-                const statusText = isPlaying ? 'Playing on' : 'Paused on';
-                const allDevices = currentDeviceList.join('\n');
-                showServiceLabel(`${statusText}:\n${allDevices}`, elements.deviceName, true);
-            }
+            const labelText = getDeviceLabel();
+            if (labelText) showServiceLabel(labelText, deviceName, true);
         });
         
-        elements.deviceName.addEventListener('mouseenter', () => {
-            if (currentDeviceList.length > 0) {
-                const statusText = isPlaying ? 'Playing on' : 'Paused on';
-                const allDevices = currentDeviceList.join('\n');
-                showServiceLabel(`${statusText}:\n${allDevices}`, elements.deviceName, true);
-            }
+        deviceName.addEventListener('mouseenter', () => {
+            const labelText = getDeviceLabel();
+            if (labelText) showServiceLabel(labelText, deviceName, true);
         });
         
-        elements.deviceName.addEventListener('mouseleave', () => {
+        deviceName.addEventListener('mouseleave', () => {
             hideServiceLabel();
         });
     }
     
-    // Service icon handlers
-    sonosIcon.addEventListener('click', (e) => {
-        e.stopPropagation();
-        showServiceLabel('Sonos Enabled', sonosIcon);
-        // Reset timer when icon is clicked
-        if (appSettings.classList.contains('expanded')) {
-            startAutoCollapseTimer();
-        }
-    });
-    
-    sonosIcon.addEventListener('touchend', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        showServiceLabel('Sonos Enabled', sonosIcon);
-        // Reset timer when icon is touched
-        if (appSettings.classList.contains('expanded')) {
-            startAutoCollapseTimer();
-        }
-    });
-    
-    sonosIcon.addEventListener('mouseenter', () => {
-        showServiceLabel('Sonos Enabled', sonosIcon);
-    });
-    
-    sonosIcon.addEventListener('mouseleave', () => {
-        hideServiceLabel();
-    });
-    
-    spotifyIcon.addEventListener('click', (e) => {
-        e.stopPropagation();
-        showServiceLabel('Spotify Enabled', spotifyIcon);
-        // Reset timer when icon is clicked
-        if (appSettings.classList.contains('expanded')) {
-            startAutoCollapseTimer();
-        }
-    });
-    
-    spotifyIcon.addEventListener('touchend', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        showServiceLabel('Spotify Enabled', spotifyIcon);
-        // Reset timer when icon is touched
-        if (appSettings.classList.contains('expanded')) {
-            startAutoCollapseTimer();
-        }
-    });
-    
-    spotifyIcon.addEventListener('mouseenter', () => {
-        showServiceLabel('Spotify Enabled', spotifyIcon);
-    });
-    
-    spotifyIcon.addEventListener('mouseleave', () => {
-        hideServiceLabel();
-    });
-    
-    playbackStatus.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const statusText = isPlaying ? 'Playing on' : 'Paused on';
-        
-        // Add device info if available
-        if (currentDeviceList.length > 0) {
-            const deviceDisplay = currentDeviceList.length === 1 
-                ? currentDeviceList[0] 
-                : `${currentDeviceList[0]} +${currentDeviceList.length - 1} more`;
-            showServiceLabel(`${statusText} ${deviceDisplay}`, playbackStatus);
-        } else {
-            // If no device info, show just the status
-            showServiceLabel(isPlaying ? 'Playing' : 'Paused', playbackStatus);
-        }
-        
-        // Reset timer when icon is clicked
-        if (appSettings.classList.contains('expanded')) {
-            startAutoCollapseTimer();
-        }
-    });
-    
-    playbackStatus.addEventListener('touchend', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const statusText = isPlaying ? 'Playing on' : 'Paused on';
-        
-        // Add device info if available
-        if (currentDeviceList.length > 0) {
-            const deviceDisplay = currentDeviceList.length === 1 
-                ? currentDeviceList[0] 
-                : `${currentDeviceList[0]} +${currentDeviceList.length - 1} more`;
-            showServiceLabel(`${statusText} ${deviceDisplay}`, playbackStatus);
-        } else {
-            // If no device info, show just the status
-            showServiceLabel(isPlaying ? 'Playing' : 'Paused', playbackStatus);
-        }
-        
-        // Reset timer when icon is touched
-        if (appSettings.classList.contains('expanded')) {
-            startAutoCollapseTimer();
-        }
-    });
-    
-    playbackStatus.addEventListener('mouseenter', () => {
-        const statusText = isPlaying ? 'Playing on' : 'Paused on';
-        
-        // Add device info if available
-        if (currentDeviceList.length > 0) {
-            const deviceDisplay = currentDeviceList.length === 1 
-                ? currentDeviceList[0] 
-                : `${currentDeviceList[0]} +${currentDeviceList.length - 1} more`;
-            showServiceLabel(`${statusText} ${deviceDisplay}`, playbackStatus);
-        } else {
-            // If no device info, show just the status
-            showServiceLabel(isPlaying ? 'Playing' : 'Paused', playbackStatus);
-        }
-    });
-    
-    playbackStatus.addEventListener('mouseleave', () => {
-        hideServiceLabel();
-    });
-    
-    // Show album name when hovering or clicking album art (now-playing state only)
-    const albumArtContainer = document.querySelector('#now-playing .album-art-container');
-    
-    if (albumArtContainer) {
-        albumArtContainer.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (currentAlbumName) {
-                showServiceLabel(currentAlbumName, albumArtContainer);
-            }
-        });
-        
-        albumArtContainer.addEventListener('touchend', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            if (currentAlbumName) {
-                showServiceLabel(currentAlbumName, albumArtContainer);
-            }
-        });
-        
-        albumArtContainer.addEventListener('mouseenter', () => {
-            if (currentAlbumName) {
-                showServiceLabel(currentAlbumName, albumArtContainer);
-            }
-        });
-        
-        albumArtContainer.addEventListener('mouseleave', () => {
-            hideServiceLabel();
-        });
-    }
-    
-    // Rotation icon click handler
-    const rotationIcon = document.getElementById('rotation-icon');
-    
-    rotationIcon.addEventListener('click', (e) => {
-        e.stopPropagation();
-        rotateDisplay();
-        const degrees = rotationState === 0 ? '0°' : `${rotationState}°`;
-        showServiceLabel(`Rotation: ${degrees}`, rotationIcon);
-        // Reset timer when icon is clicked
-        if (appSettings.classList.contains('expanded')) {
-            startAutoCollapseTimer();
-        }
-    });
-    
-    rotationIcon.addEventListener('touchend', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        rotateDisplay();
-        const degrees = rotationState === 0 ? '0°' : `${rotationState}°`;
-        showServiceLabel(`Rotation: ${degrees}`, rotationIcon);
-        // Reset timer when icon is touched
-        if (appSettings.classList.contains('expanded')) {
-            startAutoCollapseTimer();
-        }
-    });
-    
-    rotationIcon.addEventListener('mouseenter', () => {
-        const degrees = rotationState === 0 ? '0°' : `${rotationState}°`;
-        showServiceLabel(`Rotation: ${degrees}`, rotationIcon);
-    });
-    
-    rotationIcon.addEventListener('mouseleave', () => {
-        hideServiceLabel();
-    });
-    
-    // Glow icon click handler
-    const glowIcon = document.getElementById('glow-icon');
-    
-    glowIcon.addEventListener('click', (e) => {
-        e.stopPropagation();
-        cycleGlowState();
-        // Reset timer when icon is clicked
-        if (appSettings.classList.contains('expanded')) {
-            startAutoCollapseTimer();
-        }
-    });
-    
-    glowIcon.addEventListener('touchend', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        cycleGlowState();
-        // Reset timer when icon is touched
-        if (appSettings.classList.contains('expanded')) {
-            startAutoCollapseTimer();
-        }
-    });
-    
-    glowIcon.addEventListener('mouseenter', () => {
-        showServiceLabel(GLOW_EFFECT_NAMES[glowState], glowIcon);
-    });
-    
-    glowIcon.addEventListener('mouseleave', () => {
-        hideServiceLabel();
-    });
-    
-    // Equalizer icon click handler
-    const equalizerIcon = document.getElementById('equalizer-icon');
-    
-    equalizerIcon.addEventListener('click', (e) => {
-        e.stopPropagation();
-        
-        // Prevent toggling equalizer in screensaver mode
-        if (document.body.classList.contains('no-playback-active')) {
-            showServiceLabel('Equalizer unavailable in screensaver mode', equalizerIcon);
-            return;
-        }
-        
-        cycleEqualizerState();
-        // Reset timer when icon is clicked
-        if (appSettings.classList.contains('expanded')) {
-            startAutoCollapseTimer();
-        }
-    });
-    
-    equalizerIcon.addEventListener('touchend', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        
-        // Prevent toggling equalizer in screensaver mode
-        if (document.body.classList.contains('no-playback-active')) {
-            showServiceLabel('Equalizer unavailable in screensaver mode', equalizerIcon);
-            return;
-        }
-        
-        cycleEqualizerState();
-        // Reset timer when icon is touched
-        if (appSettings.classList.contains('expanded')) {
-            startAutoCollapseTimer();
-        }
-    });
-    
-    equalizerIcon.addEventListener('mouseenter', () => {
-        showServiceLabel(EQUALIZER_EFFECT_NAMES[equalizerState], equalizerIcon);
-    });
-    
-    equalizerIcon.addEventListener('mouseleave', () => {
-        hideServiceLabel();
-    });
-    
-    // Progress effect icon click handler
-    const progressEffectIcon = document.getElementById('progress-effect-icon');
-    
-    progressEffectIcon.addEventListener('click', (e) => {
-        e.stopPropagation();
-        
-        // Prevent toggling progress effect in screensaver mode
-        if (document.body.classList.contains('no-playback-active')) {
-            showServiceLabel('Progress effects unavailable in screensaver mode', progressEffectIcon);
-            return;
-        }
-        
-        cycleProgressEffectState();
-        // Reset timer when icon is clicked
-        if (appSettings.classList.contains('expanded')) {
-            startAutoCollapseTimer();
-        }
-    });
-    
-    progressEffectIcon.addEventListener('touchend', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        
-        // Prevent toggling progress effect in screensaver mode
-        if (document.body.classList.contains('no-playback-active')) {
-            showServiceLabel('Progress effects unavailable in screensaver mode', progressEffectIcon);
-            return;
-        }
-        
-        cycleProgressEffectState();
-        // Reset timer when icon is touched
-        if (appSettings.classList.contains('expanded')) {
-            startAutoCollapseTimer();
-        }
-    });
-    
-    progressEffectIcon.addEventListener('mouseenter', () => {
-        showServiceLabel(PROGRESS_EFFECT_NAMES[progressEffectState], progressEffectIcon);
-    });
-    
-    progressEffectIcon.addEventListener('mouseleave', () => {
-        hideServiceLabel();
-    });
-    
-    // Reset icon click handler - restore all effects to default
-    const resetIcon = document.getElementById('reset-icon');
-    
-    resetIcon.addEventListener('click', (e) => {
-        e.stopPropagation();
-        resetAllEffects();
-        showServiceLabel('Reset All Effects', resetIcon);
-        // Reset timer when icon is clicked
-        if (appSettings.classList.contains('expanded')) {
-            startAutoCollapseTimer();
-        }
-    });
-    
-    resetIcon.addEventListener('touchend', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        resetAllEffects();
-        showServiceLabel('Reset All Effects', resetIcon);
-        // Reset timer when icon is touched
-        if (appSettings.classList.contains('expanded')) {
-            startAutoCollapseTimer();
-        }
-    });
-    
-    resetIcon.addEventListener('mouseenter', () => {
-        showServiceLabel('Reset All Effects', resetIcon);
-    });
-    
-    resetIcon.addEventListener('mouseleave', () => {
-        hideServiceLabel();
-    });
-    
-    // Fullscreen icon click handler
-    const fullscreenIcon = document.getElementById('fullscreen-icon');
-    
-    fullscreenIcon.addEventListener('click', (e) => {
-        e.stopPropagation();
-        toggleFullscreen();
-    });
-    
-    fullscreenIcon.addEventListener('touchend', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        toggleFullscreen();
-    });
-    
-    fullscreenIcon.addEventListener('mouseenter', () => {
-        const isFullscreen = document.fullscreenElement || document.webkitFullscreenElement;
-        showServiceLabel(isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen', fullscreenIcon);
-    });
-    
-    fullscreenIcon.addEventListener('mouseleave', () => {
-        hideServiceLabel();
-    });
-    
-    // Update fullscreen icon state on initial load
     updateFullscreenIconState();
 }
 
@@ -2704,9 +2469,9 @@ function restoreRotation() {
 
 // Cycle through glow states: off -> all-colors -> white -> off
 function cycleGlowState() {
-    const currentIndex = GLOW_STATES.indexOf(glowState);
-    const nextIndex = (currentIndex + 1) % GLOW_STATES.length;
-    glowState = GLOW_STATES[nextIndex];
+    const currentIndex = EFFECT_STATES.GLOW.indexOf(glowState);
+    const nextIndex = (currentIndex + 1) % EFFECT_STATES.GLOW.length;
+    glowState = EFFECT_STATES.GLOW[nextIndex];
     
     // If enabling glow (not 'off'), disable bass glow equalizer modes
     if (glowState !== 'off' && (equalizerState === 'bass-white-glow' || equalizerState === 'bass-color-glow')) {
@@ -2725,7 +2490,7 @@ function cycleGlowState() {
     
     // Show label with effect name
     const glowIcon = document.getElementById('glow-icon');
-    showServiceLabel(GLOW_EFFECT_NAMES[glowState], glowIcon);
+    showServiceLabel(EFFECT_NAMES.GLOW[glowState], glowIcon);
     
     console.log('Glow state changed to:', glowState);
 }
@@ -2773,7 +2538,7 @@ function applyGlowState() {
 // Restore glow state from localStorage
 function restoreGlowState() {
     const savedGlow = localStorage.getItem('glowState');
-    if (savedGlow && GLOW_STATES.includes(savedGlow)) {
+    if (savedGlow && EFFECT_STATES.GLOW.includes(savedGlow)) {
         glowState = savedGlow;
     } else {
         glowState = 'off'; // Default to off
@@ -2785,9 +2550,9 @@ function restoreGlowState() {
 
 // Cycle through equalizer states: off -> colors -> white -> off
 function cycleEqualizerState() {
-    const currentIndex = EQUALIZER_STATES.indexOf(equalizerState);
-    const nextIndex = (currentIndex + 1) % EQUALIZER_STATES.length;
-    equalizerState = EQUALIZER_STATES[nextIndex];
+    const currentIndex = EFFECT_STATES.EQUALIZER.indexOf(equalizerState);
+    const nextIndex = (currentIndex + 1) % EFFECT_STATES.EQUALIZER.length;
+    equalizerState = EFFECT_STATES.EQUALIZER[nextIndex];
     
     // Clear auto-enabled flag when user manually changes equalizer
     equalizerAutoEnabled = false;
@@ -2807,7 +2572,7 @@ function cycleEqualizerState() {
     
     // Show label with effect name
     const equalizerIcon = document.getElementById('equalizer-icon');
-    showServiceLabel(EQUALIZER_EFFECT_NAMES[equalizerState], equalizerIcon);
+    showServiceLabel(EFFECT_NAMES.EQUALIZER[equalizerState], equalizerIcon);
 }
 
 // Apply current equalizer state
@@ -2923,7 +2688,7 @@ function updateEqualizerVisibility() {
 // Restore equalizer state from localStorage
 function restoreEqualizerState() {
     const savedEqualizer = localStorage.getItem('equalizerState');
-    if (savedEqualizer && EQUALIZER_STATES.includes(savedEqualizer)) {
+    if (savedEqualizer && EFFECT_STATES.EQUALIZER.includes(savedEqualizer)) {
         equalizerState = savedEqualizer;
     } else {
         equalizerState = 'off'; // Default to off
@@ -2935,9 +2700,9 @@ function restoreEqualizerState() {
 
 // Cycle through progress effect states
 function cycleProgressEffectState() {
-    const currentIndex = PROGRESS_EFFECT_STATES.indexOf(progressEffectState);
-    const nextIndex = (currentIndex + 1) % PROGRESS_EFFECT_STATES.length;
-    progressEffectState = PROGRESS_EFFECT_STATES[nextIndex];
+    const currentIndex = EFFECT_STATES.PROGRESS.indexOf(progressEffectState);
+    const nextIndex = (currentIndex + 1) % EFFECT_STATES.PROGRESS.length;
+    progressEffectState = EFFECT_STATES.PROGRESS[nextIndex];
     
     // Save to localStorage
     localStorage.setItem('progressEffectState', progressEffectState);
@@ -2947,7 +2712,7 @@ function cycleProgressEffectState() {
     
     // Show label with effect name
     const progressEffectIcon = document.getElementById('progress-effect-icon');
-    showServiceLabel(PROGRESS_EFFECT_NAMES[progressEffectState], progressEffectIcon);
+    showServiceLabel(EFFECT_NAMES.PROGRESS[progressEffectState], progressEffectIcon);
     
     console.log('Progress effect state changed to:', progressEffectState);
 }
@@ -3044,7 +2809,7 @@ function applyProgressEffectState() {
 // Restore progress effect state from localStorage
 function restoreProgressEffectState() {
     const savedEffect = localStorage.getItem('progressEffectState');
-    if (savedEffect && PROGRESS_EFFECT_STATES.includes(savedEffect)) {
+    if (savedEffect && EFFECT_STATES.PROGRESS.includes(savedEffect)) {
         progressEffectState = savedEffect;
     } else {
         progressEffectState = 'off'; // Default to off
