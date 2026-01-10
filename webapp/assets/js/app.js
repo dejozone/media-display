@@ -2575,6 +2575,18 @@ function cycleEqualizerState() {
     showServiceLabel(EFFECT_NAMES.EQUALIZER[equalizerState], equalizerIcon);
 }
 
+// Initialize bar index CSS custom properties for spectrum equalizer modes
+function initializeEqualizerBarIndices() {
+    const equalizer = elements.equalizer;
+    if (!equalizer) return;
+    
+    const bars = equalizer.querySelectorAll('.equalizer-bar');
+    bars.forEach((bar, index) => {
+        // Set 1-based index (bar 1 to 50)
+        bar.style.setProperty('--bar-index', index + 1);
+    });
+}
+
 // Apply current equalizer state
 function applyEqualizerState() {
     const equalizer = elements.equalizer;
@@ -3035,6 +3047,10 @@ function init() {
     restoreGlowState();
     restoreEqualizerState();
     restoreProgressEffectState();
+    
+    // Initialize equalizer bar indices for CSS custom property calculations
+    initializeEqualizerBarIndices();
+    
     setupServiceIconHandlers();
     
     // Start background refresh for screensaver images
