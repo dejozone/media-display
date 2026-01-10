@@ -61,25 +61,56 @@ def index():
     """Serve index.html"""
     return send_file('index.html')
 
+@app.route('/assets/images/screensavers/')
+@app.route('/assets/images/screensavers')
+def list_screensavers():
+    """List screensaver images"""
+    screensaver_dir = os.path.join(WEBAPP_DIR, 'assets', 'images', 'screensavers')
+    
+    if not os.path.exists(screensaver_dir):
+        return jsonify({"error": "Directory not found"}), 404
+    
+    try:
+        files = []
+        for filename in os.listdir(screensaver_dir):
+            filepath = os.path.join(screensaver_dir, filename)
+            if os.path.isfile(filepath):
+                # Only include common image extensions
+                if filename.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg')):
+                    files.append(filename)
+        files.sort()
+        return jsonify(files)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/<path:path>')
 def serve_static(path):
     """Serve static files or directory listings"""
+    # Resolve path relative to webapp directory
+    full_path = os.path.join(WEBAPP_DIR, path)
+    
     # Check if it's a directory
-    if os.path.isdir(path):
-        # Return JSON list of files in directory
-        try:
-            files = []
-            for filename in os.listdir(path):
-                filepath = os.path.join(path, filename)
-                if os.path.isfile(filepath):
-                    files.append(filename)
-            return jsonify(files)
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
+    if os.path.isdir(full_path):
+        # Only allow directory listing for screensavers path
+        normalized_path = path.rstrip('/')
+        if normalized_path == 'assets/images/screensavers':
+            # Return JSON list of files in directory
+            try:
+                files = []
+                for filename in os.listdir(full_path):
+                    filepath = os.path.join(full_path, filename)
+                    if os.path.isfile(filepath):
+                        files.append(filename)
+                return jsonify(files)
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+        else:
+            # Directory listing not allowed for other paths
+            return "Forbidden", 403
     
     # If it's a file, serve it
-    if os.path.isfile(path):
-        return send_from_directory('.', path)
+    if os.path.isfile(full_path):
+        return send_from_directory(WEBAPP_DIR, path)
     
     # If neither file nor directory found, return 404
     return "File not found", 404
