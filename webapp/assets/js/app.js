@@ -2153,8 +2153,40 @@ function setupServiceIconHandlers() {
     // Flag to prevent double-firing on touch devices
     let touchHandled = false;
     
+    // Track touch start position to distinguish taps from swipes
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let touchStartTime = 0;
+    
+    // Listen for touch start to record initial position
+    document.body.addEventListener('touchstart', (e) => {
+        const touch = e.touches[0];
+        touchStartX = touch.clientX;
+        touchStartY = touch.clientY;
+        touchStartTime = Date.now();
+    }, { passive: true });
+    
     // Canvas-wide touch handler (fires first on touch devices)
     document.body.addEventListener('touchend', (e) => {
+        const touch = e.changedTouches[0];
+        const touchEndX = touch.clientX;
+        const touchEndY = touch.clientY;
+        const touchEndTime = Date.now();
+        
+        // Calculate movement distance
+        const deltaX = Math.abs(touchEndX - touchStartX);
+        const deltaY = Math.abs(touchEndY - touchStartY);
+        const duration = touchEndTime - touchStartTime;
+        
+        // Determine if this was a tap or a swipe
+        // A tap should have minimal movement (< 10px) and be quick (< 300ms)
+        const isTap = deltaX < 10 && deltaY < 10 && duration < 300;
+        
+        // If this was a swipe, ignore it
+        if (!isTap) {
+            return;
+        }
+        
         touchHandled = true;
         
         // If touching inside the dock, reset the timer but don't toggle
