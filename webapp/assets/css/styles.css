@@ -1331,8 +1331,9 @@ body.rotate-270 .app-settings {
     z-index: 10;
     pointer-events: none;
     height: 80px;
+    overflow: visible;
     /* Add these performance hints */
-    contain: layout style paint;
+    contain: layout style;
     will-change: height;
 }
 
@@ -1386,9 +1387,10 @@ body.rotate-270 .equalizer {
     border-radius: 3px 3px 0 0;
     min-height: 10px;
     transition: background-color 0.3s ease;
+    overflow: visible;
     /* Add performance optimizations */
     will-change: height;
-    contain: layout style paint;
+    contain: layout style;
     transform: translateZ(0);
     backface-visibility: hidden;
     --bar-hue: 0; /* Set dynamically */
@@ -1401,10 +1403,9 @@ body:not(:has(.playback-status.playing)) .equalizer-bar {
 
 /* Filled state for progress indicator - works with all equalizer modes */
 .equalizer .equalizer-bar.filled {
-    border-color: rgba(255, 255, 255, 0.95) !important;
     box-shadow: 0 0 12px rgba(255, 255, 255, 0.8),
                 0 0 24px rgba(255, 255, 255, 0.5) !important;
-    transition: border-color 0.3s ease, box-shadow 0.3s ease;
+    transition: box-shadow 0.3s ease;
 }
 
 /* Colored mode - each bar gets a different color from gradient */
