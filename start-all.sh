@@ -1,8 +1,17 @@
 #!/bin/bash
 # Unified startup script for media-display project
 # Starts server, webapp, and opens browser when ready
+# Compatible with systemd service management
 
 set -e
+
+# Detect if running under systemd
+if [ -n "$INVOCATION_ID" ] || [ "$1" = "--systemd" ]; then
+    SYSTEMD_MODE=true
+    echo "Running in systemd mode"
+else
+    SYSTEMD_MODE=false
+fi
 
 # Colors for output
 RED='\033[0;31m'
@@ -214,23 +223,38 @@ else
     echo -e "${YELLOW}⚠️  No cached Spotify credentials found${NC}"
 fi
 
-if [ "$AUTH_NEEDED" = true ]; then
-    # Wait longer for auth browser to open and logs to flush
-    echo -e "${BLUE}Waiting for authentication process...${NC}"
-    sleep 5
-    
-    # Check if authentication happened during server startup
-    if grep -q "Spotify authentication successful" "$PROJECT_ROOT/server.log" 2>/dev/null; then
-        echo -e "${GREEN}✓ Spotify authentication completed during startup!${NC}"
-    else
-        # Extract authorization URL from log if available (simple approach)
-        AUTH_URL=$(grep -o "https://accounts\.spotify\.com/authorize[^[:space:]]*" "$PROJECT_ROOT/server.log" 2>/dev/null | head -1)
-        
-        if [ -n "$AUTH_URL" ]; then
-            # Decode URL for better readability
-            DECODED_URL=$(python3 -c "import urllib.parse; print(urllib.parse.unquote('$AUTH_URL'))" 2>/dev/null || echo "$AUTH_URL")
+if [ "$AUTIn systemd mode, just log the requirement without prompting
+        if [ "$SYSTEMD_MODE" = true ]; then
+            # Extract authorization URL from log if available
+            AUTH_URL=$(grep -o "https://accounts\.spotify\.com/authorize[^[:space:]]*" "$PROJECT_ROOT/server.log" 2>/dev/null | head -1)
             
-            echo -e "${YELLOW}⚠️  Spotify authentication required${NC}"
+            if [ -n "$AUTH_URL" ]; then
+                DECODED_URL=$(python3 -c "import urllib.parse; print(urllib.parse.unquote('$AUTH_URL'))" 2>/dev/null || echo "$AUTH_URL")
+                echo -e "${YELLOW}⚠️  Spotify authentication required${NC}"
+                echo -e "${BLUE}Please authenticate using this link:${NC}"
+                echo -e "${GREEN}$DECODED_URL${NC}"
+            fi
+            
+            echo -e "${YELLOW}Note: Service will continue with limited functionality until authenticated${NC}"
+        else
+            # Extract authorization URL from log if available (simple approach)
+            AUTH_URL=$(grep -o "https://accounts\.spotify\.com/authorize[^[:space:]]*" "$PROJECT_ROOT/server.log" 2>/dev/null | head -1)
+            
+            if [ -n "$AUTH_URL" ]; then
+                # Decode URL for better readability
+                DECODED_URL=$(python3 -c "import urllib.parse; print(urllib.parse.unquote('$AUTH_URL'))" 2>/dev/null || echo "$AUTH_URL")
+                
+                echo -e "${YELLOW}⚠️  Spotify authentication required${NC}"
+                echo -e "${BLUE}If browser didn't open automatically, use this link:${NC}"
+                echo -e "${GREEN}$DECODED_URL${NC}"
+                echo ""
+            else
+                echo -e "${YELLOW}⚠️  Please complete Spotify authentication in the browser${NC}"
+            fi
+            
+            echo -e "${BLUE}Press Enter when authentication is complete...${NC}"
+            read -r
+        fio -e "${YELLOW}⚠️  Spotify authentication required${NC}"
             echo -e "${BLUE}If browser didn't open automatically, use this link:${NC}"
             echo -e "${GREEN}$DECODED_URL${NC}"
             echo ""
@@ -254,12 +278,18 @@ cd "$PROJECT_ROOT/webapp"
 PYTHONUNBUFFERED=1 stdbuf -oL -eL ./start.sh --gunicorn >> "$PROJECT_ROOT/webapp.log" 2>&1 &
 WEBAPP_PID=$!
 
-# Wait for webapp to be ready
-if ! wait_for_service $WEBAPP_PORT "Web Application" $WEBAPP_PID "$PROJECT_ROOT/webapp.log"; then
-    echo -e "${RED}Check webapp.log for errors${NC}"
-    cleanup
-    exit 1
-fi
+
+# Only open browser in non-systemd mode
+if [ "$SYSTEMD_MODE" = false ]; then
+    echo -e "${BLUE}→ Opening: $WEBAPP_URL${NC}"
+    
+    if command -v open &> /dev/null; then
+        open "$WEBAPP_URL"
+    else
+        echo -e "${YELLOW}⚠️  Please open $WEBAPP_URL manually${NC}"
+    fi
+else
+    echo -e "${BLUE}→ Browser access: $WEBAPP_URL
 
 echo -e "${GREEN}✓ Webapp started successfully (PID: $WEBAPP_PID)${NC}"
 echo ""
@@ -271,7 +301,10 @@ sleep 2  # Brief delay to ensure webapp is fully ready
 WEBAPP_URL="http://localhost:${WEBAPP_PORT}"
 echo -e "${BLUE}→ Opening: $WEBAPP_URL${NC}"
 
-if command -v open &> /dev/null; then
+if [ "$SYSTEMD_MODE" = false ]; then
+    echo -e "${YELLOW}Press Ctrl+C to stop all services${NC}"
+    echo ""
+fiand -v open &> /dev/null; then
     open "$WEBAPP_URL"
 else
     echo -e "${YELLOW}⚠️  Please open $WEBAPP_URL manually${NC}"

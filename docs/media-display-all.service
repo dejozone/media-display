@@ -1,0 +1,80 @@
+# Systemd service file for Media Display - Complete Stack (Server + Webapp)
+# 
+# Installation:
+#   1. Edit this file to set the correct paths and user
+#   2. Create log files:
+#      sudo mkdir -p /var/log/dejozone
+#      sudo touch /var/log/dejozone/media-display-all.log
+#      sudo chown dejozone:dejozone /var/log/dejozone/media-display-all.log
+#   3. Copy to systemd directory:
+#      sudo cp media-display-all.service /etc/systemd/system/
+#   4. Reload systemd:
+#      sudo systemctl daemon-reload
+#   5. Enable service to start on boot:
+#      sudo systemctl enable media-display-all.service
+#   6. Start the service:
+#      sudo systemctl start media-display-all.service
+#   7. (Optional) Setup log rotation:
+#      sudo cp media-display-logrotate.conf /etc/logrotate.d/media-display-all
+#
+# Management commands:
+#   sudo systemctl status media-display-all    # Check status
+#   sudo systemctl stop media-display-all      # Stop service
+#   sudo systemctl restart media-display-all   # Restart service
+#   tail -f /var/log/dejozone/media-display-all.log     # View logs in real-time
+#   sudo journalctl -u media-display-all -f   # View systemd logs
+#
+# Note: This service starts both the server and webapp in a single process.
+#       For production, you may prefer separate services (media-display.service 
+#       and media-display-webapp.service) for better isolation and management.
+
+[Unit]
+Description=Media Display Complete Stack - Spotify/Sonos Monitor + Web UI
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=dejozone
+Group=dejozone
+WorkingDirectory=/opt/media-display
+
+# Environment variables
+# CRITICAL: PYTHONUNBUFFERED=1 ensures print() statements appear immediately in logs
+Environment="PYTHONUNBUFFERED=1"
+# Uncomment and customize as needed:
+# Environment="MEDIA_SERVICE_METHOD=all"
+# Environment="SERVER_HOST=0.0.0.0"
+# Environment="WEBSOCKET_SERVER_PORT=5001"
+# Environment="WEBAPP_PORT=8081"
+
+# Start command - uses unified startup script with systemd flag
+ExecStart=/opt/media-display/start-all.sh --systemd
+
+# Restart policy
+Restart=on-failure
+RestartSec=15s
+
+# Resource limits
+LimitNOFILE=65536
+
+# Security hardening (uncomment for additional security)
+# NoNewPrivileges=true
+# PrivateTmp=true
+# ProtectSystem=strict
+# ProtectHome=read-only
+# ReadWritePaths=/opt/media-display
+
+# Logging - output to /var/log/dejozone/media-display-all.log
+# Note: Log directory must exist and be writable by the service user
+# Create with: sudo mkdir -p /var/log/dejozone && sudo touch /var/log/dejozone/media-display-all.log && sudo chown dejozone:dejozone /var/log/dejozone/media-display-all.log
+StandardOutput=append:/var/log/dejozone/media-display-all.log
+StandardError=append:/var/log/dejozone/media-display-all.log
+
+# Graceful shutdown
+TimeoutStopSec=30
+KillMode=mixed
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target
