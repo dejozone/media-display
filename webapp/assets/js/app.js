@@ -71,62 +71,72 @@ let screensaverImages = [];
 let screensaverImagesLoaded = false;
 let currentScreensaverIndex = 0;
 let screensaverInterval = null;
+let screensaverRefreshInterval = null;
 
 // Function to load screensaver images from directory
-async function loadScreensaverImages() {
-    if (screensaverImagesLoaded) {
+async function loadScreensaverImages(forceRefresh = false) {
+    if (screensaverImagesLoaded && !forceRefresh) {
         return screensaverImages;
     }
     
     try {
         console.log('Loading screensaver images...');
         const response = await fetch('assets/images/screensavers/', {
-            cache: 'default' // Use HTTP cache according to Cache-Control headers
+            cache: forceRefresh ? 'reload' : 'default' // Force reload or use HTTP cache
         });
         
         if (!response.ok) {
             throw new Error(`Failed to fetch directory listing: ${response.status}`);
         }
         
-        const html = await response.text();
+        // Parse JSON array of filenames
+        const filenames = await response.json();
         
-        // Parse HTML to extract image filenames
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(html, 'text/html');
-        const links = doc.querySelectorAll('a');
-        
-        const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg'];
-        const images = [];
-        
-        links.forEach(link => {
-            const href = link.getAttribute('href');
-            if (href && href !== '../' && href !== '..') {
-                const lowerHref = href.toLowerCase();
-                if (imageExtensions.some(ext => lowerHref.endsWith(ext))) {
-                    images.push(`assets/images/screensavers/${href}`);
-                }
-            }
-        });
-        
-        if (images.length === 0) {
+        if (!Array.isArray(filenames) || filenames.length === 0) {
             console.warn('No screensaver images found in directory');
             // Fallback to a default image if available
-            images.push(DEF_ALBUM_ART_PATH);
+            screensaverImages = [DEF_ALBUM_ART_PATH];
+            screensaverImagesLoaded = true;
+            return screensaverImages;
         }
         
+        // Build full paths for each image
+        const images = filenames.map(filename => `assets/images/screensavers/${filename}`);
+        
+        const previousCount = screensaverImages.length;
         screensaverImages = images;
         screensaverImagesLoaded = true;
         
-        console.log(`Loaded ${images.length} screensaver image paths (will load on-demand)`);
+        if (forceRefresh && previousCount !== images.length) {
+            console.log(`Screensaver images refreshed: ${previousCount} -> ${images.length} images`);
+        } else {
+            console.log(`Loaded ${images.length} screensaver image paths (will load on-demand)`);
+        }
         
         return screensaverImages;
     } catch (error) {
         console.error('Error loading screensaver images:', error);
         // Fallback to default image
-        screensaverImages = ['assets/cat.jpg'];
+        screensaverImages = ['assets/images/cat.jpg'];
         screensaverImagesLoaded = true;
         return screensaverImages;
     }
+}
+
+// Start background refresh of screensaver images every 5 minutes
+function startScreensaverRefresh() {
+    // Clear any existing refresh interval
+    if (screensaverRefreshInterval) {
+        clearInterval(screensaverRefreshInterval);
+    }
+    
+    // Refresh screensaver list every 5 minutes (300000 ms)
+    screensaverRefreshInterval = setInterval(async () => {
+        console.log('Background refresh: Updating screensaver images list...');
+        await loadScreensaverImages(true); // Force refresh
+    }, 300000); // 5 minutes
+    
+    console.log('Screensaver background refresh enabled (every 5 minutes)');
 }
 
 // Load image on-demand - browser will use cache if available
@@ -3221,6 +3231,10 @@ function init() {
     restoreEqualizerState();
     restoreProgressEffectState();
     setupServiceIconHandlers();
+    
+    // Start background refresh for screensaver images
+    startScreensaverRefresh();
+    
     connectWebSocket();
     
     // Update URL configuration hint in console

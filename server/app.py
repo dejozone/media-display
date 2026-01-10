@@ -134,6 +134,10 @@ desired_services = set()  # Services that should be active based on MEDIA_SERVIC
 recovery_thread = None  # Background thread for service recovery
 recovery_running = False  # Control flag for recovery thread
 
+# Global state for OAuth callback server
+oauth_callback_server = None
+oauth_callback_server_lock = threading.Lock()
+
 class OAuth2CallbackHandler(BaseHTTPRequestHandler):
     """Handle the OAuth2 callback"""
     def do_GET(self):
@@ -199,39 +203,56 @@ class SpotifyAuthWithServer:
                 self.local_port = 443 if parsed.scheme == 'https' else 80
         
     def start_server(self):
-        """Start the callback server"""
-        try:
-            port = self.local_port
-            print(f"Starting OAuth callback server on localhost:{port}...")
+        """Start the callback server (reuses existing if already running)"""
+        global oauth_callback_server, oauth_callback_server_lock
+        
+        with oauth_callback_server_lock:
+            # Check if server is already running
+            if oauth_callback_server is not None:
+                self.server = oauth_callback_server
+                print(f"✓ Reusing existing OAuth callback server on port {self.local_port}")
+                return
             
-            self.server = HTTPServer(('localhost', port), OAuth2CallbackHandler)
-            
-            # Enable SSL with self-signed certificate
-            server_dir = os.path.dirname(os.path.abspath(__file__))
-            project_root = os.path.dirname(server_dir)
-            cert_file = os.path.join(project_root, 'certs', 'localhost.crt')
-            key_file = os.path.join(project_root, 'certs', 'localhost.key')
-            
-            if os.path.exists(cert_file) and os.path.exists(key_file):
-                context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-                context.load_cert_chain(cert_file, key_file)
-                self.server.socket = context.wrap_socket(self.server.socket, server_side=True)
-                protocol = 'https'
-                print(f"✓ SSL enabled for OAuth callback server")
-            else:
-                protocol = 'http'
-                print(f"⚠️  SSL certificates not found, using HTTP")
-            
-            self.server_thread = threading.Thread(target=self.server.serve_forever, daemon=True)
-            self.server_thread.start()
-            time.sleep(0.5)
-            print(f"✓ OAuth callback server running on {protocol}://localhost:{port}/")
+            try:
+                port = self.local_port
+                print(f"Starting OAuth callback server on localhost:{port}...")
                 
-        except OSError as e:
-            print(f"✗ Error starting callback server: {e}")
-            if 'Address already in use' in str(e):
-                print(f"  Port {port} is already in use.")
-            raise
+                self.server = HTTPServer(('localhost', port), OAuth2CallbackHandler)
+                
+                # Enable SSL with self-signed certificate
+                server_dir = os.path.dirname(os.path.abspath(__file__))
+                project_root = os.path.dirname(server_dir)
+                cert_file = os.path.join(project_root, 'certs', 'localhost.crt')
+                key_file = os.path.join(project_root, 'certs', 'localhost.key')
+                
+                if os.path.exists(cert_file) and os.path.exists(key_file):
+                    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                    context.load_cert_chain(cert_file, key_file)
+                    self.server.socket = context.wrap_socket(self.server.socket, server_side=True)
+                    protocol = 'https'
+                    print(f"✓ SSL enabled for OAuth callback server")
+                else:
+                    protocol = 'http'
+                    print(f"⚠️  SSL certificates not found, using HTTP")
+                
+                self.server_thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+                self.server_thread.start()
+                time.sleep(0.5)
+                print(f"✓ OAuth callback server running on {protocol}://localhost:{port}/")
+                
+                # Store globally so it can be reused
+                oauth_callback_server = self.server
+                    
+            except OSError as e:
+                # If server already exists globally but we hit this, reuse it
+                if oauth_callback_server is not None:
+                    self.server = oauth_callback_server
+                    print(f"✓ Reusing existing OAuth callback server")
+                else:
+                    print(f"✗ Error starting callback server: {e}")
+                    if 'Address already in use' in str(e):
+                        print(f"  Port {port} is already in use.")
+                    raise
         
     def get_spotify_client(self):
         """Get authenticated Spotify client"""
@@ -271,9 +292,12 @@ class SpotifyAuthWithServer:
         return spotipy.Spotify(auth_manager=auth_manager, requests_session=session)  # type: ignore
     
     def shutdown_server(self):
-        """Stop the callback server"""
-        if self.server:
-            self.server.shutdown()
+        """Stop the callback server (only if we own it)"""
+        global oauth_callback_server, oauth_callback_server_lock
+        
+        # Don't shutdown the shared server
+        # It will be cleaned up on process exit
+        pass
 
 class DeviceMonitor:
     """Monitor Sonos devices for playback updates"""
@@ -1073,8 +1097,23 @@ def try_start_spotify():
         monitor = initialize_spotify()
         active_monitors.append(monitor)
         print("✅ Spotify service recovered and activated")
+        
+        # Give monitor a moment to verify it's working
+        time.sleep(2)
+        
         broadcast_service_status()
         return True
+    except OSError as e:
+        if 'Address already in use' in str(e):
+            # Callback server already exists, this likely means Spotify is initializing
+            # Check again if service became active
+            time.sleep(3)
+            if is_service_active('spotify'):
+                print("✅ Spotify service is active (callback server already running)")
+                broadcast_service_status()
+                return True
+        print(f"⚠️  Spotify recovery attempt failed: {e}")
+        return False
     except Exception as e:
         print(f"⚠️  Spotify recovery attempt failed: {e}")
         return False
@@ -1083,18 +1122,39 @@ def service_recovery_loop():
     """Background thread that continuously monitors and recovers failed services"""
     global recovery_running, desired_services
     
-    retry_count = {'sonos': 0, 'spotify': 0}
+    retry_count: dict[str, int] = {'sonos': 0, 'spotify': 0}
+    first_failure_time: dict[str, float | None] = {'sonos': None, 'spotify': None}
+    max_retry_duration = 300  # 5 minutes in seconds
     
+    # Give initial startup time before starting recovery checks
     print("🔄 Service recovery thread started")
     print(f"   Monitoring services: {', '.join(sorted(desired_services))}")
+    print("   Waiting 15s for initial service startup...")
+    time.sleep(15)
     
     while recovery_running:
         try:
             # Check each desired service
             for service in desired_services:
                 if not is_service_active(service):
+                    # Track first failure time
+                    failure_start = first_failure_time[service]
+                    if failure_start is None:
+                        failure_start = time.time()
+                        first_failure_time[service] = failure_start
+                    
+                    # Check if we've exceeded the 5-minute retry window
+                    elapsed_time = time.time() - failure_start
+                    if elapsed_time > max_retry_duration:
+                        if retry_count[service] > 0:  # Only print once
+                            print(f"⏱️  {service.upper()} service recovery timeout (5 minutes exceeded)")
+                            print(f"   Stopped retrying after {retry_count[service]} attempts")
+                            retry_count[service] = -1  # Mark as timed out
+                        continue  # Skip this service
+                    
                     retry_count[service] += 1
-                    print(f"🔄 Attempting to recover {service.upper()} service (attempt #{retry_count[service]})...")
+                    remaining_time = int(max_retry_duration - elapsed_time)
+                    print(f"🔄 Attempting to recover {service.upper()} service (attempt #{retry_count[service]}, timeout in {remaining_time}s)...")
                     
                     success = False
                     if service == 'sonos':
@@ -1104,27 +1164,33 @@ def service_recovery_loop():
                     
                     if success:
                         retry_count[service] = 0  # Reset counter on success
+                        first_failure_time[service] = None
                     else:
-                        print(f"⚠️  {service.upper()} recovery failed. Will retry in 10 seconds...")
+                        print(f"⚠️  {service.upper()} recovery failed. Will retry in 30 seconds...")
                 else:
-                    # Service is active, verify it's still healthy
+                    # Service is active, reset retry counter and failure time
+                    if retry_count[service] != 0:
+                        if retry_count[service] > 0:
+                            print(f"✅ {service.upper()} service is healthy again")
+                        retry_count[service] = 0
+                        first_failure_time[service] = None
+                    
+                    # Verify service is still healthy
                     monitor = get_service_monitor(service)
                     if monitor:
-                        # Check if monitor is still running
                         if not monitor.is_running or not monitor.is_ready:
                             print(f"⚠️  {service.upper()} service detected as unhealthy, marking for recovery...")
                             monitor.is_ready = False
-                            # Remove from active monitors to trigger recovery
                             if monitor in active_monitors:
                                 active_monitors.remove(monitor)
                             broadcast_service_status()
             
-            # Sleep for 10 seconds before next check
-            time.sleep(10)
+            # Sleep for 30 seconds before next check (increased from 10s)
+            time.sleep(30)
             
         except Exception as e:
             print(f"⚠️  Error in service recovery loop: {e}")
-            time.sleep(10)
+            time.sleep(30)
     
     print("🔄 Service recovery thread stopped")
 
