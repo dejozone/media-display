@@ -1124,7 +1124,9 @@ def service_recovery_loop():
     
     retry_count: dict[str, int] = {'sonos': 0, 'spotify': 0}
     first_failure_time: dict[str, float | None] = {'sonos': None, 'spotify': None}
-    max_retry_duration = 300  # 5 minutes in seconds
+    # Get timeout from environment variable (default: 5 minutes = 300 seconds)
+    max_retry_duration = int(os.getenv('SERVICE_RECOVERY_TIMEOUT_MINUTES', '5')) * 60
+    timeout_minutes = max_retry_duration // 60
     
     # Give initial startup time before starting recovery checks
     print("🔄 Service recovery thread started")
@@ -1143,11 +1145,11 @@ def service_recovery_loop():
                         failure_start = time.time()
                         first_failure_time[service] = failure_start
                     
-                    # Check if we've exceeded the 5-minute retry window
+                    # Check if we've exceeded the retry window
                     elapsed_time = time.time() - failure_start
                     if elapsed_time > max_retry_duration:
                         if retry_count[service] > 0:  # Only print once
-                            print(f"⏱️  {service.upper()} service recovery timeout (5 minutes exceeded)")
+                            print(f"⏱️  {service.upper()} service recovery timeout ({timeout_minutes} minute{'s' if timeout_minutes != 1 else ''} exceeded)")
                             print(f"   Stopped retrying after {retry_count[service]} attempts")
                             retry_count[service] = -1  # Mark as timed out
                         continue  # Skip this service
