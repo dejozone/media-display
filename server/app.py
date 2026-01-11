@@ -81,6 +81,23 @@ logging.getLogger('werkzeug').setLevel(logging.ERROR)
 werkzeug_logger = logging.getLogger('werkzeug')
 werkzeug_logger.addFilter(lambda record: 'write() before start_response' not in str(record.getMessage()))
 
+# Utility function for time parsing
+def parse_time_to_ms(time_str):
+    """Convert H:MM:SS or M:SS to milliseconds"""
+    try:
+        if not time_str or time_str == '0:00:00':
+            return 0
+        parts = time_str.split(':')
+        if len(parts) == 3:  # H:MM:SS
+            hours, minutes, seconds = map(int, parts)
+            return (hours * 3600 + minutes * 60 + seconds) * 1000
+        elif len(parts) == 2:  # M:SS
+            minutes, seconds = map(int, parts)
+            return (minutes * 60 + seconds) * 1000
+    except:
+        return 0
+    return 0
+
 # Flask app setup
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-secret-key-change-in-production')
@@ -368,22 +385,6 @@ class DeviceMonitor:
                     device_names = self.get_device_names(device)
                     
                     # Parse duration and position (format: "H:MM:SS" or "M:SS")
-                    def parse_time_to_ms(time_str):
-                        """Convert H:MM:SS or M:SS to milliseconds"""
-                        try:
-                            if not time_str or time_str == '0:00:00':
-                                return 0
-                            parts = time_str.split(':')
-                            if len(parts) == 3:  # H:MM:SS
-                                hours, minutes, seconds = map(int, parts)
-                                return (hours * 3600 + minutes * 60 + seconds) * 1000
-                            elif len(parts) == 2:  # M:SS
-                                minutes, seconds = map(int, parts)
-                                return (minutes * 60 + seconds) * 1000
-                        except:
-                            return 0
-                        return 0
-                    
                     duration_ms = parse_time_to_ms(track.get('duration', '0:00:00'))
                     position_ms = parse_time_to_ms(track.get('position', '0:00:00'))
                     
@@ -481,22 +482,6 @@ class DeviceMonitor:
                         device_names = self.get_device_names(device)
                         
                         # Parse duration and position (format: "H:MM:SS" or "M:SS")
-                        def parse_time_to_ms(time_str):
-                            """Convert H:MM:SS or M:SS to milliseconds"""
-                            try:
-                                if not time_str or time_str == '0:00:00':
-                                    return 0
-                                parts = time_str.split(':')
-                                if len(parts) == 3:  # H:MM:SS
-                                    hours, minutes, seconds = map(int, parts)
-                                    return (hours * 3600 + minutes * 60 + seconds) * 1000
-                                elif len(parts) == 2:  # M:SS
-                                    minutes, seconds = map(int, parts)
-                                    return (minutes * 60 + seconds) * 1000
-                            except:
-                                return 0
-                            return 0
-                        
                         duration_ms = parse_time_to_ms(track.get('duration', '0:00:00'))
                         position_ms = parse_time_to_ms(track.get('position', '0:00:00'))
                         
@@ -550,21 +535,6 @@ class DeviceMonitor:
                                 
                                 if track and track.get('title'):
                                     # Parse position
-                                    def parse_time_to_ms(time_str):
-                                        try:
-                                            if not time_str or time_str == '0:00:00':
-                                                return 0
-                                            parts = time_str.split(':')
-                                            if len(parts) == 3:  # H:MM:SS
-                                                hours, minutes, seconds = map(int, parts)
-                                                return (hours * 3600 + minutes * 60 + seconds) * 1000
-                                            elif len(parts) == 2:  # M:SS
-                                                minutes, seconds = map(int, parts)
-                                                return (minutes * 60 + seconds) * 1000
-                                        except:
-                                            return 0
-                                        return 0
-                                    
                                     position_ms = parse_time_to_ms(track.get('position', '0:00:00'))
                                     duration_ms = parse_time_to_ms(track.get('duration', '0:00:00'))
                                     is_playing = transport.get('current_transport_state') == 'PLAYING'
