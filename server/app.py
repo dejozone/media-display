@@ -22,6 +22,8 @@ import webbrowser
 from dotenv import load_dotenv
 import requests
 import urllib3
+import atexit
+from config import Config
 
 # Try importing Sonos library
 try:
@@ -61,13 +63,8 @@ def get_local_ip():
     
     return ips
 
-# Load environment variables
-load_dotenv()
-
-# Configure SSL verification for Spotify API
-SSL_VERIFY_SPOTIFY = os.getenv('SSL_CERT_VERIFICATION_SPOTIFY', 'true').lower() == 'true'
-
-if not SSL_VERIFY_SPOTIFY:
+# Configure SSL verification for Spotify API (from Config)
+if not Config.SSL_VERIFY_SPOTIFY:
     print("⚠️  SSL certificate verification DISABLED for Spotify endpoints")
     print("   Applies to: api.spotify.com, accounts.spotify.com")
     print("   This should only be used in development/testing environments")
@@ -100,13 +97,12 @@ def parse_time_to_ms(time_str):
 
 # Flask app setup
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-secret-key-change-in-production')
-app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 86400  # Default cache for static files: 1 day
+app.config['SECRET_KEY'] = Config.SECRET_KEY
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = Config.SEND_FILE_MAX_AGE_DEFAULT
 CORS(app)
 
 # Configure Socket.IO with custom path for nginx subpath proxying
-socketio_path = os.getenv('WEBSOCKET_PATH', '/socket.io')
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading', path=socketio_path)
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading', path=Config.WEBSOCKET_PATH)
 
 # Override Flask-SocketIO's aggressive no-cache defaults for static assets
 @app.after_request
@@ -201,7 +197,7 @@ class SpotifyAuthWithServer:
         self.client_secret = client_secret
         self.redirect_uri = redirect_uri
         self.scope = scope
-        self.cache_path = '.spotify_cache'
+        self.cache_path = Config.SPOTIFY_CACHE_PATH
         self.server = None
         self.server_thread = None
         
@@ -277,7 +273,7 @@ class SpotifyAuthWithServer:
         
         # Create a custom requests session with SSL verification setting
         session = requests.Session()
-        session.verify = SSL_VERIFY_SPOTIFY
+        session.verify = Config.SSL_VERIFY_SPOTIFY
         
         auth_manager = SpotifyOAuth(
             client_id=self.client_id,
@@ -907,11 +903,7 @@ def health():
 @app.route('/assets/images/screensavers/')
 def list_screensaver_images():
     """List screensaver images with directory listing"""
-    # Determine the webapp assets path relative to this server file
-    # Server is in server/app.py, webapp assets are in webapp/assets/
-    server_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(server_dir)
-    screensaver_dir = os.path.join(project_root, 'webapp', 'assets', 'images', 'screensavers')
+    screensaver_dir = Config.SCREENSAVER_DIR
     
     if not os.path.exists(screensaver_dir):
         return jsonify({'error': 'Directory not found'}), 404
@@ -970,9 +962,7 @@ def list_screensaver_images():
 @app.route('/assets/images/screensavers/<filename>')
 def serve_screensaver_image(filename):
     """Serve individual screensaver images"""
-    server_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(server_dir)
-    screensaver_dir = os.path.join(project_root, 'webapp', 'assets', 'images', 'screensavers')
+    screensaver_dir = Config.SCREENSAVER_DIR
     
     try:
         response = send_from_directory(screensaver_dir, filename)
@@ -987,24 +977,16 @@ def initialize_spotify():
     """Initialize Spotify authentication and monitoring"""
     global spotify_client
     
-    client_id = os.getenv('SPOTIFY_CLIENT_ID')
-    client_secret = os.getenv('SPOTIFY_CLIENT_SECRET')
-    redirect_uri = os.getenv('SPOTIFY_REDIRECT_URI', 'http://localhost:8888/callback')
-    
-    # Get LOCAL_CALLBACK_PORT if explicitly set (optional override)
-    local_callback_port = os.getenv('LOCAL_CALLBACK_PORT', '').strip()
-    local_port = int(local_callback_port) if local_callback_port else None
-    
-    if not client_id or not client_secret:
+    if not Config.SPOTIFY_CLIENT_ID or not Config.SPOTIFY_CLIENT_SECRET:
         raise Exception("SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET must be set")
     
-    # Initialize auth (port from LOCAL_CALLBACK_PORT or parsed from redirect_uri)
+    # Initialize auth (port from Config or parsed from redirect_uri)
     auth = SpotifyAuthWithServer(
-        client_id=client_id,
-        client_secret=client_secret,
-        redirect_uri=redirect_uri,
-        scope='user-read-currently-playing user-read-playback-state',
-        local_port=local_port
+        client_id=Config.SPOTIFY_CLIENT_ID,
+        client_secret=Config.SPOTIFY_CLIENT_SECRET,
+        redirect_uri=Config.SPOTIFY_REDIRECT_URI,
+        scope=Config.SPOTIFY_SCOPE,
+        local_port=Config.LOCAL_CALLBACK_PORT
     )
     
     # Get authenticated client
@@ -1094,15 +1076,14 @@ def service_recovery_loop():
     
     retry_count: dict[str, int] = {'sonos': 0, 'spotify': 0}
     first_failure_time: dict[str, float | None] = {'sonos': None, 'spotify': None}
-    # Get timeout from environment variable (default: 5 minutes = 300 seconds)
-    max_retry_duration = int(os.getenv('SERVICE_RECOVERY_TIMEOUT_MINUTES', '5')) * 60
-    timeout_minutes = max_retry_duration // 60
+    max_retry_duration = Config.SERVICE_RECOVERY_TIMEOUT_MINUTES * 60
+    timeout_minutes = Config.SERVICE_RECOVERY_TIMEOUT_MINUTES
     
     # Give initial startup time before starting recovery checks
     print("🔄 Service recovery thread started")
     print(f"   Monitoring services: {', '.join(sorted(desired_services))}")
-    print("   Waiting 15s for initial service startup...")
-    time.sleep(15)
+    print(f"   Waiting {Config.SERVICE_RECOVERY_INITIAL_DELAY}s for initial service startup...")
+    time.sleep(Config.SERVICE_RECOVERY_INITIAL_DELAY)
     
     while recovery_running:
         try:
@@ -1175,26 +1156,17 @@ def main():
     global active_monitors, desired_services, recovery_running, recovery_thread
     
     try:
-        service_method = os.getenv('MEDIA_SERVICE_METHOD', 'all').lower().strip()
-        
-        if service_method not in ['sonos', 'spotify', 'all']:
-            print(f"\n⚠️  Invalid MEDIA_SERVICE_METHOD: '{service_method}'")
-            print("Valid options: 'sonos', 'spotify', 'all'")
-            print("Defaulting to 'all'\n")
-            service_method = 'all'
+        # Validate and print configuration
+        Config.validate()
+        Config.print_config()
         
         # Set desired services based on configuration
-        if service_method == 'spotify':
-            desired_services = {'spotify'}
-        elif service_method == 'sonos':
-            desired_services = {'sonos'}
-        else:  # 'all'
-            desired_services = {'sonos', 'spotify'}
+        desired_services = Config.get_desired_services()
         
         print("\n🔧 Initializing playback monitoring...")
-        print(f"Configuration: MEDIA_SERVICE_METHOD={service_method.upper()}\n")
+        print(f"Configuration: MEDIA_SERVICE_METHOD={Config.MEDIA_SERVICE_METHOD.upper()}\n")
         
-        if service_method == 'spotify':
+        if Config.MEDIA_SERVICE_METHOD == 'spotify':
             # Spotify only
             print("=" * 60)
             print("Mode: Spotify Connect Only")
@@ -1204,7 +1176,7 @@ def main():
             active_monitors.append(monitor)
             print("\n✅ Spotify monitoring active")
             
-        elif service_method == 'sonos':
+        elif Config.MEDIA_SERVICE_METHOD == 'sonos':
             # Sonos only
             print("=" * 60)
             print("Mode: Sonos API Only")
@@ -1218,7 +1190,7 @@ def main():
                 print("\n✗ Failed to start Sonos monitoring")
                 return 1
                 
-        else:  # service_method == 'all'
+        else:  # Config.MEDIA_SERVICE_METHOD == 'all'
             # Monitor BOTH simultaneously
             print("=" * 60)
             # Use threading to initialize services in parallel
@@ -1306,9 +1278,9 @@ def main():
         recovery_thread = threading.Thread(target=service_recovery_loop, daemon=True)
         recovery_thread.start()
         
-        # Get server configuration
-        host = os.getenv('SERVER_HOST', '0.0.0.0')
-        port = int(os.getenv('WEBSOCKET_SERVER_PORT', 5001))
+        # Get server configuration from Config
+        host = Config.SERVER_HOST
+        port = Config.WEBSOCKET_SERVER_PORT
         
         print(f"\n🚀 Starting server on {host}:{port}...")
         print("WebSocket endpoints:")
@@ -1354,7 +1326,10 @@ def initialize_for_gunicorn():
     
     if not active_monitors:  # Only initialize if not already done
         try:
-            service_method = os.getenv('MEDIA_SERVICE_METHOD', 'all').lower().strip()
+            # Validate configuration
+            Config.validate()
+            
+            service_method = Config.MEDIA_SERVICE_METHOD
             
             # Set desired services based on configuration
             if service_method == 'spotify':
@@ -1365,14 +1340,14 @@ def initialize_for_gunicorn():
                 desired_services = {'sonos', 'spotify'}
             
             print("\n🔧 Initializing playback monitoring (Gunicorn mode)...")
-            print(f"Configuration: MEDIA_SERVICE_METHOD={service_method.upper()}\n")
+            print(f"Configuration: MEDIA_SERVICE_METHOD={Config.MEDIA_SERVICE_METHOD.upper()}\n")
             
-            if service_method == 'spotify':
+            if Config.MEDIA_SERVICE_METHOD == 'spotify':
                 monitor = initialize_spotify()
                 active_monitors.append(monitor)
                 print("✅ Spotify monitoring active")
                 
-            elif service_method == 'sonos':
+            elif Config.MEDIA_SERVICE_METHOD == 'sonos':
                 device_monitor = DeviceMonitor()
                 if device_monitor.start():
                     active_monitors.append(device_monitor)
