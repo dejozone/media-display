@@ -2894,7 +2894,7 @@ function showCursor() {
         cursorHideTimeout = setTimeout(() => {
             document.body.classList.remove('fullscreen-show-cursor');
             document.body.classList.add('fullscreen-hide-cursor');
-        }, CURSOR_HIDE_DELAY);
+        }, CONFIG.CURSOR_HIDE_DELAY);
     }
 }
 
