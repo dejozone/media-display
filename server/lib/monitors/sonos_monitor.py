@@ -17,6 +17,7 @@ try:
 except ImportError:
     SONOS_AVAILABLE = False
     soco = None
+    event_listener = None
 
 
 class SonosMonitor(BaseMonitor):
@@ -36,6 +37,9 @@ class SonosMonitor(BaseMonitor):
         self.devices: List[Dict[str, Any]] = []
         self.subscriptions: List[Any] = []
         self.polling_thread: Optional[threading.Thread] = None
+        self.event_mode: bool = True  # True = use events, False = use polling fallback
+        self.last_event_time: float = 0  # Track last successful event
+        self.event_timeout: float = 30  # Seconds before considering events dead
     
     def get_device_names(self, coordinator_device) -> List[str]:
         """Get list of device names from a group"""
@@ -80,6 +84,14 @@ class SonosMonitor(BaseMonitor):
     def on_sonos_event(self, event):
         """Handle Sonos transport events"""
         try:
+            # Update last event time to track event health
+            self.last_event_time = time.time()
+            
+            # If we were in polling fallback mode, switch back to events
+            if not self.event_mode:
+                print("✅ [SONOS] Events recovered, switching from polling to event mode")
+                self.event_mode = True
+            
             # Get the parent service to access track info
             if hasattr(event.service, 'soco'):
                 device = event.service.soco
@@ -222,15 +234,31 @@ class SonosMonitor(BaseMonitor):
         return None
     
     def _poll_position_updates(self):
-        """Poll Sonos devices for position updates every 2 seconds"""
+        """
+        Poll Sonos devices for position updates every 2 seconds.
+        Also serves as fallback when event subscriptions fail.
+        """
         while self.is_running:
             try:
                 time.sleep(2)  # Poll every 2 seconds
                 
                 current_track_data = self.app_state.get_track_data()
                 
-                # Only poll if we have Sonos as the active source AND clients need progress
-                if current_track_data and current_track_data.get('source') == 'sonos' and self.app_state.has_clients_needing_progress():
+                # Check if events have stopped working (no events in last 30 seconds while playing)
+                if self.event_mode and current_track_data and current_track_data.get('source') == 'sonos':
+                    time_since_event = time.time() - self.last_event_time
+                    if time_since_event > self.event_timeout and current_track_data.get('is_playing'):
+                        print(f"⚠️  [SONOS] No events received for {int(time_since_event)}s, switching to polling fallback")
+                        self.event_mode = False
+                
+                # Poll if: (1) clients need progress OR (2) event mode has failed
+                should_poll = (
+                    current_track_data and 
+                    current_track_data.get('source') == 'sonos' and
+                    (self.app_state.has_clients_needing_progress() or not self.event_mode)
+                )
+                
+                if should_poll:
                     for device_info in self.devices:
                         if device_info['type'] == 'sonos':
                             try:
@@ -244,24 +272,56 @@ class SonosMonitor(BaseMonitor):
                                     duration_ms = parse_time_to_ms(track.get('duration', '0:00:00'))
                                     is_playing = transport.get('current_transport_state') == 'PLAYING'
                                     
-                                    # Update current_track_data with fresh position
-                                    current_track_data['progress_ms'] = position_ms
-                                    current_track_data['duration_ms'] = duration_ms
-                                    current_track_data['is_playing'] = is_playing
-                                    current_track_data['timestamp'] = time.time()
+                                    # In polling fallback mode, check for track changes
+                                    if not self.event_mode:
+                                        track_id = f"{track.get('title')}_{track.get('artist')}"
+                                        if self.last_track_id != track_id:
+                                            print(f"🔄 [SONOS POLL] Track changed: {track.get('title')} - {track.get('artist')}")
+                                            self.last_track_id = track_id
+                                            
+                                            # Get full track data
+                                            device_names = self.get_device_names(device)
+                                            current_track_data = {
+                                                'track_name': track.get('title', 'Unknown'),
+                                                'artist': track.get('artist', 'Unknown Artist'),
+                                                'album': track.get('album', 'Unknown Album'),
+                                                'album_art': track.get('album_art', None),
+                                                'is_playing': is_playing,
+                                                'progress_ms': position_ms,
+                                                'duration_ms': duration_ms,
+                                                'device': {
+                                                    'names': device_names,
+                                                    'type': 'Sonos Speaker'
+                                                },
+                                                'source': 'sonos',
+                                                'source_priority': self.source_priority,
+                                                'timestamp': time.time()
+                                            }
+                                            self.app_state.update_track_data(current_track_data)
                                     
-                                    self.app_state.update_track_data(current_track_data)
-                                    
-                                    # Broadcast update
-                                    self.socketio.emit('track_update', current_track_data, namespace='/')
+                                    # Update position (works in both modes)
+                                    if current_track_data:
+                                        current_track_data['progress_ms'] = position_ms
+                                        current_track_data['duration_ms'] = duration_ms
+                                        current_track_data['is_playing'] = is_playing
+                                        current_track_data['timestamp'] = time.time()
+                                        
+                                        self.app_state.update_track_data(current_track_data)
+                                        
+                                        # Broadcast update
+                                        self.socketio.emit('track_update', current_track_data, namespace='/')
                                 
                                 break  # Only need to poll one device
                                 
                             except Exception as e:
-                                print(f"⚠️  Sonos polling error: {e}")
+                                print(f"⚠️  [SONOS] Polling error: {e}")
+                                # If polling fails repeatedly, events are likely still better
+                                if not self.event_mode:
+                                    print("⚠️  [SONOS] Polling also failing, will retry event mode")
+                                    self.event_mode = True
                                 
             except Exception as e:
-                print(f"⚠️  Position polling error: {e}")
+                print(f"⚠️  [SONOS] Position polling loop error: {e}")
     
     def get_current_playback(self) -> Optional[Dict[str, Any]]:
         """Get current playback information"""
@@ -281,21 +341,26 @@ class SonosMonitor(BaseMonitor):
                 self.is_running = False
                 return False
             
-            # Subscribe to events
-            if not self.subscribe_to_devices():
-                print("\n⚠️  Failed to subscribe to any devices")
-                self.is_running = False
-                return False
+            # Subscribe to events (primary mechanism)
+            events_active = self.subscribe_to_devices()
+            if not events_active:
+                print("\n⚠️  Failed to subscribe to events, will use polling fallback")
+                self.event_mode = False
+            else:
+                print("✅ Event subscriptions active (primary mode)")
+                self.event_mode = True
+                self.last_event_time = time.time()  # Initialize event timer
             
             # Get initial state
             self.get_initial_state()
             
-            # Start position polling thread
+            # Start polling thread (handles both position updates and fallback)
             self.polling_thread = threading.Thread(target=self._poll_position_updates, daemon=True)
             self.polling_thread.start()
             
             self.is_ready = True
-            print("\n✅ Sonos monitoring started")
+            mode_str = "events (primary) + polling (position)" if events_active else "polling (fallback)"
+            print(f"\n✅ Sonos monitoring started - Mode: {mode_str}")
             return True
         
         return False
