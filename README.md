@@ -61,38 +61,82 @@ cd server
 pip install -r requirements.txt
 ```
 
-### 3. Start the Backend Server
+### 3. Start the Services
 
+#### Option A: Start All Services (Recommended)
+
+Use the unified startup script to start both server and webapp:
+
+```bash
+./start-all.sh
+```
+
+This will:
+1. **Start the Spotify Server**:
+   - Clean up any existing processes on required ports
+   - Launch the WebSocket server on port 5001
+   - Attempt to connect using Sonos API (local network, no authentication)
+   - If Sonos not available or `MEDIA_SERVICE_METHOD=spotify`, use Spotify Connect:
+     - Start OAuth callback server on port 8888
+     - Open browser for Spotify authorization (first time only)
+     - Check if existing credentials are valid
+   - Wait for server to be fully ready
+
+2. **Start the Web Application**:
+   - Launch the webapp using Gunicorn (production-ready)
+   - Available at `http://localhost:8081`
+   - Wait for webapp to be fully ready
+
+3. **Open Browser**:
+   - Automatically open the webapp in your default browser
+   - Display will connect to the WebSocket server automatically
+
+4. **Keep Services Running**:
+   - Press `Ctrl+C` to stop all services
+   - Logs are written to `server.log` and `webapp.log`
+
+**Systemd Mode**: For running as a system service, use `./start-all.sh --systemd`
+
+#### Option B: Start Services Manually
+
+If you need more control, start each service separately:
+
+**Terminal 1 - Backend Server:**
 ```bash
 cd server
-./start.sh
+./start.sh --gunicorn
 ```
 
-The server will:
-- Attempt to connect using Sonos API (local network, no authentication)
-- If Sonos not available or MEDIA_SERVICE_METHOD=spotify, use Spotify Connect:
-  - Start OAuth callback server on port 8888
-  - Open browser for Spotify authorization (first time only)
-- Start WebSocket server on port 5001
-- Monitor playback and broadcast updates
-
-### 4. Start the Web App (Development)
-
-In a new terminal:
-
+**Terminal 2 - Web Application:**
 ```bash
 cd webapp
-./start.sh
+./start.sh --gunicorn
 ```
 
-The webapp will be available at: `http://localhost:8081`
+Then open your browser to `http://localhost:8081`
 
-### 5. Open the Display
+### 4. Stop the Services
 
-Open your browser to `http://localhost:8081` and the display will:
+To stop all running services:
+
+```bash
+./stop-all.sh
+```
+
+This will:
+- Stop the Spotify Server (port 5001)
+- Stop the Web Application (port 8081)
+- Clean up all related processes
+
+**Note**: The stop script automatically finds and terminates processes using the configured ports, so you don't need to track PIDs manually.
+
+### 5. Using the Display
+
+Once started, the display will:
 - Connect to the WebSocket server automatically
 - Show current playback in full-screen
 - Update in real-time when tracks change
+- Display screensaver with custom images when no music is playing
 
 ## Features
 
