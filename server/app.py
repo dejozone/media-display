@@ -23,16 +23,17 @@ from lib.monitors.spotify_monitor import SpotifyMonitor
 from lib.monitors.sonos_monitor import SonosMonitor, SONOS_AVAILABLE
 from lib.auth.spotify_auth import SpotifyAuthWithServer
 from lib.utils.network import get_local_ip
+from lib.utils.logger import server_logger
 
 # Configure SSL verification for Spotify API (from Config)
 if not Config.SSL_VERIFY_SPOTIFY:
-    print("⚠️  SSL certificate verification DISABLED for Spotify endpoints")
-    print("   Applies to: api.spotify.com, accounts.spotify.com")
-    print("   This should only be used in development/testing environments")
+    server_logger.warning("⚠️  SSL certificate verification DISABLED for Spotify endpoints")
+    server_logger.warning("   Applies to: api.spotify.com, accounts.spotify.com")
+    server_logger.warning("   This should only be used in development/testing environments")
     # Suppress only the InsecureRequestWarning from urllib3
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 else:
-    print("✓ SSL certificate verification ENABLED for all Spotify endpoints")
+    server_logger.info("✓ SSL certificate verification ENABLED for all Spotify endpoints")
 
 # Suppress werkzeug logging for WebSocket disconnect errors
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
@@ -53,30 +54,30 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading', path=
 def after_request(response):
     # Only modify cache headers for asset routes
     if '/assets/' in request.path:
-        print(f"[DEBUG] Processing asset route: {request.path}")
-        print(f"[DEBUG] Cache-Control before: {response.headers.get('Cache-Control', 'NOT SET')}")
+        server_logger.debug(f"Processing asset route: {request.path}")
+        server_logger.debug(f"Cache-Control before: {response.headers.get('Cache-Control', 'NOT SET')}")
         
         # Always override cache headers for assets - Flask-SocketIO sets bad defaults
         if '/screensavers/' in request.path:
             if request.path.endswith('/'):
                 # Directory listing - cache for 1 hour
                 response.headers['Cache-Control'] = 'public, max-age=3600'
-                print(f"[DEBUG] Set Cache-Control for directory listing")
+                server_logger.debug("Set Cache-Control for directory listing")
             else:
                 # Individual image - cache for 1 day
                 response.headers['Cache-Control'] = 'public, max-age=86400, immutable'
-                print(f"[DEBUG] Set Cache-Control for image")
+                server_logger.debug("Set Cache-Control for image")
         else:
             # Default for other assets - cache for 1 day
             response.headers['Cache-Control'] = 'public, max-age=86400'
-            print(f"[DEBUG] Set Cache-Control for other asset")
+            server_logger.debug("Set Cache-Control for other asset")
         
         # Remove conflicting headers that prevent caching
         response.headers.pop('Pragma', None)
         if 'Expires' in response.headers:
             response.headers.pop('Expires')
         
-        print(f"[DEBUG] Cache-Control after: {response.headers.get('Cache-Control', 'NOT SET')}")
+        server_logger.debug(f"Cache-Control after: {response.headers.get('Cache-Control', 'NOT SET')}")
     return response
 
 # Global state
@@ -98,7 +99,7 @@ def broadcast_service_status() -> None:
     try:
         socketio.emit('service_status', active_services, namespace='/')
     except Exception as e:
-        print(f"\u26a0\ufe0f  Error broadcasting service status: {e}")
+        server_logger.error(f"⚠️  Error broadcasting service status: {e}")
 
 def is_service_active(service_name: str) -> bool:
     """Check if a specific service is currently active"""
@@ -116,7 +117,7 @@ def get_service_monitor(service_name: str) -> Optional[Any]:
 @socketio.on('connect')
 def handle_connect():
     app_state.connected_clients += 1
-    print(f"Client connected. Total clients: {app_state.connected_clients}")
+    server_logger.info(f"Client connected. Total clients: {app_state.connected_clients}")
     
     # Send current service status
     active_services = get_active_services()
@@ -132,12 +133,12 @@ def handle_disconnect():
     try:
         client_id = request.sid  # type: ignore
         app_state.connected_clients -= 1
-        print(f"Client disconnected: {client_id[:8]}... Total clients: {app_state.connected_clients}")
+        server_logger.info(f"Client disconnected: {client_id[:8]}... Total clients: {app_state.connected_clients}")
         
         # Remove from progress tracking if present
         app_state.remove_client_needing_progress(client_id)
         if len(app_state.clients_needing_progress) == 0:
-            print("📊 Stopping progress tracking (no clients need it)")
+            server_logger.info("📊 Stopping progress tracking (no clients need it)")
     except Exception:
         # Suppress werkzeug disconnect errors
         pass
@@ -159,28 +160,28 @@ def handle_enable_progress():
     # Log which service is currently active
     current_track = app_state.get_track_data()
     current_source = current_track.get('source', 'none').upper() if current_track else 'NONE'
-    print(f"📡 Received 'enable_progress' from client {client_id[:8]}... (Active source: {current_source})")
+    server_logger.info(f"📡 Received 'enable_progress' from client {client_id[:8]}... (Active source: {current_source})")
     
     if app_state.add_client_needing_progress(client_id):
-        print(f"✅ Progress updates enabled for client {client_id[:8]}... (Total: {len(app_state.clients_needing_progress)})")
+        server_logger.info(f"✅ Progress updates enabled for client {client_id[:8]}... (Total: {len(app_state.clients_needing_progress)})")
         
         # If this is the first client needing progress, log the change
         if len(app_state.clients_needing_progress) == 1:
-            print("📊 Starting progress tracking (client requested)")
+            server_logger.info("📊 Starting progress tracking (client requested)")
 
 @socketio.on('disable_progress')
 def handle_disable_progress():
     """Client disables progress effects and no longer needs progress updates"""
     client_id = request.sid  # type: ignore
     
-    print(f"📡 Received 'disable_progress' from client {client_id[:8]}...")
+    server_logger.info(f"📡 Received 'disable_progress' from client {client_id[:8]}...")
     
     if app_state.remove_client_needing_progress(client_id):
-        print(f"⏸️  Progress updates disabled for client {client_id[:8]}... (Total: {len(app_state.clients_needing_progress)})")
+        server_logger.info(f"⏸️  Progress updates disabled for client {client_id[:8]}... (Total: {len(app_state.clients_needing_progress)})")
         
         # If no clients need progress anymore, log the change
         if len(app_state.clients_needing_progress) == 0:
-            print("📊 Stopping progress tracking (no clients need it)")
+            server_logger.info("📊 Stopping progress tracking (no clients need it)")
 
 # HTTP routes
 @app.route('/')
@@ -320,7 +321,7 @@ def initialize_spotify():
     # Verify authentication by making a test call
     try:
         spotify_client.current_user()
-        print("✓ Spotify authentication successful!\n")
+        server_logger.info("✓ Spotify authentication successful!")
     except Exception as e:
         raise Exception(f"Spotify authentication failed: {e}")
     
@@ -348,13 +349,13 @@ def try_start_sonos() -> bool:
         device_monitor = SonosMonitor(app_state, socketio)
         if device_monitor.start():
             app_state.add_monitor(device_monitor)
-            print("✅ Sonos service recovered and activated")
+            server_logger.info("✅ Sonos service recovered and activated")
             broadcast_service_status()
             return True
         else:
             return False
     except Exception as e:
-        print(f"⚠️  Sonos recovery attempt failed: {e}")
+        server_logger.warning(f"⚠️  Sonos recovery attempt failed: {e}")
         return False
 
 def try_start_spotify() -> bool:
@@ -371,7 +372,7 @@ def try_start_spotify() -> bool:
         # Try to start new monitor
         monitor = initialize_spotify()
         app_state.add_monitor(monitor)
-        print("✅ Spotify service recovered and activated")
+        server_logger.info("✅ Spotify service recovered and activated")
         
         # Give monitor a moment to verify it's working
         time.sleep(2)
@@ -384,13 +385,13 @@ def try_start_spotify() -> bool:
             # Check again if service became active
             time.sleep(3)
             if is_service_active('spotify'):
-                print("✅ Spotify service is active (callback server already running)")
+                server_logger.info("✅ Spotify service is active (callback server already running)")
                 broadcast_service_status()
                 return True
-        print(f"⚠️  Spotify recovery attempt failed: {e}")
+        server_logger.warning(f"⚠️  Spotify recovery attempt failed: {e}")
         return False
     except Exception as e:
-        print(f"⚠️  Spotify recovery attempt failed: {e}")
+        server_logger.warning(f"⚠️  Spotify recovery attempt failed: {e}")
         return False
 
 def service_recovery_loop() -> None:
@@ -403,9 +404,9 @@ def service_recovery_loop() -> None:
     timeout_minutes = Config.SERVICE_RECOVERY_TIMEOUT_MINUTES
     
     # Give initial startup time before starting recovery checks
-    print("🔄 Service recovery thread started")
-    print(f"   Monitoring services: {', '.join(sorted(desired_services))}")
-    print(f"   Waiting {Config.SERVICE_RECOVERY_INITIAL_DELAY}s for initial service startup...")
+    server_logger.info("🔄 Service recovery thread started")
+    server_logger.info(f"   Monitoring services: {', '.join(sorted(desired_services))}")
+    server_logger.info(f"   Waiting {Config.SERVICE_RECOVERY_INITIAL_DELAY}s for initial service startup...")
     time.sleep(Config.SERVICE_RECOVERY_INITIAL_DELAY)
     
     while recovery_running:
@@ -423,14 +424,14 @@ def service_recovery_loop() -> None:
                     elapsed_time = time.time() - failure_start
                     if elapsed_time > max_retry_duration:
                         if retry_count[service] > 0:  # Only print once
-                            print(f"⏱️  {service.upper()} service recovery timeout ({timeout_minutes} minute{'s' if timeout_minutes != 1 else ''} exceeded)")
-                            print(f"   Stopped retrying after {retry_count[service]} attempts")
+                            server_logger.warning(f"⏱️  {service.upper()} service recovery timeout ({timeout_minutes} minute{'s' if timeout_minutes != 1 else ''} exceeded)")
+                            server_logger.warning(f"   Stopped retrying after {retry_count[service]} attempts")
                             retry_count[service] = -1  # Mark as timed out
                         continue  # Skip this service
                     
                     retry_count[service] += 1
                     remaining_time = int(max_retry_duration - elapsed_time)
-                    print(f"🔄 Attempting to recover {service.upper()} service (attempt #{retry_count[service]}, timeout in {remaining_time}s)...")
+                    server_logger.info(f"🔄 Attempting to recover {service.upper()} service (attempt #{retry_count[service]}, timeout in {remaining_time}s)...")
                     
                     success = False
                     if service == 'sonos':
@@ -442,12 +443,12 @@ def service_recovery_loop() -> None:
                         retry_count[service] = 0  # Reset counter on success
                         first_failure_time[service] = None
                     else:
-                        print(f"⚠️  {service.upper()} recovery failed. Will retry in 30 seconds...")
+                        server_logger.warning(f"⚠️  {service.upper()} recovery failed. Will retry in 30 seconds...")
                 else:
                     # Service is active, reset retry counter and failure time
                     if retry_count[service] != 0:
                         if retry_count[service] > 0:
-                            print(f"✅ {service.upper()} service is healthy again")
+                            server_logger.info(f"✅ {service.upper()} service is healthy again")
                         retry_count[service] = 0
                         first_failure_time[service] = None
                     
@@ -455,7 +456,7 @@ def service_recovery_loop() -> None:
                     monitor = get_service_monitor(service)
                     if monitor:
                         if not monitor.is_running or not monitor.is_ready:
-                            print(f"⚠️  {service.upper()} service detected as unhealthy, marking for recovery...")
+                            server_logger.warning(f"⚠️  {service.upper()} service detected as unhealthy, marking for recovery...")
                             monitor.is_ready = False
                             if monitor in app_state.active_monitors:
                                 app_state.remove_monitor(monitor)
@@ -465,16 +466,16 @@ def service_recovery_loop() -> None:
             time.sleep(30)
             
         except Exception as e:
-            print(f"⚠️  Error in service recovery loop: {e}")
+            server_logger.error(f"⚠️  Error in service recovery loop: {e}")
             time.sleep(30)
     
-    print("🔄 Service recovery thread stopped")
+    server_logger.info("🔄 Service recovery thread stopped")
 
 def main() -> int:
     """Main entry point"""
-    print("=" * 60)
-    print("Now Playing Server (Multi-Source Monitor)")
-    print("=" * 60)
+    server_logger.info("=" * 60)
+    server_logger.info("Now Playing Server (Multi-Source Monitor)")
+    server_logger.info("=" * 60)
     
     global desired_services, recovery_running, recovery_thread
     
@@ -486,67 +487,67 @@ def main() -> int:
         # Set desired services based on configuration
         desired_services = Config.get_desired_services()
         
-        print("\n🔧 Initializing playback monitoring...")
-        print(f"Configuration: MEDIA_SERVICE_METHOD={Config.MEDIA_SERVICE_METHOD.upper()}\n")
+        server_logger.info("🔧 Initializing playback monitoring...")
+        server_logger.info(f"Configuration: MEDIA_SERVICE_METHOD={Config.MEDIA_SERVICE_METHOD.upper()}")
         
         if Config.MEDIA_SERVICE_METHOD == 'spotify':
             # Spotify only
-            print("=" * 60)
-            print("Mode: Spotify Connect Only")
-            print("=" * 60)
+            server_logger.info("=" * 60)
+            server_logger.info("Mode: Spotify Connect Only")
+            server_logger.info("=" * 60)
             
             monitor = initialize_spotify()
             app_state.add_monitor(monitor)
-            print("\n✅ Spotify monitoring active")
+            server_logger.info("✅ Spotify monitoring active")
             
         elif Config.MEDIA_SERVICE_METHOD == 'sonos':
             # Sonos only
-            print("=" * 60)
-            print("Mode: Sonos API Only")
-            print("=" * 60)
+            server_logger.info("=" * 60)
+            server_logger.info("Mode: Sonos API Only")
+            server_logger.info("=" * 60)
             
             device_monitor = SonosMonitor(app_state, socketio)
             if device_monitor.start():
                 app_state.add_monitor(device_monitor)
-                print("\n✅ Sonos monitoring active")
+                server_logger.info("✅ Sonos monitoring active")
             else:
-                print("\n✗ Failed to start Sonos monitoring")
+                server_logger.error("✗ Failed to start Sonos monitoring")
                 return 1
                 
         else:  # Config.MEDIA_SERVICE_METHOD == 'all'
             # Monitor BOTH simultaneously
-            print("=" * 60)
+            server_logger.info("=" * 60)
             # Use threading to initialize services in parallel
             sonos_result = {'started': False, 'monitor': None}
             spotify_result = {'started': False, 'monitor': None}
             
             def init_sonos():
                 """Initialize Sonos in background thread"""
-                print("🔵 Starting Sonos monitor...")
+                server_logger.info("🔵 Starting Sonos monitor...")
                 try:
                     if SONOS_AVAILABLE:
                         device_monitor = SonosMonitor(app_state, socketio)
                         if device_monitor.start():
                             sonos_result['monitor'] = device_monitor
                             sonos_result['started'] = True
-                            print("✅ Sonos monitoring active")
+                            server_logger.info("✅ Sonos monitoring active")
                         else:
-                            print("⚠️  Sonos monitoring unavailable (no devices found)")
+                            server_logger.warning("⚠️  Sonos monitoring unavailable (no devices found)")
                     else:
-                        print("⚠️  Sonos library not installed")
+                        server_logger.warning("⚠️  Sonos library not installed")
                 except Exception as e:
-                    print(f"⚠️  Sonos initialization failed: {e}")
+                    server_logger.warning(f"⚠️  Sonos initialization failed: {e}")
             
             def init_spotify():
                 """Initialize Spotify in background thread"""
-                print("🟢 Starting Spotify monitor...")
+                server_logger.info("🟢 Starting Spotify monitor...")
                 try:
                     spotify_monitor = initialize_spotify()
                     spotify_result['monitor'] = spotify_monitor
                     spotify_result['started'] = True
-                    print("✅ Spotify monitoring active")
+                    server_logger.info("✅ Spotify monitoring active")
                 except Exception as e:
-                    print(f"⚠️  Spotify monitoring unavailable: {e}")
+                    server_logger.warning(f"⚠️  Spotify monitoring unavailable: {e}")
             
             # Start both initializations in parallel
             sonos_thread = threading.Thread(target=init_sonos, daemon=True)
@@ -562,7 +563,7 @@ def main() -> int:
                 
                 # Check if at least one service has started
                 if sonos_result['started'] or spotify_result['started']:
-                    print(f"\n✓ At least one service ready after {i+1}s")
+                    server_logger.info(f"At least one service ready after {i+1}s")
                     break
                     
                 # If both threads have finished but neither succeeded, exit early
@@ -575,8 +576,6 @@ def main() -> int:
             if spotify_thread.is_alive():
                 spotify_thread.join(timeout=2)
             
-            print()
-            
             # Add successfully started monitors to active list
             if sonos_result['started'] and sonos_result['monitor']:
                 app_state.add_monitor(sonos_result['monitor'])
@@ -586,15 +585,15 @@ def main() -> int:
             
             # Check if at least one monitor started
             if not sonos_result['started'] and not spotify_result['started']:
-                print("✗ Failed to start any monitoring service")
+                server_logger.error("✗ Failed to start any monitoring service")
                 return 1
             
             if sonos_result['started'] and spotify_result['started']:
-                print("✅ Both Sonos and Spotify monitoring active (Sonos priority)")
+                server_logger.info("✅ Both Sonos and Spotify monitoring active (Sonos priority)")
             elif sonos_result['started']:
-                print("✅ Sonos monitoring active")
+                server_logger.info("✅ Sonos monitoring active")
             else:
-                print("✅ Spotify monitoring active")
+                server_logger.info("✅ Spotify monitoring active")
         
         # Start service recovery thread
         recovery_running = True
@@ -605,29 +604,29 @@ def main() -> int:
         host = Config.SERVER_HOST
         port = Config.WEBSOCKET_SERVER_PORT
         
-        print(f"\n🚀 Starting server on {host}:{port}...")
-        print("WebSocket endpoints:")
+        server_logger.info(f"🚀 Starting server on {host}:{port}...")
+        server_logger.info("WebSocket endpoints:")
         
         # Show all accessible endpoints
         local_ips = get_local_ip()
         for ip in local_ips:
             protocol = 'wss' if ip.startswith('127.') or ip == 'localhost' else 'ws'
-            print(f"  {protocol}://{ip}:{port}/")
+            server_logger.info(f"  {protocol}://{ip}:{port}/")
         
-        print("Press Ctrl+C to stop\n")
+        server_logger.info("Press Ctrl+C to stop")
         
         # Start Flask-SocketIO server
         socketio.run(app, host=host, port=port, debug=False)
         
     except KeyboardInterrupt:
-        print("\n\nShutting down...")
+        server_logger.info("\nShutting down...")
         recovery_running = False
         if recovery_thread:
             recovery_thread.join(timeout=2)
         for monitor in app_state.active_monitors:
             monitor.stop()
     except Exception as e:
-        print(f"\n✗ Error: {e}")
+        server_logger.error(f"✗ Error: {e}")
         import traceback
         traceback.print_exc()
         return 1
@@ -662,19 +661,19 @@ def initialize_for_gunicorn():
             else:  # 'all'
                 desired_services = {'sonos', 'spotify'}
             
-            print("\n🔧 Initializing playback monitoring (Gunicorn mode)...")
-            print(f"Configuration: MEDIA_SERVICE_METHOD={Config.MEDIA_SERVICE_METHOD.upper()}\n")
+            server_logger.info("🔧 Initializing playback monitoring (Gunicorn mode)...")
+            server_logger.info(f"Configuration: MEDIA_SERVICE_METHOD={Config.MEDIA_SERVICE_METHOD.upper()}")
             
             if Config.MEDIA_SERVICE_METHOD == 'spotify':
                 monitor = initialize_spotify()
                 app_state.add_monitor(monitor)
-                print("✅ Spotify monitoring active")
+                server_logger.info("✅ Spotify monitoring active")
                 
             elif Config.MEDIA_SERVICE_METHOD == 'sonos':
                 device_monitor = SonosMonitor(app_state, socketio)
                 if device_monitor.start():
                     app_state.add_monitor(device_monitor)
-                    print("✅ Sonos monitoring active")
+                    server_logger.info("✅ Sonos monitoring active")
                     
             else:  # 'all'
                 # Initialize both in parallel
@@ -689,7 +688,7 @@ def initialize_for_gunicorn():
                                 sonos_result['monitor'] = device_monitor
                                 sonos_result['started'] = True
                     except Exception as e:
-                        print(f"⚠️  Sonos initialization failed: {e}")
+                        server_logger.warning(f"⚠️  Sonos initialization failed: {e}")
                 
                 def init_spotify():
                     try:
@@ -697,7 +696,7 @@ def initialize_for_gunicorn():
                         spotify_result['monitor'] = spotify_monitor
                         spotify_result['started'] = True
                     except Exception as e:
-                        print(f"⚠️  Spotify initialization failed: {e}")
+                        server_logger.warning(f"⚠️  Spotify initialization failed: {e}")
                 
                 sonos_thread = threading.Thread(target=init_sonos, daemon=True)
                 spotify_thread = threading.Thread(target=init_spotify, daemon=True)
@@ -716,7 +715,7 @@ def initialize_for_gunicorn():
                     app_state.add_monitor(spotify_result['monitor'])
                 
                 if sonos_result['started'] or spotify_result['started']:
-                    print("✅ Monitoring services initialized")
+                    server_logger.info("✅ Monitoring services initialized")
             
             # Start service recovery thread
             if not recovery_running:
@@ -725,7 +724,7 @@ def initialize_for_gunicorn():
                 recovery_thread.start()
                     
         except Exception as e:
-            print(f"⚠️  Error initializing monitors: {e}")
+            server_logger.error(f"⚠️  Error initializing monitors: {e}")
 
 # Register cleanup handler
 def cleanup_monitors():

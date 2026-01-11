@@ -16,6 +16,7 @@ import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 
 from config import Config
+from lib.utils.logger import auth_logger
 
 
 # Global state for OAuth callback
@@ -99,12 +100,12 @@ class SpotifyAuthWithServer:
             # Check if server is already running
             if oauth_callback_server is not None:
                 self.server = oauth_callback_server
-                print(f"✓ Reusing existing OAuth callback server on port {self.local_port}")
+                auth_logger.info(f"✓ Reusing existing OAuth callback server on port {self.local_port}")
                 return
             
             try:
                 port = self.local_port
-                print(f"Starting OAuth callback server on localhost:{port}...")
+                auth_logger.info(f"Starting OAuth callback server on localhost:{port}...")
                 
                 self.server = HTTPServer(('localhost', port), OAuth2CallbackHandler)
                 
@@ -117,15 +118,15 @@ class SpotifyAuthWithServer:
                     context.load_cert_chain(cert_file, key_file)
                     self.server.socket = context.wrap_socket(self.server.socket, server_side=True)
                     protocol = 'https'
-                    print(f"✓ SSL enabled for OAuth callback server")
+                    auth_logger.info(f"✓ SSL enabled for OAuth callback server")
                 else:
                     protocol = 'http'
-                    print(f"⚠️  SSL certificates not found, using HTTP")
+                    auth_logger.warning(f"⚠️  SSL certificates not found, using HTTP")
                 
                 self.server_thread = threading.Thread(target=self.server.serve_forever, daemon=True)
                 self.server_thread.start()
                 time.sleep(0.5)
-                print(f"✓ OAuth callback server running on {protocol}://localhost:{port}/")
+                auth_logger.info(f"✓ OAuth callback server running on {protocol}://localhost:{port}/")
                 
                 # Store globally so it can be reused
                 oauth_callback_server = self.server
@@ -134,11 +135,11 @@ class SpotifyAuthWithServer:
                 # If server already exists globally but we hit this, reuse it
                 if oauth_callback_server is not None:
                     self.server = oauth_callback_server
-                    print(f"✓ Reusing existing OAuth callback server")
+                    auth_logger.info(f"✓ Reusing existing OAuth callback server")
                 else:
-                    print(f"✗ Error starting callback server: {e}")
+                    auth_logger.error(f"✗ Error starting callback server: {e}")
                     if 'Address already in use' in str(e):
-                        print(f"  Port {port} is already in use.")
+                        auth_logger.error(f"  Port {port} is already in use.")
                     raise
         
     def get_spotify_client(self):
@@ -165,11 +166,11 @@ class SpotifyAuthWithServer:
         
         if not token_info:
             auth_url = auth_manager.get_authorize_url()
-            print(f"\nAuthorization required. Opening browser...")
-            print(f"If browser doesn't open, go to: {auth_url}\n")
+            auth_logger.info("Authorization required. Opening browser...")
+            auth_logger.info(f"If browser doesn't open, go to: {auth_url}")
             webbrowser.open(auth_url)
             
-            print("Waiting for authorization callback...")
+            auth_logger.info("Waiting for authorization callback...")
             callback_received.wait(timeout=120)
             
             if callback_code:

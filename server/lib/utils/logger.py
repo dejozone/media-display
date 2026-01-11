@@ -6,6 +6,20 @@ Provides consistent logging format with levels and context.
 import logging
 import sys
 from typing import Optional
+from datetime import datetime
+
+
+class TimezoneFormatter(logging.Formatter):
+    """Custom formatter that includes timezone offset in timestamps"""
+    
+    def formatTime(self, record, datefmt=None):
+        # Get the local time with timezone
+        dt = datetime.fromtimestamp(record.created).astimezone()
+        if datefmt:
+            return dt.strftime(datefmt)
+        else:
+            return dt.strftime('%Y-%m-%d %H:%M:%S %z')
+
 
 class StructuredLogger:
     """Structured logger with consistent formatting"""
@@ -22,9 +36,10 @@ class StructuredLogger:
         handler.setLevel(level)
         
         # Format: [TIME] [LEVEL] [SOURCE] Message
-        formatter = logging.Formatter(
+        # Using custom formatter to include timezone
+        formatter = TimezoneFormatter(
             '%(asctime)s [%(levelname)s] [%(name)s] %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
+            datefmt='%Y-%m-%d %H:%M:%S %z'
         )
         handler.setFormatter(formatter)
         self.logger.addHandler(handler)

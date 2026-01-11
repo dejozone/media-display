@@ -5,6 +5,7 @@ Monitors Spotify playback and broadcasts updates
 import time
 from typing import Optional, Dict, Any
 from lib.monitors.base import BaseMonitor
+from lib.utils.logger import monitor_logger
 
 class SpotifyMonitor(BaseMonitor):
     """Monitor Spotify playback and broadcast updates"""
@@ -49,12 +50,12 @@ class SpotifyMonitor(BaseMonitor):
                 }
             return None
         except Exception as e:
-            print(f"Error getting playback: {e}")
+            monitor_logger.error(f"Error getting playback: {e}")
             return None
     
     def _monitor_loop(self):
         """Main monitoring loop"""
-        print("Starting Spotify playback monitor...")
+        monitor_logger.info("Starting Spotify playback monitor...")
         
         while self.is_running:
             try:
@@ -99,7 +100,7 @@ class SpotifyMonitor(BaseMonitor):
                         
                         # Log when switching to Spotify as progress source
                         if major_change and (current_track_data is None or current_track_data.get('source') != 'spotify'):
-                            print("📊 Progress source: SPOTIFY (fallback)")
+                            monitor_logger.info("📊 Progress source: SPOTIFY (fallback)")
                         
                         self.app_state.update_track_data(track_data)
                         
@@ -111,7 +112,7 @@ class SpotifyMonitor(BaseMonitor):
                         # Only log major changes, not every position update
                         if major_change:
                             status = '🎵' if track_data['is_playing'] else '⏸️'
-                            print(f"{status} [SPOTIFY] {track_data['track_name']} - {track_data['artist']}")
+                            monitor_logger.info(f"{status} [SPOTIFY] {track_data['track_name']} - {track_data['artist']}")
                 
                 elif current_track_data is not None and current_track_data.get('source') == 'spotify':
                     # Only clear if current source is Spotify
@@ -122,22 +123,22 @@ class SpotifyMonitor(BaseMonitor):
                         self.socketio.emit('track_update', None, namespace='/')
                     except Exception:
                         pass
-                    print("⏹️  [SPOTIFY] No track playing")
+                    monitor_logger.info("⏹️  [SPOTIFY] No track playing")
                 
                 # Sleep for 2 seconds before next check
                 time.sleep(2)
                 
             except Exception as e:
-                print(f"Error in Spotify monitor loop: {e}")
+                monitor_logger.error(f"Error in Spotify monitor loop: {e}")
                 time.sleep(5)
     
-    def start(self) -> bool:
+    def start(self):
         """Start monitoring in background thread"""
         self._start_thread(self._monitor_loop)
-        print("✓ Spotify monitor started")
+        monitor_logger.info("✓ Spotify monitor started")
         return True
     
     def stop(self):
         """Stop monitoring"""
         self._stop_thread()
-        print("Spotify monitor stopped")
+        monitor_logger.info("Spotify monitor stopped")
