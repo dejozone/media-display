@@ -6,20 +6,19 @@ const CONFIG = {
         WS_PORT: 5001,
         WS_SSL_CERT_VERIFY: false,
         WS_SUB_PATH: '/notis/media-display/socket.io',
-        DEF_ALBUM_ART_PATH: 'assets/images/cat.jpg',
     },
     PROD: {
         WS_URL: null,
         WS_PORT: null,
         WS_SSL_CERT_VERIFY: true,
         WS_SUB_PATH: '/notis/media-display/socket.io',
-        DEF_ALBUM_ART_PATH: 'assets/images/cat.jpg',
     },
     WS_MAX_RECON_ATTEMPTS: 10,
     WS_RECONN_WAIT_MINUTES: 5,
     CURSOR_HIDE_DELAY: 3000,
     SCREENSAVER_REFRESH_INTERVAL: 300000,
     SCREENSAVER_PAUSED_DELAY_MINUTES: 5,
+    DEF_ALBUM_ART_PATH: 'assets/images/cat.jpg',
     LABEL_TIMEOUT: 5000,
     AUTO_COLLAPSE_TIMEOUT: 10000,
     TRIPLE_CLICK_TIMEOUT: 600
@@ -66,12 +65,12 @@ const EFFECT_NAMES = {
 
 // ===== CONFIGURATION SETUP =====
 const hostname = window.location.hostname;
-const selectedConfig = hostname === CONFIG.PROD_ENV ? CONFIG.PROD : CONFIG.LOCAL;
+const selectedEnvConfig = hostname === CONFIG.PROD_ENV ? CONFIG.PROD : CONFIG.LOCAL;
 
 // Determine WebSocket URL
 let WS_URL;
-if (selectedConfig.WS_URL) {
-    WS_URL = selectedConfig.WS_URL;
+if (selectedEnvConfig.WS_URL) {
+    WS_URL = selectedEnvConfig.WS_URL;
 } else {
     // If not set, determine from browser root URL
     const hostname = window.location.hostname || 'localhost';
@@ -80,17 +79,14 @@ if (selectedConfig.WS_URL) {
 }
 
 // Handle WS_PORT - append port if set in config or available from browser
-if (selectedConfig.WS_PORT) {
-    WS_URL = `${WS_URL}:${selectedConfig.WS_PORT}`;
+if (selectedEnvConfig.WS_PORT) {
+    WS_URL = `${WS_URL}:${selectedEnvConfig.WS_PORT}`;
 } else if (window.location.port) {
     WS_URL = `${WS_URL}:${window.location.port}`;
 }
 
 // Note: WS_SUB_PATH is now handled in Socket.IO path option, not in URL
 // This allows proper Socket.IO routing through nginx subpaths
-
-// Set DEF_ALBUM_ART_PATH with default fallback
-const DEF_ALBUM_ART_PATH = selectedConfig.DEF_ALBUM_ART_PATH || 'assets/images/cat.jpg';
 
 // DOM elements
 const elements = {
@@ -125,7 +121,7 @@ async function loadScreensaverImages(forceRefresh = false) {
     }
     
     try {
-        console.log('Loading screensaver images...');
+        // console.log('Loading screensaver images...');
         const response = await fetch('assets/images/screensavers/', {
             cache: forceRefresh ? 'reload' : 'default' // Force reload or use HTTP cache
         });
@@ -140,7 +136,7 @@ async function loadScreensaverImages(forceRefresh = false) {
         if (!Array.isArray(filenames) || filenames.length === 0) {
             console.warn('No screensaver images found in directory');
             // Fallback to a default image if available
-            screensaverImages = [DEF_ALBUM_ART_PATH];
+            screensaverImages = [CONFIG.DEF_ALBUM_ART_PATH];
             screensaverImagesLoaded = true;
             return screensaverImages;
         }
@@ -340,7 +336,7 @@ function connectWebSocket() {
     // 3. Then reload this page
     
     socket = io(WS_URL, {
-        path: selectedConfig.WS_SUB_PATH ? `${selectedConfig.WS_SUB_PATH}` : '/socket.io',
+        path: selectedEnvConfig.WS_SUB_PATH ? `${selectedEnvConfig.WS_SUB_PATH}` : '/socket.io',
         transports: ['websocket', 'polling'],
         reconnection: true,
         reconnectionDelay: 1000,
@@ -691,7 +687,7 @@ async function startScreensaverCycle() {
             const handleLoad = () => {
                 elements.screensaverImage.style.opacity = '1';
                 retryState.currentImageLoaded = true;
-                console.log(`✓ Successfully loaded: ${imageSrc}`);
+                // console.log(`✓ Successfully loaded: ${imageSrc}`);
                 // Remove handlers after use
                 elements.screensaverImage.removeEventListener('load', handleLoad);
                 elements.screensaverImage.removeEventListener('error', handleError);
@@ -2079,7 +2075,7 @@ function updateDisplay(trackData) {
                 console.warn('Failed to load album art, using default image');
                 
                 // Load default image
-                elements.albumArt.src = DEF_ALBUM_ART_PATH;
+                elements.albumArt.src = CONFIG.DEF_ALBUM_ART_PATH;
                 elements.albumArt.style.transition = 'opacity 0.3s ease';
                 elements.albumArt.style.opacity = '1';
                 
