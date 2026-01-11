@@ -101,6 +101,8 @@ class SpotifyMonitor(BaseMonitor):
                         # Log when switching to Spotify as progress source
                         if major_change and (current_track_data is None or current_track_data.get('source') != 'spotify'):
                             monitor_logger.info("📊 Progress source: SPOTIFY (fallback)")
+                            monitor_logger.debug(f"   Switching from {current_track_data.get('source', 'none') if current_track_data else 'none'} (priority {current_track_data.get('source_priority', 'N/A') if current_track_data else 'N/A'}) to spotify (priority {self.source_priority})")
+                            monitor_logger.debug(f"   Reason: can_take_over={can_take_over}, time_since_last_update={int(time_since_last_update)}s")
                         
                         self.app_state.update_track_data(track_data)
                         
