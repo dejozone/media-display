@@ -9,20 +9,10 @@ import os
 import time
 import threading
 import logging
-import ssl
-import socket
-import traceback
-from typing import Dict, List, Any, Optional, Set
+from typing import Dict, Any, Optional, Set
 from flask import Flask, jsonify, send_from_directory, Response, request
 from flask_socketio import SocketIO, emit
 from flask_cors import CORS
-import spotipy
-from spotipy.oauth2 import SpotifyOAuth
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs
-import webbrowser
-from dotenv import load_dotenv
-import requests
 import urllib3
 import atexit
 from config import Config
@@ -31,10 +21,8 @@ from config import Config
 from lib.app_state import AppState
 from lib.monitors.spotify_monitor import SpotifyMonitor
 from lib.monitors.sonos_monitor import SonosMonitor, SONOS_AVAILABLE
-from lib.auth.spotify_auth import OAuth2CallbackHandler, SpotifyAuthWithServer
+from lib.auth.spotify_auth import SpotifyAuthWithServer
 from lib.utils.network import get_local_ip
-from lib.utils.time_utils import parse_time_to_ms
-from lib.utils.device_utils import format_device_display
 
 # Configure SSL verification for Spotify API (from Config)
 if not Config.SSL_VERIFY_SPOTIFY:

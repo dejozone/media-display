@@ -4,7 +4,6 @@ Provides common functionality for all media monitors
 """
 from abc import ABC, abstractmethod
 import threading
-import time
 from typing import Optional, Dict, Any
 
 

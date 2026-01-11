@@ -3,12 +3,8 @@ Spotify Monitor
 Monitors Spotify playback and broadcasts updates
 """
 import time
-from typing import Optional, Dict, Any, Callable
-
-import spotipy
-
+from typing import Optional, Dict, Any
 from lib.monitors.base import BaseMonitor
-
 
 class SpotifyMonitor(BaseMonitor):
     """Monitor Spotify playback and broadcast updates"""

@@ -2,7 +2,6 @@
 Gunicorn configuration for Flask-SocketIO production deployment
 """
 import os
-import multiprocessing
 
 # Server socket
 bind = f"{os.getenv('SERVER_HOST', '0.0.0.0')}:{os.getenv('WEBSOCKET_SERVER_PORT', '5001')}"

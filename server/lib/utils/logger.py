@@ -6,7 +6,6 @@ Provides consistent logging format with levels and context.
 import logging
 import sys
 from typing import Optional
-from datetime import datetime
 
 class StructuredLogger:
     """Structured logger with consistent formatting"""

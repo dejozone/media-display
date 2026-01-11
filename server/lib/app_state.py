@@ -6,7 +6,6 @@ import threading
 from typing import Optional, Dict, Any, Set, List
 from lib.monitors.base import BaseMonitor
 
-
 class AppState:
     """Centralized application state"""
     
