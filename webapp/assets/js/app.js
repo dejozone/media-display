@@ -16,6 +16,7 @@ const CONFIG = {
         DEF_ALBUM_ART_PATH: 'assets/images/cat.jpg',
     },
     MAX_RECONNECT_ATTEMPTS: 10,
+    WEBSOCKET_RECONN_WAIT_MINUTES: 5,
     CURSOR_HIDE_DELAY: 3000,
     SCREENSAVER_REFRESH_INTERVAL: 300000,
     LABEL_TIMEOUT: 5000,
@@ -292,6 +293,9 @@ let progressEffectState = 'off';
 // WebSocket connection
 let socket = null;
 let reconnectAttempts = 0;
+let reconnectCycle = 0;
+let waitingForRetry = false;
+let retryWaitTimeout = null;
 let currentDeviceList = [];
 let currentAlbumName = '';
 let currentAlbumColors = [];
@@ -338,6 +342,18 @@ function connectWebSocket() {
     socket.on('connect', () => {
         console.log('Connected to server');
         reconnectAttempts = 0;
+        reconnectCycle = 0;
+        waitingForRetry = false;
+        
+        // Clear any pending retry timeout
+        if (retryWaitTimeout) {
+            clearTimeout(retryWaitTimeout);
+            retryWaitTimeout = null;
+        }
+        
+        // Clear waiting state and resume animations
+        document.body.classList.remove('waiting-for-retry');
+        
         updateConnectionStatus('connected');
         
         // Request current track
@@ -373,7 +389,44 @@ function connectWebSocket() {
         }
         
         if (reconnectAttempts >= CONFIG.MAX_RECONNECT_ATTEMPTS) {
-            showLoading('Connection failed. Refresh to retry.');
+            if (!waitingForRetry) {
+                // First time hitting max attempts in this cycle
+                reconnectCycle++;
+                waitingForRetry = true;
+                
+                const waitMinutes = CONFIG.WEBSOCKET_RECONN_WAIT_MINUTES;
+                const waitMs = waitMinutes * 60 * 1000;
+                const retryTime = new Date(Date.now() + waitMs);
+                
+                console.log(`Connection failed after ${CONFIG.MAX_RECONNECT_ATTEMPTS} attempts (cycle ${reconnectCycle}). Will retry in ${waitMinutes} minutes at ${retryTime.toLocaleTimeString()}`);
+                
+                showLoading(`Connection failed. Retrying in ${waitMinutes} minutes...`);
+                updateConnectionStatus('connection-failed');
+                
+                // Stop all animations during wait period
+                document.body.classList.add('waiting-for-retry');
+                
+                // Wait 5 minutes then reset and try again
+                retryWaitTimeout = setTimeout(() => {
+                    console.log(`Retry cycle ${reconnectCycle + 1} starting after ${waitMinutes} minute wait`);
+                    reconnectAttempts = 0;
+                    waitingForRetry = false;
+                    
+                    // Resume all animations when retrying starts again
+                    document.body.classList.remove('waiting-for-retry');
+                    
+                    // Disconnect and reconnect to trigger new connection attempts
+                    if (socket) {
+                        socket.disconnect();
+                        // Small delay before reconnecting
+                        setTimeout(() => {
+                            socket.connect();
+                            showLoading('Reconnecting...');
+                            updateConnectionStatus('connecting');
+                        }, 1000);
+                    }
+                }, waitMs);
+            }
         }
     });
     
