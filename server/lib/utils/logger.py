@@ -5,6 +5,7 @@ Provides consistent logging format with levels and context.
 
 import logging
 import sys
+import os
 from typing import Optional
 from datetime import datetime
 
@@ -80,9 +81,25 @@ class StructuredLogger:
         return f" ({', '.join(pairs)})"
 
 
+# Get default log level from environment
+def _get_default_log_level() -> int:
+    """Get log level from LOG_LEVEL environment variable, default to INFO"""
+    level_name = os.getenv('LOG_LEVEL', 'INFO').upper()
+    level_map = {
+        'DEBUG': logging.DEBUG,
+        'INFO': logging.INFO,
+        'WARNING': logging.WARNING,
+        'ERROR': logging.ERROR,
+        'CRITICAL': logging.CRITICAL
+    }
+    return level_map.get(level_name, logging.INFO)
+
+
 # Create singleton instances for different components
-def get_logger(name: str, level: int = logging.INFO) -> StructuredLogger:
+def get_logger(name: str, level: Optional[int] = None) -> StructuredLogger:
     """Get or create a logger for a component"""
+    if level is None:
+        level = _get_default_log_level()
     return StructuredLogger(name, level)
 
 

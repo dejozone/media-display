@@ -310,14 +310,16 @@ class SonosMonitor(BaseMonitor):
                                             self.app_state.update_track_data(current_track_data)
                                     
                                     # Always update position (whether events are working or not)
-                                    if current_track_data:
-                                        current_track_data['progress_ms'] = position_ms
-                                        current_track_data['duration_ms'] = duration_ms
-                                        current_track_data['is_playing'] = is_playing
-                                        current_track_data['timestamp'] = time.time()
+                                    # Get fresh track data to avoid race condition with events
+                                    fresh_track_data = self.app_state.get_track_data()
+                                    if fresh_track_data and fresh_track_data.get('source') == 'sonos':
+                                        fresh_track_data['progress_ms'] = position_ms
+                                        fresh_track_data['duration_ms'] = duration_ms
+                                        fresh_track_data['is_playing'] = is_playing
+                                        fresh_track_data['timestamp'] = time.time()
                                         
-                                        self.app_state.update_track_data(current_track_data)
-                                        self.socketio.emit('track_update', current_track_data, namespace='/')
+                                        self.app_state.update_track_data(fresh_track_data)
+                                        self.socketio.emit('track_update', fresh_track_data, namespace='/')
                                 
                                 break  # Only need to poll one device
                                 
