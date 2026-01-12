@@ -2,22 +2,23 @@
 const CONFIG = {
     PROD_ENV: 'media-display.projecttechcycle.org',
     LOCAL: {
-        WEBSOCKET_URL: null,
-        WEBSOCKET_PORT: 5001,
-        WEBSOCKET_SSL_CERT_VERIFY: false,
-        WEBSOCKET_SUB_PATH: '/notis/media-display/socket.io',
-        DEF_ALBUM_ART_PATH: 'assets/images/cat.jpg',
+        WS_URL: null,
+        WS_PORT: 5001,
+        WS_SSL_CERT_VERIFY: false,
+        WS_SUB_PATH: '/notis/media-display/socket.io',
     },
     PROD: {
-        WEBSOCKET_URL: null,
-        WEBSOCKET_PORT: null,
-        WEBSOCKET_SSL_CERT_VERIFY: true,
-        WEBSOCKET_SUB_PATH: '/notis/media-display/socket.io',
-        DEF_ALBUM_ART_PATH: 'assets/images/cat.jpg',
+        WS_URL: null,
+        WS_PORT: null,
+        WS_SSL_CERT_VERIFY: true,
+        WS_SUB_PATH: '/notis/media-display/socket.io',
     },
-    MAX_RECONNECT_ATTEMPTS: 10,
+    WS_MAX_RECON_ATTEMPTS: 10,
+    WS_RECONN_WAIT_MINUTES: 5,
     CURSOR_HIDE_DELAY: 3000,
     SCREENSAVER_REFRESH_INTERVAL: 300000,
+    SCREENSAVER_PAUSED_DELAY_MINUTES: 5,
+    DEF_ALBUM_ART_PATH: 'assets/images/cat.jpg',
     LABEL_TIMEOUT: 5000,
     AUTO_COLLAPSE_TIMEOUT: 10000,
     TRIPLE_CLICK_TIMEOUT: 600
@@ -64,31 +65,28 @@ const EFFECT_NAMES = {
 
 // ===== CONFIGURATION SETUP =====
 const hostname = window.location.hostname;
-const selectedConfig = hostname === CONFIG.PROD_ENV ? CONFIG.PROD : CONFIG.LOCAL;
+const selectedEnvConfig = hostname === CONFIG.PROD_ENV ? CONFIG.PROD : CONFIG.LOCAL;
 
 // Determine WebSocket URL
-let WEBSOCKET_URL;
-if (selectedConfig.WEBSOCKET_URL) {
-    WEBSOCKET_URL = selectedConfig.WEBSOCKET_URL;
+let WS_URL;
+if (selectedEnvConfig.WS_URL) {
+    WS_URL = selectedEnvConfig.WS_URL;
 } else {
     // If not set, determine from browser root URL
     const hostname = window.location.hostname || 'localhost';
     const protocol = window.location.protocol === 'https:' ? 'https' : 'http';
-    WEBSOCKET_URL = `${protocol}://${hostname}`;
+    WS_URL = `${protocol}://${hostname}`;
 }
 
-// Handle WEBSOCKET_PORT - append port if set in config or available from browser
-if (selectedConfig.WEBSOCKET_PORT) {
-    WEBSOCKET_URL = `${WEBSOCKET_URL}:${selectedConfig.WEBSOCKET_PORT}`;
+// Handle WS_PORT - append port if set in config or available from browser
+if (selectedEnvConfig.WS_PORT) {
+    WS_URL = `${WS_URL}:${selectedEnvConfig.WS_PORT}`;
 } else if (window.location.port) {
-    WEBSOCKET_URL = `${WEBSOCKET_URL}:${window.location.port}`;
+    WS_URL = `${WS_URL}:${window.location.port}`;
 }
 
-// Note: WEBSOCKET_SUB_PATH is now handled in Socket.IO path option, not in URL
+// Note: WS_SUB_PATH is now handled in Socket.IO path option, not in URL
 // This allows proper Socket.IO routing through nginx subpaths
-
-// Set DEF_ALBUM_ART_PATH with default fallback
-const DEF_ALBUM_ART_PATH = selectedConfig.DEF_ALBUM_ART_PATH || 'assets/images/cat.jpg';
 
 // DOM elements
 const elements = {
@@ -123,7 +121,7 @@ async function loadScreensaverImages(forceRefresh = false) {
     }
     
     try {
-        console.log('Loading screensaver images...');
+        // console.log('Loading screensaver images...');
         const response = await fetch('assets/images/screensavers/', {
             cache: forceRefresh ? 'reload' : 'default' // Force reload or use HTTP cache
         });
@@ -138,7 +136,7 @@ async function loadScreensaverImages(forceRefresh = false) {
         if (!Array.isArray(filenames) || filenames.length === 0) {
             console.warn('No screensaver images found in directory');
             // Fallback to a default image if available
-            screensaverImages = [DEF_ALBUM_ART_PATH];
+            screensaverImages = [CONFIG.DEF_ALBUM_ART_PATH];
             screensaverImagesLoaded = true;
             return screensaverImages;
         }
@@ -173,13 +171,13 @@ function startScreensaverRefresh() {
         clearInterval(screensaverRefreshInterval);
     }
     
-    // Refresh screensaver list every 5 minutes (300000 ms)
+    // Refresh screensaver list at configured interval
     screensaverRefreshInterval = setInterval(async () => {
         console.log('Background refresh: Updating screensaver images list...');
         await loadScreensaverImages(true); // Force refresh
-    }, 300000); // 5 minutes
+    }, CONFIG.SCREENSAVER_REFRESH_INTERVAL);
     
-    console.log('Screensaver background refresh enabled (every 5 minutes)');
+    console.log(`Screensaver background refresh enabled (every ${CONFIG.SCREENSAVER_REFRESH_INTERVAL / 60000} minutes)`);
 }
 
 // Load image on-demand - browser will use cache if available
@@ -292,10 +290,22 @@ let progressEffectState = 'off';
 // WebSocket connection
 let socket = null;
 let reconnectAttempts = 0;
+let reconnectCycle = 0;
+let waitingForRetry = false;
+let retryWaitTimeout = null;
+let wasInNoPlaybackBeforeError = false;
+let hasReceivedTrackData = false; // Track if we've ever received track data
 let currentDeviceList = [];
 let currentAlbumName = '';
 let currentAlbumColors = [];
 let rotationState = 0;
+
+// Paused screensaver delay - use config value
+let pausedScreensaverTimeout = null;
+const PAUSED_SCREENSAVER_DELAY = CONFIG.SCREENSAVER_PAUSED_DELAY_MINUTES * 60 * 1000;
+
+// Initial connection screensaver delay - wait 5 minutes before showing screensaver on first failure
+let initialScreensaverTimeout = null;
 
 // Cursor auto-hide in fullscreen
 let cursorHideTimeout = null;
@@ -325,19 +335,43 @@ function connectWebSocket() {
     // 2. Accept the security warning to trust the self-signed certificate
     // 3. Then reload this page
     
-    socket = io(WEBSOCKET_URL, {
-        path: selectedConfig.WEBSOCKET_SUB_PATH ? `${selectedConfig.WEBSOCKET_SUB_PATH}` : '/socket.io',
+    socket = io(WS_URL, {
+        path: selectedEnvConfig.WS_SUB_PATH ? `${selectedEnvConfig.WS_SUB_PATH}` : '/socket.io',
         transports: ['websocket', 'polling'],
         reconnection: true,
         reconnectionDelay: 1000,
         reconnectionDelayMax: 5000,
-        reconnectionAttempts: CONFIG.MAX_RECONNECT_ATTEMPTS
+        reconnectionAttempts: CONFIG.WS_MAX_RECON_ATTEMPTS
     });
     
     // Connection events
     socket.on('connect', () => {
         console.log('Connected to server');
         reconnectAttempts = 0;
+        reconnectCycle = 0;
+        waitingForRetry = false;
+        
+        // Preserve screensaver state if currently showing - only clear if we're not in screensaver mode
+        const wasInScreensaver = document.body.classList.contains('no-playback-active');
+        if (!wasInScreensaver) {
+            wasInNoPlaybackBeforeError = false;
+        }
+        
+        // Clear any pending retry timeout
+        if (retryWaitTimeout) {
+            clearTimeout(retryWaitTimeout);
+            retryWaitTimeout = null;
+        }
+        
+        // Clear any pending initial screensaver timeout
+        if (initialScreensaverTimeout) {
+            clearTimeout(initialScreensaverTimeout);
+            initialScreensaverTimeout = null;
+        }
+        
+        // Clear waiting state and resume animations
+        document.body.classList.remove('waiting-for-retry');
+        
         updateConnectionStatus('connected');
         
         // Request current track
@@ -355,30 +389,140 @@ function connectWebSocket() {
     
     socket.on('disconnect', () => {
         console.log('Disconnected from server');
+        
+        // Remove waiting state when disconnect triggers new reconnection cycle
+        document.body.classList.remove('waiting-for-retry');
+        
         updateConnectionStatus('disconnected');
-        showLoading('Reconnecting...');
+        
+        // Determine what to show:
+        // Priority: Keep screensaver active if already showing, or show it for connection errors
+        // Only show loading if we're currently showing the now-playing UI (had active music)
+        const wasInScreensaver = document.body.classList.contains('no-playback-active');
+        const isShowingNowPlaying = !elements.nowPlaying.classList.contains('hidden');
+        
+        if (wasInScreensaver) {
+            // Already showing screensaver - keep it active
+            // (screensaver continues, retries happen in background)
+        } else if (waitingForRetry && reconnectCycle > 1) {
+            // In retry cycle after first attempt - show screensaver
+            showNoPlayback();
+            console.log('Showing screensaver - connection attempts will continue in background');
+        } else if (!hasReceivedTrackData && reconnectCycle === 0) {
+            // Initial connection attempt - show loading, don't show screensaver yet
+            // (screensaver will show after 5-minute timer if still failing)
+            showLoading('Connecting...');
+        } else if (isShowingNowPlaying) {
+            // Was showing now-playing UI - show loading/reconnecting message
+            showLoading('Reconnecting...');
+        } else if (hasReceivedTrackData) {
+            // Had data before, now disconnected - show screensaver
+            showNoPlayback();
+            console.log('Showing screensaver - connection attempts will continue in background');
+        } else {
+            // Default: show loading
+            showLoading('Connecting...');
+        }
     });
     
     socket.on('connect_error', (error) => {
         console.error('Connection error:', error);
         reconnectAttempts++;
+        
+        // Ensure waiting-for-retry class is removed when actively retrying
+        // (it should only be present during the wait period between retry cycles)
+        if (!waitingForRetry) {
+            document.body.classList.remove('waiting-for-retry');
+        }
+        
         updateConnectionStatus('connecting');
         
-        // Hide app settings during connection error
-        if (elements.connectionStatus) {
-            elements.connectionStatus.style.display = 'none';
-        }
-        if (elements.equalizer) {
-            elements.equalizer.classList.add('hidden');
+        // Track if we're in no-playback/screensaver mode
+        const isInNoPlayback = document.body.classList.contains('no-playback-active');
+        wasInNoPlaybackBeforeError = isInNoPlayback;
+        
+        // Only hide UI elements if not in screensaver mode
+        if (!isInNoPlayback) {
+            // Hide app settings during connection error (only when showing playback)
+            if (elements.connectionStatus) {
+                elements.connectionStatus.style.display = 'none';
+            }
+            if (elements.equalizer) {
+                elements.equalizer.classList.add('hidden');
+            }
         }
         
-        if (reconnectAttempts >= CONFIG.MAX_RECONNECT_ATTEMPTS) {
-            showLoading('Connection failed. Refresh to retry.');
+        if (reconnectAttempts >= CONFIG.WS_MAX_RECON_ATTEMPTS) {
+            if (!waitingForRetry) {
+                // First time hitting max attempts in this cycle
+                reconnectCycle++;
+                waitingForRetry = true;
+                
+                const waitMinutes = CONFIG.WS_RECONN_WAIT_MINUTES;
+                const waitMs = waitMinutes * 60 * 1000;
+                const retryTime = new Date(Date.now() + waitMs);
+                
+                console.log(`Connection failed after ${CONFIG.WS_MAX_RECON_ATTEMPTS} attempts (cycle ${reconnectCycle}). Will retry in ${waitMinutes} minutes at ${retryTime.toLocaleTimeString()}`);
+                
+                // For first retry cycle: wait 5 minutes before showing screensaver
+                // For subsequent cycles: show screensaver immediately
+                const currentlyInScreensaver = document.body.classList.contains('no-playback-active');
+                const isShowingNowPlaying = !elements.nowPlaying.classList.contains('hidden');
+                
+                if (reconnectCycle === 1 && !hasReceivedTrackData) {
+                    // First connection retry cycle - wait before showing screensaver
+                    const screensaverDelayMinutes = CONFIG.SCREENSAVER_PAUSED_DELAY_MINUTES;
+                    console.log(`Initial connection failed. Screensaver will activate in ${screensaverDelayMinutes} minutes if connection not restored.`);
+                    showLoading(`Connection failed - retrying in ${screensaverDelayMinutes} minutes`);
+                    
+                    // Set timer to show screensaver after configured delay
+                    initialScreensaverTimeout = setTimeout(() => {
+                        console.log(`${screensaverDelayMinutes} minutes elapsed - activating screensaver`);
+                        showNoPlayback();
+                        initialScreensaverTimeout = null;
+                    }, screensaverDelayMinutes * 60 * 1000);
+                } else {
+                    // Subsequent cycles OR had connection before - show screensaver immediately
+                    if (!currentlyInScreensaver && !isShowingNowPlaying) {
+                        showNoPlayback();
+                    }
+                    console.log('Screensaver active - retrying in background');
+                }
+                updateConnectionStatus('connection-failed');
+                
+                // Stop all animations during wait period
+                document.body.classList.add('waiting-for-retry');
+                
+                // Wait 5 minutes then reset and try again
+                retryWaitTimeout = setTimeout(() => {
+                    console.log(`Retry cycle ${reconnectCycle + 1} starting after ${waitMinutes} minute wait`);
+                    reconnectAttempts = 0;
+                    waitingForRetry = false;
+                    
+                    // Resume all animations when retrying starts again
+                    document.body.classList.remove('waiting-for-retry');
+                    
+                    // Disconnect and reconnect to trigger new connection attempts
+                    if (socket) {
+                        socket.disconnect();
+                        // Small delay before reconnecting
+                        setTimeout(() => {
+                            socket.connect();
+                            // Don't change display here - let disconnect/connect handlers manage it
+                            // Screensaver will persist if active, which is what we want
+                            updateConnectionStatus('connecting');
+                        }, 1000);
+                    }
+                }, waitMs);
+            }
         }
     });
     
     // Track update event
     socket.on('track_update', (data) => {
+        if (data) {
+            hasReceivedTrackData = true;
+        }
         updateDisplay(data);
     });
     
@@ -543,7 +687,7 @@ async function startScreensaverCycle() {
             const handleLoad = () => {
                 elements.screensaverImage.style.opacity = '1';
                 retryState.currentImageLoaded = true;
-                console.log(`✓ Successfully loaded: ${imageSrc}`);
+                // console.log(`✓ Successfully loaded: ${imageSrc}`);
                 // Remove handlers after use
                 elements.screensaverImage.removeEventListener('load', handleLoad);
                 elements.screensaverImage.removeEventListener('error', handleError);
@@ -1931,7 +2075,7 @@ function updateDisplay(trackData) {
                 console.warn('Failed to load album art, using default image');
                 
                 // Load default image
-                elements.albumArt.src = DEF_ALBUM_ART_PATH;
+                elements.albumArt.src = CONFIG.DEF_ALBUM_ART_PATH;
                 elements.albumArt.style.transition = 'opacity 0.3s ease';
                 elements.albumArt.style.opacity = '1';
                 
@@ -2010,8 +2154,29 @@ function updateDisplay(trackData) {
         }
     }
     
-    // Show the display
-    showNowPlaying();
+    // Show appropriate display:
+    // Only show now-playing UI when music is actively playing
+    // When paused, wait 5 minutes before showing screensaver
+    if (trackData.is_playing) {
+        // Music is playing - cancel any pending screensaver timer and show now-playing UI
+        if (pausedScreensaverTimeout) {
+            clearTimeout(pausedScreensaverTimeout);
+            pausedScreensaverTimeout = null;
+        }
+        showNowPlaying();
+    } else {
+        // Music is paused - start 5-minute timer before showing screensaver
+        // Keep now-playing UI visible during the wait period
+        if (!pausedScreensaverTimeout) {
+            // Start timer only if not already started
+            pausedScreensaverTimeout = setTimeout(() => {
+                showNoPlayback();
+                pausedScreensaverTimeout = null;
+            }, PAUSED_SCREENSAVER_DELAY);
+        }
+        // Keep showing now-playing UI while paused (screensaver will appear after 5 min)
+        showNowPlaying();
+    }
 }
 
 // Show service label
@@ -2894,7 +3059,7 @@ function showCursor() {
         cursorHideTimeout = setTimeout(() => {
             document.body.classList.remove('fullscreen-show-cursor');
             document.body.classList.add('fullscreen-hide-cursor');
-        }, CURSOR_HIDE_DELAY);
+        }, CONFIG.CURSOR_HIDE_DELAY);
     }
 }
 
@@ -3059,7 +3224,7 @@ function init() {
     connectWebSocket();
     
     // Update URL configuration hint in console
-    console.log('WebSocket URL:', WEBSOCKET_URL);
+    console.log('WebSocket URL:', WS_URL);
 }
 
 // Start the app when DOM is ready

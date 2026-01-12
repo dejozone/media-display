@@ -124,6 +124,24 @@ body.connecting::before {
     animation: borderGlow var(--duration-pulse) ease-in-out infinite;
 }
 
+/* Connection failed - retries exhausted, show static red border without animation */
+body.connection-failed::before {
+    opacity: 1;
+    box-shadow: 
+        inset 0 0 var(--border-glow-large) rgba(239, 68, 68, 0.4),
+        0 0 var(--border-glow-large) rgba(220, 38, 38, 0.4);
+    animation: none;
+}
+
+/* Waiting for retry - stop border animation during 5-minute wait period */
+body.waiting-for-retry::before {
+    opacity: 1;
+    box-shadow: 
+        inset 0 0 var(--border-glow-large) rgba(239, 68, 68, 0.4),
+        0 0 var(--border-glow-large) rgba(220, 38, 38, 0.4);
+    animation: none;
+}
+
 body.connected::before {
     opacity: 1;
     box-shadow: 
@@ -395,6 +413,11 @@ body.rotate-270 .album-art-container {
     border-radius: 50%;
     animation: spin 1s linear infinite;
     opacity: 0.3;
+}
+
+/* Stop spinner animation during 5-minute wait period */
+body.waiting-for-retry .spinner {
+    animation: none;
 }
 
 @keyframes spin {
