@@ -15,7 +15,7 @@ class Config:
     
     # Flask Configuration
     SECRET_KEY: str = os.getenv('SECRET_KEY', 'your-secret-key-change-in-production')
-    SEND_FILE_MAX_AGE_DEFAULT: int = 86400  # 1 day in seconds
+    WEBAPP_SEND_FILE_MAX_AGE_DEFAULT: int = int(os.getenv('WEBAPP_SEND_FILE_MAX_AGE_DEFAULT', '86400'))  # 1 day in seconds
     
     # Server Configuration
     SERVER_HOST: str = os.getenv('SERVER_HOST', '0.0.0.0')
@@ -52,7 +52,7 @@ class Config:
     # Service Recovery
     SERVICE_RECOVERY_WINDOW_TIME: int = int(os.getenv('SERVICE_RECOVERY_WINDOW_TIME', '86400'))  # seconds (default: 15 minutes)
     SERVICE_RECOVERY_RETRY_INTERVAL: int = int(os.getenv('SERVICE_RECOVERY_RETRY_INTERVAL', '15'))  # seconds (default: 15s)
-    SERVICE_RECOVERY_INITIAL_DELAY: int = 15  # seconds to wait before starting recovery checks
+    SERVICE_RECOVERY_INITIAL_DELAY: int = int(os.getenv('SERVICE_RECOVERY_INITIAL_DELAY', '15'))  # seconds to wait before starting recovery checks
     
     # Path Configuration
     _current_file = os.path.abspath(__file__)

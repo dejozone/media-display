@@ -10,7 +10,6 @@ import sys
 import signal
 import threading
 import socket
-import json
 from dotenv import load_dotenv
 from flask import Flask, send_from_directory, send_file, request, jsonify
 from flask_cors import CORS
@@ -53,8 +52,9 @@ WEBAPP_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Flask app for production (gunicorn)
 app = Flask(__name__, static_folder='.', static_url_path='')
-app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 86400  # Cache static files for 1 day
+app.config['WEBAPP_SEND_FILE_MAX_AGE_DEFAULT'] = int(os.getenv('WEBAPP_SEND_FILE_MAX_AGE_DEFAULT', '86400'))  # Cache static files for 1 day
 CORS(app)
+app.config['WEBAPP_DIR_LISTING_MAX_AGE_DEFAULT'] = int(os.getenv('WEBAPP_DIR_LISTING_MAX_AGE_DEFAULT', '3600'))  # Cache directory listings for 1 hour
 
 @app.route('/')
 def index():
@@ -192,14 +192,14 @@ def add_headers(response):
     """Add cache headers to responses"""
     if '/assets/images/screensavers/' in request.path:
         if request.path.endswith('/'):
-            # Directory listing - cache for 1 hour
-            response.headers['Cache-Control'] = 'public, max-age=3600'
+            # Directory listing - cache using configured value
+            response.headers['Cache-Control'] = f'public, max-age={app.config["WEBAPP_DIR_LISTING_MAX_AGE_DEFAULT"]}'
         else:
-            # Individual image - cache for 1 day
-            response.headers['Cache-Control'] = 'public, max-age=86400, immutable'
+            # Individual image - cache using configured value
+            response.headers['Cache-Control'] = f'public, max-age={app.config["WEBAPP_SEND_FILE_MAX_AGE_DEFAULT"]}, immutable'
     elif '/assets/' in request.path:
-        # Other assets - cache for 1 day
-        response.headers['Cache-Control'] = 'public, max-age=86400'
+        # Other assets - cache using configured value
+        response.headers['Cache-Control'] = f'public, max-age={app.config["WEBAPP_SEND_FILE_MAX_AGE_DEFAULT"]}'
     elif request.path.endswith('.html') or request.path == '/':
         # HTML pages - no cache for development
         response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'

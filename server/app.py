@@ -43,7 +43,7 @@ werkzeug_logger.addFilter(lambda record: 'write() before start_response' not in 
 # Flask app setup
 app = Flask(__name__)
 app.config['SECRET_KEY'] = Config.SECRET_KEY
-app.config['SEND_FILE_MAX_AGE_DEFAULT'] = Config.SEND_FILE_MAX_AGE_DEFAULT
+app.config['WEBAPP_SEND_FILE_MAX_AGE_DEFAULT'] = Config.WEBAPP_SEND_FILE_MAX_AGE_DEFAULT
 CORS(app)
 
 # Configure Socket.IO with custom path for nginx subpath proxying
