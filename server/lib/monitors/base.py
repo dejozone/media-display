@@ -23,6 +23,22 @@ class BaseMonitor(ABC):
         self.last_update_time = 0
         self.source_priority = source_priority
         self.monitor_thread: Optional[threading.Thread] = None
+        
+        # Source-specific takeover timeout
+        self.takeover_timeout = self._get_takeover_timeout()
+    
+    def _get_takeover_timeout(self) -> int:
+        """
+        Get takeover timeout based on source type.
+        Sonos has network group sync delays and needs more time.
+        
+        Returns:
+            int: Timeout in seconds before source is considered stale
+        """
+        # Check if this is a Sonos monitor (needs more time for group sync)
+        if 'Sonos' in self.__class__.__name__:
+            return 30  # 30 seconds for Sonos (accounts for multi-speaker sync delays)
+        return 10  # 10 seconds for other sources (Spotify, etc.)
     
     @abstractmethod
     def start(self) -> bool:
@@ -79,7 +95,7 @@ class BaseMonitor(ABC):
         self,
         current_track_data: Optional[Dict[str, Any]],
         time_since_update: float,
-        stale_threshold: float = 10.0
+        stale_threshold: Optional[float] = None  # Now optional, uses source-specific timeout
     ) -> bool:
         """
         Determine if this source should take over from current source
@@ -87,7 +103,7 @@ class BaseMonitor(ABC):
         Args:
             current_track_data: Current track data from active source
             time_since_update: Seconds since last update from current source
-            stale_threshold: Seconds before source is considered stale
+            stale_threshold: Optional override for staleness threshold (uses source-specific timeout if None)
             
         Returns:
             bool: True if this source should take over
@@ -97,6 +113,16 @@ class BaseMonitor(ABC):
         
         current_priority = current_track_data.get('source_priority', 999)
         has_higher_priority = current_priority > self.source_priority
+        
+        # Determine staleness threshold
+        # If current source is Sonos, it needs more time due to group sync delays
+        if stale_threshold is None:
+            current_source = current_track_data.get('source', '')
+            if current_source == 'sonos':
+                stale_threshold = 60  # Give Sonos more time for group sync
+            else:
+                stale_threshold = 10  # Standard timeout for other sources
+        
         is_stale = time_since_update > stale_threshold
         
         return has_higher_priority or is_stale
