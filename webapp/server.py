@@ -64,24 +64,60 @@ def index():
 @app.route('/assets/images/screensavers/')
 @app.route('/assets/images/screensavers')
 def list_screensavers():
-    """List screensaver images"""
+    """List screensaver images in nginx-style HTML format"""
     screensaver_dir = os.path.join(WEBAPP_DIR, 'assets', 'images', 'screensavers')
     
     if not os.path.exists(screensaver_dir):
-        return jsonify({"error": "Directory not found"}), 404
+        return "<html><body><h1>404 Not Found</h1></body></html>", 404
     
     try:
+        from datetime import datetime
+        
         files = []
         for filename in os.listdir(screensaver_dir):
             filepath = os.path.join(screensaver_dir, filename)
             if os.path.isfile(filepath):
                 # Only include common image extensions
                 if filename.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg')):
-                    files.append(filename)
-        files.sort()
-        return jsonify(files)
+                    # Get file size and modification time
+                    stat = os.stat(filepath)
+                    size = stat.st_size
+                    mtime = datetime.fromtimestamp(stat.st_mtime)
+                    
+                    # Format size (B, K, M)
+                    if size < 1024:
+                        size_str = f"{size}"
+                    elif size < 1024 * 1024:
+                        size_str = f"{size // 1024}K"
+                    else:
+                        size_str = f"{size // (1024 * 1024)}M"
+                    
+                    files.append({
+                        'name': filename,
+                        'size': size_str,
+                        'mtime': mtime.strftime('%d-%b-%Y %H:%M')
+                    })
+        
+        files.sort(key=lambda x: x['name'])
+        
+        # Build HTML response
+        html = '<html>\n'
+        html += '<head><title>Index of /assets/images/screensavers/</title></head>\n'
+        html += '<body>\n'
+        html += '<h1>Index of /assets/images/screensavers/</h1><hr><pre><a href="../">../</a>\n'
+        
+        for file_info in files:
+            # Format: <a href="filename">filename</a> spaces date spaces size
+            name = file_info['name']
+            padded_name = name.ljust(50)
+            html += f'<a href="{name}">{name}</a>{"" * (50 - len(name))}{file_info["mtime"]}  {file_info["size"].rjust(6)}\n'
+        
+        html += '</pre><hr></body>\n'
+        html += '</html>\n'
+        
+        return html, 200, {'Content-Type': 'text/html; charset=utf-8'}
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return f"<html><body><h1>Error: {str(e)}</h1></body></html>", 500
 
 @app.route('/<path:path>')
 def serve_static(path):
@@ -94,16 +130,52 @@ def serve_static(path):
         # Only allow directory listing for screensavers path
         normalized_path = path.rstrip('/')
         if normalized_path == 'assets/images/screensavers':
-            # Return JSON list of files in directory
+            # Return nginx-style HTML directory listing
             try:
+                from datetime import datetime
+                
                 files = []
                 for filename in os.listdir(full_path):
                     filepath = os.path.join(full_path, filename)
                     if os.path.isfile(filepath):
-                        files.append(filename)
-                return jsonify(files)
+                        # Get file size and modification time
+                        stat = os.stat(filepath)
+                        size = stat.st_size
+                        mtime = datetime.fromtimestamp(stat.st_mtime)
+                        
+                        # Format size (B, K, M)
+                        if size < 1024:
+                            size_str = f"{size}"
+                        elif size < 1024 * 1024:
+                            size_str = f"{size // 1024}K"
+                        else:
+                            size_str = f"{size // (1024 * 1024)}M"
+                        
+                        files.append({
+                            'name': filename,
+                            'size': size_str,
+                            'mtime': mtime.strftime('%d-%b-%Y %H:%M')
+                        })
+                
+                files.sort(key=lambda x: x['name'])
+                
+                # Build HTML response
+                html = '<html>\n'
+                html += f'<head><title>Index of /{normalized_path}/</title></head>\n'
+                html += '<body>\n'
+                html += f'<h1>Index of /{normalized_path}/</h1><hr><pre><a href="../">../</a>\n'
+                
+                for file_info in files:
+                    name = file_info['name']
+                    padded_name = name.ljust(50)
+                    html += f'<a href="{name}">{name}</a>{" " * (50 - len(name))}{file_info["mtime"]}  {file_info["size"].rjust(6)}\n'
+                
+                html += '</pre><hr></body>\n'
+                html += '</html>\n'
+                
+                return html, 200, {'Content-Type': 'text/html; charset=utf-8'}
             except Exception as e:
-                return jsonify({"error": str(e)}), 500
+                return f"<html><body><h1>Error: {str(e)}</h1></body></html>", 500
         else:
             # Directory listing not allowed for other paths
             return "Forbidden", 403

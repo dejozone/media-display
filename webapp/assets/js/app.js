@@ -130,10 +130,27 @@ async function loadScreensaverImages(forceRefresh = false) {
             throw new Error(`Failed to fetch directory listing: ${response.status}`);
         }
         
-        // Parse JSON array of filenames
-        const filenames = await response.json();
+        // Parse HTML directory listing (nginx-style format)
+        const html = await response.text();
         
-        if (!Array.isArray(filenames) || filenames.length === 0) {
+        // Extract image filenames from anchor tags
+        // Match: <a href="filename">filename</a>
+        const regex = /<a href="([^"]+)">[^<]+<\/a>/g;
+        const filenames = [];
+        let match;
+        
+        while ((match = regex.exec(html)) !== null) {
+            const filename = match[1];
+            // Skip parent directory link
+            if (filename === '../') continue;
+            
+            // Only include image files
+            if (filename.toLowerCase().match(/\.(jpg|jpeg|png|gif|webp|svg)$/)) {
+                filenames.push(filename);
+            }
+        }
+        
+        if (filenames.length === 0) {
             console.warn('No screensaver images found in directory');
             // Fallback to a default image if available
             screensaverImages = [CONFIG.DEF_ALBUM_ART_PATH];
