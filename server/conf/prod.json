@@ -1,0 +1,21 @@
+{
+  "svcMethod": "all",
+  "localCallbackSrvPort": 8888,
+  "svcRecoveryWindowTime": 86400,
+  "svcRecoveryRetryInterval": 15,
+  "svcRecoveryInitDelay": 15,
+  "logging": {
+    "level": "info"
+  },
+  "websocket": {
+    "serverPort": 5001,
+    "subPath": "/notis/media-display/socket.io"
+  },
+  "spotify": {
+    "api": {
+      "sslCertVerification": true,
+      "callbackRedirRootUrl": "https://media-display.projecttechcycle.org/spotify/callback",
+      "scope": "user-read-currently-playing user-read-playback-state"
+    }
+  }
+}
