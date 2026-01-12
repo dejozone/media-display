@@ -30,7 +30,7 @@ class Config:
     SPOTIFY_SCOPE: str = 'user-read-currently-playing user-read-playback-state'
     
     # SSL Configuration
-    SSL_VERIFY_SPOTIFY: bool = os.getenv('SSL_CERT_VERIFICATION_SPOTIFY', 'true').lower() == 'true'
+    SSL_VERIFY_SPOTIFY: bool = os.getenv('SPOTIFY_SSL_CERT_VERIFICATION', 'true').lower() == 'true'
     
     # OAuth Callback Server
     LOCAL_CALLBACK_PORT: Optional[int] = None
@@ -50,7 +50,8 @@ class Config:
         print(f"⚠️  Invalid MEDIA_SERVICE_METHOD: '{_service_method}' (defaulting to 'all')")
     
     # Service Recovery
-    SERVICE_RECOVERY_TIMEOUT_MINUTES: int = int(os.getenv('SERVICE_RECOVERY_TIMEOUT_MINUTES', '5'))
+    SERVICE_RECOVERY_WINDOW_TIME: int = int(os.getenv('SERVICE_RECOVERY_WINDOW_TIME', '86400'))  # seconds (default: 15 minutes)
+    SERVICE_RECOVERY_RETRY_INTERVAL: int = int(os.getenv('SERVICE_RECOVERY_RETRY_INTERVAL', '15'))  # seconds (default: 15s)
     SERVICE_RECOVERY_INITIAL_DELAY: int = 15  # seconds to wait before starting recovery checks
     
     # Path Configuration
@@ -82,8 +83,11 @@ class Config:
             errors.append(f"LOCAL_CALLBACK_PORT must be between 1024-65535, got {cls.LOCAL_CALLBACK_PORT}")
         
         # Validate recovery timeout
-        if cls.SERVICE_RECOVERY_TIMEOUT_MINUTES < 1:
-            warnings.append(f"SERVICE_RECOVERY_TIMEOUT_MINUTES is very low ({cls.SERVICE_RECOVERY_TIMEOUT_MINUTES} min)")
+        if cls.SERVICE_RECOVERY_WINDOW_TIME < 60:
+            warnings.append(f"SERVICE_RECOVERY_WINDOW_TIME is very low ({cls.SERVICE_RECOVERY_WINDOW_TIME}s)")
+        
+        if cls.SERVICE_RECOVERY_RETRY_INTERVAL < 5:
+            warnings.append(f"SERVICE_RECOVERY_RETRY_INTERVAL is very low ({cls.SERVICE_RECOVERY_RETRY_INTERVAL}s)")
         
         # Print warnings
         for warning in warnings:
@@ -105,7 +109,16 @@ class Config:
         print(f"   WEBSOCKET_SERVER_PORT: {cls.WEBSOCKET_SERVER_PORT}")
         print(f"   WEBSOCKET_PATH: {cls.WEBSOCKET_PATH}")
         print(f"   SSL_VERIFY_SPOTIFY: {cls.SSL_VERIFY_SPOTIFY}")
-        print(f"   SERVICE_RECOVERY_TIMEOUT: {cls.SERVICE_RECOVERY_TIMEOUT_MINUTES} minutes")
+        
+        # Format recovery window time smartly
+        window_time = cls.SERVICE_RECOVERY_WINDOW_TIME
+        if window_time <= 60:
+            window_display = f"{window_time}s"
+        else:
+            window_display = f"{window_time / 60:.1f} minutes"
+        print(f"   SERVICE_RECOVERY_WINDOW_TIME: {window_display}")
+        print(f"   SERVICE_RECOVERY_RETRY_INTERVAL: {cls.SERVICE_RECOVERY_RETRY_INTERVAL}s")
+        
         if cls.LOCAL_CALLBACK_PORT:
             print(f"   LOCAL_CALLBACK_PORT: {cls.LOCAL_CALLBACK_PORT}")
         print()

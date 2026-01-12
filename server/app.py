@@ -400,8 +400,8 @@ def service_recovery_loop() -> None:
     
     retry_count: dict[str, int] = {'sonos': 0, 'spotify': 0}
     first_failure_time: dict[str, float | None] = {'sonos': None, 'spotify': None}
-    max_retry_duration = Config.SERVICE_RECOVERY_TIMEOUT_MINUTES * 60
-    timeout_minutes = Config.SERVICE_RECOVERY_TIMEOUT_MINUTES
+    max_retry_duration = Config.SERVICE_RECOVERY_WINDOW_TIME
+    retry_interval = Config.SERVICE_RECOVERY_RETRY_INTERVAL
     
     # Give initial startup time before starting recovery checks
     server_logger.info("🔄 Service recovery thread started")
@@ -424,14 +424,24 @@ def service_recovery_loop() -> None:
                     elapsed_time = time.time() - failure_start
                     if elapsed_time > max_retry_duration:
                         if retry_count[service] > 0:  # Only print once
-                            server_logger.warning(f"⏱️  {service.upper()} service recovery timeout ({timeout_minutes} minute{'s' if timeout_minutes != 1 else ''} exceeded)")
+                            # Format timeout display smartly
+                            if max_retry_duration <= 60:
+                                timeout_display = f"{max_retry_duration}s"
+                            else:
+                                timeout_display = f"{max_retry_duration / 60:.1f} minutes"
+                            server_logger.warning(f"⏱️  {service.upper()} service recovery timeout ({timeout_display} exceeded)")
                             server_logger.warning(f"   Stopped retrying after {retry_count[service]} attempts")
                             retry_count[service] = -1  # Mark as timed out
                         continue  # Skip this service
                     
                     retry_count[service] += 1
                     remaining_time = int(max_retry_duration - elapsed_time)
-                    server_logger.info(f"🔄 Attempting to recover {service.upper()} service (attempt #{retry_count[service]}, timeout in {remaining_time}s)...")
+                    # Format remaining time smartly
+                    if remaining_time <= 60:
+                        remaining_display = f"{remaining_time}s"
+                    else:
+                        remaining_display = f"{remaining_time / 60:.1f} minutes"
+                    server_logger.info(f"🔄 Attempting to recover {service.upper()} service (attempt #{retry_count[service]}, timeout in {remaining_display})...")
                     
                     success = False
                     if service == 'sonos':
@@ -443,7 +453,7 @@ def service_recovery_loop() -> None:
                         retry_count[service] = 0  # Reset counter on success
                         first_failure_time[service] = None
                     else:
-                        server_logger.warning(f"⚠️  {service.upper()} recovery failed. Will retry in 30 seconds...")
+                        server_logger.warning(f"⚠️  {service.upper()} recovery failed. Will retry in {retry_interval}s...")
                 else:
                     # Service is active, reset retry counter and failure time
                     if retry_count[service] != 0:
@@ -462,12 +472,12 @@ def service_recovery_loop() -> None:
                                 app_state.remove_monitor(monitor)
                             broadcast_service_status()
             
-            # Sleep for 30 seconds before next check (increased from 10s)
-            time.sleep(30)
+            # Sleep for configured retry interval before next check
+            time.sleep(retry_interval)
             
         except Exception as e:
             server_logger.error(f"⚠️  Error in service recovery loop: {e}")
-            time.sleep(30)
+            time.sleep(retry_interval)
     
     server_logger.info("🔄 Service recovery thread stopped")
 
