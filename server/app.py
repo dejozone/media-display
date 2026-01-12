@@ -10,7 +10,7 @@ import time
 import threading
 import logging
 from typing import Dict, Any, Optional, Set
-from flask import Flask, jsonify, send_from_directory, Response, request
+from flask import Flask, jsonify, request
 from flask_socketio import SocketIO, emit
 from flask_cors import CORS
 import urllib3
@@ -43,42 +43,10 @@ werkzeug_logger.addFilter(lambda record: 'write() before start_response' not in 
 # Flask app setup
 app = Flask(__name__)
 app.config['SECRET_KEY'] = Config.SECRET_KEY
-app.config['WEBAPP_SEND_FILE_MAX_AGE_DEFAULT'] = Config.WEBAPP_SEND_FILE_MAX_AGE_DEFAULT
 CORS(app)
 
 # Configure Socket.IO with custom path for nginx subpath proxying
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading', path=Config.WEBSOCKET_PATH)
-
-# Override Flask-SocketIO's aggressive no-cache defaults for static assets
-@app.after_request
-def after_request(response):
-    # Only modify cache headers for asset routes
-    if '/assets/' in request.path:
-        server_logger.debug(f"Processing asset route: {request.path}")
-        server_logger.debug(f"Cache-Control before: {response.headers.get('Cache-Control', 'NOT SET')}")
-        
-        # Always override cache headers for assets - Flask-SocketIO sets bad defaults
-        if '/screensavers/' in request.path:
-            if request.path.endswith('/'):
-                # Directory listing - cache for 1 hour
-                response.headers['Cache-Control'] = 'public, max-age=3600'
-                server_logger.debug("Set Cache-Control for directory listing")
-            else:
-                # Individual image - cache for 1 day
-                response.headers['Cache-Control'] = 'public, max-age=86400, immutable'
-                server_logger.debug("Set Cache-Control for image")
-        else:
-            # Default for other assets - cache for 1 day
-            response.headers['Cache-Control'] = 'public, max-age=86400'
-            server_logger.debug("Set Cache-Control for other asset")
-        
-        # Remove conflicting headers that prevent caching
-        response.headers.pop('Pragma', None)
-        if 'Expires' in response.headers:
-            response.headers.pop('Expires')
-        
-        server_logger.debug(f"Cache-Control after: {response.headers.get('Cache-Control', 'NOT SET')}")
-    return response
 
 # Global state
 app_state: AppState = AppState()
@@ -184,35 +152,6 @@ def handle_disable_progress():
             server_logger.info("📊 Stopping progress tracking (no clients need it)")
 
 # HTTP routes
-@app.route('/')
-def index():
-    """Serve the main web app"""
-    return """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Spotify Now Playing</title>
-    </head>
-    <body>
-        <h1>Spotify Now Playing Server</h1>
-        <p>Server is running. Connect your display client via WebSocket.</p>
-        <p>WebSocket endpoint: <code>ws://localhost:5000</code></p>
-        <p>Connected clients: <span id="clients">0</span></p>
-        
-        <script src="https://cdn.socket.io/4.8.3/socket.io.min.js"></script>
-        <script>
-            const socket = io();
-            socket.on('connect', () => {
-                console.log('Connected to server');
-            });
-            socket.on('track_update', (data) => {
-                console.log('Track update:', data);
-            });
-        </script>
-    </body>
-    </html>
-    """
-
 @app.route('/health')
 def health():
     """Health check endpoint"""
@@ -225,79 +164,6 @@ def health():
         'current_track': current_track is not None,
         'current_source': current_track.get('source') if current_track else None
     })
-
-@app.route('/assets/images/screensavers/')
-def list_screensaver_images():
-    """List screensaver images with directory listing"""
-    screensaver_dir = Config.SCREENSAVER_DIR
-    
-    if not os.path.exists(screensaver_dir):
-        return jsonify({'error': 'Directory not found'}), 404
-    
-    try:
-        # Get list of image files
-        files = []
-        for filename in os.listdir(screensaver_dir):
-            filepath = os.path.join(screensaver_dir, filename)
-            if os.path.isfile(filepath):
-                # Only include common image extensions
-                if filename.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg')):
-                    files.append(filename)
-        
-        # Sort files alphabetically
-        files.sort()
-        
-        # Generate HTML directory listing (similar to nginx autoindex)
-        html = f'''<!DOCTYPE html>
-<html>
-<head>
-    <title>Index of /assets/images/screensavers/</title>
-    <style>
-        body {{ font-family: monospace; margin: 20px; }}
-        h1 {{ font-size: 18px; }}
-        a {{ display: block; padding: 2px 0; text-decoration: none; }}
-        a:hover {{ background-color: #f0f0f0; }}
-    </style>
-</head>
-<body>
-    <h1>Index of /assets/images/screensavers/</h1>
-    <hr>
-    <pre>
-'''
-        
-        for filename in files:
-            html += f'<a href="{filename}">{filename}</a>\n'
-        
-        html += '''    </pre>
-    <hr>
-</body>
-</html>'''
-        
-        response = Response(html, mimetype='text/html')
-        # Add CORS headers for JavaScript access
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
-        # Cache headers set by after_request hook
-        
-        return response
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/assets/images/screensavers/<filename>')
-def serve_screensaver_image(filename):
-    """Serve individual screensaver images"""
-    screensaver_dir = Config.SCREENSAVER_DIR
-    
-    try:
-        response = send_from_directory(screensaver_dir, filename)
-        # Add CORS headers
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        # Cache headers set by after_request hook
-        return response
-    except Exception as e:
-        return jsonify({'error': 'File not found'}), 404
 
 def initialize_spotify():
     """Initialize Spotify authentication and monitoring"""
