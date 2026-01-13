@@ -1,7 +1,6 @@
 {
   "svcMethod": "all",
   "localCallbackSrvPort": 8888,
-  "svcRecoveryWindowTime": 129600,
   "svcRecoveryInitDelay": 15,
   "logging": {
     "level": "debug"
@@ -15,7 +14,8 @@
     "stopHeartBeatTimeNoPlayback": 3,
     "pausedPollingInterval": 10,
     "reducedPollingInterval": 10,
-    "discoverSvcInterval": 15
+    "discoverSvcInterval": 10,
+    "recoverAttemptWindowTime": 129600
   },
   "spotify": {
     "takeoverWaitTime": 5,
@@ -23,6 +23,7 @@
     "reducedPollingInterval": 10,
     "consecutiveNoPollsBeforePause": 3,
     "discoverSvcInterval": 15,
+    "recoverAttemptWindowTime": 129600,
     "api": {
       "sslCertVerification": false,
       "callbackRedirRootUrl": "https://media-display.projecttechcycle-dev.org:9080/spotify/callback",

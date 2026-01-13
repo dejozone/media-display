@@ -1,21 +1,29 @@
 {
   "svcMethod": "all",
   "localCallbackSrvPort": 8888,
-  "svcRecoveryWindowTime": 86400,
-  "svcRecoveryRetryInterval": 15,
   "svcRecoveryInitDelay": 15,
   "logging": {
-    "level": "info"
+    "level": "debug"
   },
   "websocket": {
     "serverPort": 5001,
     "subPath": "/notis/media-display/socket.io"
   },
   "sonos": {
-    "checkTakeoverInterval": 2
+    "checkTakeoverInterval": 2,
+    "stopHeartBeatTimeNoPlayback": 3,
+    "pausedPollingInterval": 10,
+    "reducedPollingInterval": 10,
+    "discoverSvcInterval": 10,
+    "recoverAttemptWindowTime": 129600
   },
   "spotify": {
     "takeoverWaitTime": 5,
+    "pausedPollingInterval": 10,
+    "reducedPollingInterval": 10,
+    "consecutiveNoPollsBeforePause": 3,
+    "discoverSvcInterval": 15,
+    "recoverAttemptWindowTime": 129600,
     "api": {
       "sslCertVerification": true,
       "callbackRedirRootUrl": "https://media-display.projecttechcycle.org/spotify/callback",

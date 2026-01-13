@@ -748,6 +748,8 @@ body.rotate-270 .no-playback-state .icon-container {
     will-change: box-shadow;
     transform: translateZ(0);
     backface-visibility: hidden;
+    /* Ensure image maintains container's square aspect ratio */
+    aspect-ratio: 1;
 }
 
 .album-art.glow-all-colors {
