@@ -85,11 +85,11 @@ Use the unified startup script to start both server and webapp:
 ```
 
 This will:
-1. **Start the Spotify Server**:
+1. **Start the Backend Server**:
    - Clean up any existing processes on required ports
    - Launch the WebSocket server on port 5001
    - Attempt to connect using Sonos API (local network, no authentication)
-   - If Sonos not available or `MEDIA_SERVICE_METHOD=spotify`, use Spotify Connect:
+   - If Sonos not available or `svcMethod=spotify`, use Spotify Connect:
      - Start OAuth callback server on port 8888
      - Open browser for Spotify authorization (first time only)
      - Check if existing credentials are valid
@@ -137,7 +137,7 @@ To stop all running services:
 ```
 
 This will:
-- Stop the Spotify Server (port 5001)
+- Stop the Backend Server (port 5001)
 - Stop the Web Application (port 8081)
 - Clean up all related processes
 
@@ -155,9 +155,12 @@ Once started, the display will:
 
 ### Core Playback
 - **Dual Service Support**: 
-  - **Sonos API** (Primary): Local network integration, no authentication required
-  - **Spotify Connect** (Fallback): OAuth-based, works with any Spotify device
-- **Real-time Updates**: Event-based updates for Sonos, 2-second polling for Spotify
+  - **Sonos API** (Priority 1): Local network integration, no authentication required
+  - **Spotify Connect** (Priority 2): OAuth-based, works with any Spotify device
+  - **Priority-based Takeover**: Higher-priority services automatically take control
+  - **Failure Detection**: Automatic failover when services become unavailable
+  - **Graceful Degradation**: Services reduce activity when not the active source
+- **Real-time Updates**: Event-based updates for Sonos, adaptive polling for Spotify (2s-10s)
 - **Full-screen Display**: Optimized for dedicated displays
 - **Responsive Design**: Works in both portrait and landscape
 - **Dynamic Background**: Album art colors extracted for immersive display
@@ -230,27 +233,6 @@ Once started, the display will:
   - Green glow: Connected (fades after 10 seconds)
 - **Service Indicators**: Visual icons show which service is active
 
-## Service Method Configuration
-
-The `MEDIA_SERVICE_METHOD` environment variable controls which service to use:
-
-### `all` (Default)
-- Tries Sonos API first (no authentication required)
-- Falls back to Spotify Connect if Sonos not available
-- Best for mixed environments
-
-### `sonos`
-- Uses Sonos API only
-- Requires Sonos speakers on local network
-- No authentication needed
-- Event-based real-time updates
-
-### `spotify`
-- Uses Spotify Connect only
-- Requires Spotify OAuth authentication
-- Works with any Spotify device
-- 2-second polling for updates
-
 ## Display Controls
 
 ### Keyboard Shortcuts
@@ -289,11 +271,52 @@ The `MEDIA_SERVICE_METHOD` environment variable controls which service to use:
 The server can run on any machine with Python. For production:
 
 1. Use a process manager like `systemd` or `supervisor`
-2. Configure firewall to allow WebSocket port (5001)
-3. Set `SERVER_HOST=0.0.0.0` to allow external connections
-4. For Sonos mode: Ensure server is on same local network as Sonos devices
-6. For Spotify mode: Configure OAuth credentials in `server/.env`
-6. Set `MEDIA_SERVICE_METHOD` based on your environment
+2. Configure firewall to allow WebSocket port (default: 5001)
+3. Create production config file `server/conf/prod.json` with appropriate settings
+4. Set `ENV=prod` in `server/.env` to use production configuration
+5. Configure `svcMethod` in production config (`"sonos"`, `"spotify"`, or `"all"`)
+6. For Sonos mode: Ensure server is on same local network as Sonos devices
+7. For Spotify mode: Configure OAuth credentials in `server/.env`
+8. Adjust service-specific timeouts and intervals based on your network reliability
+9. Configure `logging.level` to `"info"` or `"warning"` for production (avoid `"debug"`)
+
+
+### Nginx Support for Websocket & Callbacks
+
+```nginx
+server {
+    listen 80;
+    server_name yourdomain.com;
+    
+    root /path/to/media-display/webapp;
+    index index.html;
+
+    location /spotify/callback/ {
+       proxy_pass      https://localhost:8888/callback/;
+       proxy_ssl_verify off;
+       proxy_set_header Host $host;
+       proxy_set_header X-Real-IP $remote_addr;
+    }
+    
+    location /notis/media-display/socket.io/ {
+      proxy_pass      http://localhost:5001/notis/media-display/socket.io/;
+      # proxy_set_header Host localhost;
+      # WebSocket support
+      proxy_http_version 1.1;
+      proxy_set_header Upgrade $http_upgrade;
+      proxy_set_header Connection "upgrade";
+      proxy_set_header Host $host;
+      
+      # Additional recommended headers for proxying
+      proxy_set_header X-Real-IP $remote_addr;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $scheme;
+      
+      # Timeouts for long-lived WebSocket connections
+      proxy_read_timeout 86400;
+    }
+}
+```
 
 ### Frontend Web App
 
@@ -309,25 +332,64 @@ server {
     root /path/to/media-display/webapp;
     index index.html;
     
-    location / {
-        try_files $uri $uri/ =404;
+    # Enable directory listing for screensaver images folder
+    location /assets/images/screensavers/ {
+        autoindex on;
+        autoindex_format html;
+        autoindex_exact_size off;
+        autoindex_localtime on;
+        
+        # CORS headers to allow JavaScript access
+        add_header 'Access-Control-Allow-Origin' '*' always;
+        add_header 'Access-Control-Allow-Methods' 'GET, OPTIONS' always;
+        add_header 'Access-Control-Allow-Headers' 'Content-Type' always;
+        
+        # Cache images for faster loading
+        expires 1d;
+        add_header Cache-Control "public, immutable";
+    }
+    
+    # General static assets caching
+    location /assets/ {
+        expires 1h;
+        add_header Cache-Control "public";
     }
 }
 ```
 
-#### Update WebSocket URL
-
-Edit `webapp/assets/js/app.js` line 2-4 to point to your production server:
-
-```javascript
-const WEBSOCKET_URL = window.location.hostname === 'localhost' 
-    ? 'http://localhost:5001' 
-    : 'https://your-server-domain.com:5001';
-```
-
 #### Add Screensaver Images
 
-Place your custom screensaver images in `webapp/assets/images/screensavers/` and update the `screensaverImages` array in `webapp/assets/js/app.js` (lines 22-37).
+Place your custom screensaver images in `webapp/assets/images/screensavers/`. The webapp automatically discovers images via directory listing (requires nginx `autoindex on` configuration shown above).
+
+#### Configure Production Settings
+
+1. **Update Production Domain** in `webapp/assets/js/app.js`:
+   
+   Edit the `PROD_ENV` constant (line 3) to match your production domain:
+   ```javascript
+   const CONFIG = {
+       PROD_ENV: 'your-production-domain.com',  // MUST match your production domain
+       LOCAL: { ... },
+       PROD: { ... }
+   };
+   ```
+   
+   **Critical**: The webapp determines whether to use production or local settings by comparing `window.location.hostname` with this value. If they match, production settings are applied (SSL verification enabled, etc.). If they don't match, local/development settings are used.
+
+2. Create `webapp/conf/prod.json` based on `dev.json`:
+   ```json
+   {
+     "server": {
+       "port": 8081,
+       "sendFileCacheMaxAge": 86400,
+       "dirListingCacheMaxAge": 3600
+     }
+   }
+   ```
+
+3. Set `ENV=prod` in `webapp/.env`
+
+4. Adjust port and cache settings as needed for your production environment
 
 ## Configuration
 
@@ -346,14 +408,9 @@ The server uses environment-specific JSON configuration files. All timing values
   - Must match the redirect URI in Spotify app settings
 
 #### Service Recovery
-- **`svcRecoveryWindowTime`**: Maximum time window for service recovery attempts in seconds (default: `129600` = 36 hours)
-  - After this period, server stops trying to recover failed services
-
-- **`svcRecoveryRetryInterval`**: Interval between service recovery retry attempts in seconds (default: `15`)
-  - How often to retry starting a failed service
-
 - **`svcRecoveryInitDelay`**: Initial delay before first service recovery attempt in seconds (default: `15`)
   - Prevents immediate retry on startup failure
+  - Applies to all services globally
 
 #### Logging
 - **`logging.level`**: Log verbosity level (`"debug"`, `"info"`, `"warning"`, `"error"`, `"critical"`)
@@ -375,15 +432,59 @@ The server uses environment-specific JSON configuration files. All timing values
   - How often to poll Sonos devices for playback state
   - Also used for position updates when clients need progress
 
-- **`sonos.stopHeartBeatTimeNoPlayback`**: Minimum time before sending heartbeat updates to keep timestamp fresh in seconds (default: `8`)
+- **`sonos.stopHeartBeatTimeNoPlayback`**: Minimum time before sending heartbeat updates to keep timestamp fresh in seconds (default: `3`)
   - Prevents other sources from thinking Sonos is stale during playback
+  - Must be less than `spotify.takeoverWaitTime` to prevent ping-pong takeovers
   - Heartbeat only sent when events are active and no clients need progress updates
 
+- **`sonos.pausedPollingInterval`**: Polling interval when Sonos has no active playback in seconds (default: `10`)
+  - Reduces unnecessary device queries when music is not playing
+
+- **`sonos.reducedPollingInterval`**: Polling interval when higher-priority source is active in seconds (default: `10`)
+  - Reduces activity when another service (with higher priority) is playing
+  - Enables efficient multi-service coexistence
+
+- **`sonos.discoverSvcInterval`**: Retry interval for Sonos device discovery when service fails in seconds (default: `15`)
+  - How often to attempt reconnecting to Sonos devices after network changes
+
+- **`sonos.recoverAttemptWindowTime`**: Maximum time window for Sonos recovery attempts in seconds (default: `129600` = 36 hours)
+  - After this period, server stops trying to recover Sonos service
+
+- **`sonos.maxConsecutiveFailures`**: Number of consecutive heartbeat failures before clearing track in seconds (default: `3`)
+  - Allows lower-priority services to take over when Sonos becomes unreachable
+  - Prevents stale data when network changes or devices go offline
+
 #### Spotify Configuration
-- **`spotify.takeoverWaitTime`**: Time to wait before Spotify takes over from stale higher-priority source in seconds (default: `10`)
+- **`spotify.takeoverWaitTime`**: Time to wait before Spotify takes over from stale higher-priority source in seconds (default: `5`)
   - Prevents flapping during brief Sonos pauses/buffering
   - Lower values (3-5s) = more responsive but may cause brief source switches
   - Higher values (10s+) = more stable but slower to respond to source changes
+
+- **`spotify.pausedPollingInterval`**: Polling interval when Spotify detects no playback in seconds (default: `10`)
+  - Reduces API calls when music is not playing
+  - Automatically resumes normal polling when playback detected
+
+- **`spotify.reducedPollingInterval`**: Polling interval when higher-priority source is active in seconds (default: `10`)
+  - Reduces API calls when Sonos (or other higher-priority service) is playing
+  - Enables efficient multi-service coexistence
+
+- **`spotify.consecutiveNoPollsBeforePause`**: Number of consecutive checks with no playback before entering paused mode (default: `3`)
+  - After this many checks (3 × 2s = 6s), switches to `pausedPollingInterval`
+  - Prevents excessive API calls when idle
+
+- **`spotify.discoverSvcInterval`**: Retry interval for Spotify service recovery when service fails in seconds (default: `15`)
+  - How often to attempt reconnecting to Spotify after failures
+
+- **`spotify.recoverAttemptWindowTime`**: Maximum time window for Spotify recovery attempts in seconds (default: `129600` = 36 hours)
+  - After this period, server stops trying to recover Spotify service
+
+- **`spotify.maxConsecutiveFailures`**: Number of consecutive API failures before entering paused mode (default: `5`)
+  - Prevents excessive retries when network is down
+  - Automatically resumes when network is restored
+
+- **`spotify.staleSourceTakeoverTime`**: Time threshold for detecting stale higher-priority sources in seconds (default: `30`)
+  - If higher-priority source hasn't updated in this time, Spotify attempts takeover
+  - Enables recovery from stuck/frozen services
 
 - **`spotify.api.sslCertVerification`**: Enable/disable SSL certificate verification for Spotify API calls (default: `true`)
   - Set to `false` for development with self-signed certificates
@@ -437,6 +538,75 @@ The following settings are automatically saved to the browser's localStorage and
 - **Progress Effect**: Current progress visualization (7 modes available)
 
 These settings are device-specific and stored in the browser. To reset preferences, clear the browser's localStorage or use developer tools.
+
+## Multi-Service Coordination
+
+### Priority-Based Takeover System
+
+The server uses a priority-based system to manage multiple music sources:
+
+1. **Priority Levels**:
+   - Sonos: Priority 1 (highest)
+   - Spotify: Priority 2
+   - Future services (Apple Music, Last.fm): Can be assigned any priority
+
+2. **Conditional Polling**:
+   - Services reduce their polling frequency when a higher-priority source is active
+   - Spotify polls every 10s (instead of 2s) when Sonos is active
+   - Reduces network traffic and API usage by ~80%
+   - Sonos maintains normal polling since it's the highest priority service
+
+3. **Takeover Logic**:
+   - Higher-priority services automatically take control when they start playing
+   - Lower-priority services yield to higher-priority ones
+   - Same-track detection prevents ping-pong between sources playing the same content
+   - Staleness detection: Services can take over if higher-priority source stops updating
+
+### Failure Detection & Recovery
+
+1. **Sonos Failure Handling**:
+   - Tracks consecutive heartbeat failures (default: 3)
+   - Clears track after repeated failures, allowing Spotify to take over
+   - Automatically attempts reconnection every 15s
+   - Stops retrying after recovery window expires (default: 36 hours)
+
+2. **Spotify Failure Handling**:
+   - Tracks consecutive API failures (default: 5)
+   - Enters paused mode after repeated failures
+   - Detects stale higher-priority sources (30s threshold)
+   - Attempts takeover when higher-priority source appears frozen
+   - Automatically attempts reconnection every 15s
+
+3. **Network Change Scenarios**:
+   - **Scenario A**: Sonos devices become unreachable
+     - Sonos heartbeat fails → track cleared → Spotify takes over
+   - **Scenario B**: Both services lose connectivity
+     - Both enter paused mode → display shows screensaver
+     - Services automatically resume when network restored
+   - **Scenario C**: Higher-priority service frozen/stuck
+     - Lower-priority service detects staleness → attempts takeover
+
+### Adding New Services
+
+The architecture is designed for easy extension:
+
+```python
+class AppleMusicMonitor(BaseMonitor):
+    def __init__(self, app_state, socketio):
+        super().__init__(source_priority=0)  # Highest priority
+        # ... initialization
+    
+    def _monitor_loop(self):
+        while self.is_running:
+            # Check if higher-priority source active
+            if self.should_use_reduced_polling(self.app_state, Config.APPLE_MUSIC_TAKEOVER_WAIT_TIME):
+                time.sleep(Config.APPLE_MUSIC_REDUCED_POLLING_INTERVAL)
+                continue
+            
+            # Normal polling logic...
+```
+
+All failure detection and conditional polling behavior is inherited from `BaseMonitor`.
 
 ## Architecture
 
@@ -493,19 +663,29 @@ These settings are device-specific and stored in the browser. To reset preferenc
 - Check `server/.env` file has correct Spotify credentials
 - Ensure port 8888 is not in use by another application
 - Verify nginx is proxying callback URL correctly
+- Check that required ports are available (default: 5001 for WebSocket, 8888 for OAuth callback)
 
 ### Web app can't connect
-- Ensure server is running on port 5000
+- Ensure server is running on port 5001 (default WebSocket port)
 - Check firewall allows WebSocket connections
-- Update `WEBSOCKET_URL` in `app.js` if server is on different machine
+- Verify `PROD_ENV` in `app.js` matches your production domain (if applicable)
+- Check that WebSocket path in nginx config matches `websocket.subPath` in server config
+- Inspect browser console for connection errors
 
 ### No track updates
 - **Sonos mode**: Ensure Sonos devices are on same network and playing
 - **Spotify mode**: Play music on any Spotify device
-- Check server logs for errors
-- Verify `MEDIA_SERVICE_METHOD` is set correctly
+- Check server logs for errors (`server.log` or terminal output)
+- Verify `svcMethod` in config file is set correctly (`"sonos"`, `"spotify"`, or `"all"`)
 - For Sonos: Check that `soco` library is installed (`pip install soco`)
 - For Spotify: Verify Spotify account has active playback
+- Check service status indicators in webapp settings panel (gear icon)
+
+### Services not recovering after network change
+- Check `discoverSvcInterval` settings in config (default: 15s retry interval)
+- Verify `recoverAttemptWindowTime` hasn't expired (default: 36 hours)
+- Review `maxConsecutiveFailures` thresholds in config
+- Check server logs for recovery attempt messages
 
 ## License
 
