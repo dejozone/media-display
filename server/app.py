@@ -216,6 +216,21 @@ def try_start_sonos() -> bool:
         if device_monitor.start():
             app_state.add_monitor(device_monitor)
             server_logger.info("✅ Sonos service recovered and activated")
+            
+            # Give Sonos a moment to get its initial state
+            time.sleep(1)
+            
+            # Check if Sonos has active playback and should take over from lower-priority source
+            current_track = app_state.get_track_data()
+            if current_track:
+                sonos_priority = device_monitor.source_priority
+                current_priority = current_track.get('source_priority', 999)
+                current_source = current_track.get('source', 'unknown')
+                
+                # If Sonos has higher priority (lower number) and Sonos is the new track, it should be active
+                if current_track.get('source') == 'sonos' and sonos_priority < current_priority:
+                    server_logger.info(f"✅ Sonos (priority {sonos_priority}) taking over from {current_source.upper()} (priority {current_priority})")
+            
             broadcast_service_status()
             return True
         else:
@@ -266,8 +281,18 @@ def service_recovery_loop() -> None:
     
     retry_count: dict[str, int] = {'sonos': 0, 'spotify': 0}
     first_failure_time: dict[str, float | None] = {'sonos': None, 'spotify': None}
-    max_retry_duration = Config.SERVICE_RECOVERY_WINDOW_TIME
-    retry_interval = Config.SERVICE_RECOVERY_RETRY_INTERVAL
+    
+    # Service-specific retry intervals
+    retry_intervals: dict[str, int] = {
+        'sonos': Config.SONOS_DISCOVER_SVC_INTERVAL,
+        'spotify': Config.SPOTIFY_DISCOVER_SVC_INTERVAL
+    }
+    
+    # Service-specific recovery window times
+    recovery_window_times: dict[str, int] = {
+        'sonos': Config.SONOS_RECOVER_ATTEMPT_WINDOW_TIME,
+        'spotify': Config.SPOTIFY_RECOVER_ATTEMPT_WINDOW_TIME
+    }
     
     # Give initial startup time before starting recovery checks
     server_logger.info("🔄 Service recovery thread started")
@@ -288,6 +313,7 @@ def service_recovery_loop() -> None:
                     
                     # Check if we've exceeded the retry window
                     elapsed_time = time.time() - failure_start
+                    max_retry_duration = recovery_window_times.get(service, 86400)
                     if elapsed_time > max_retry_duration:
                         if retry_count[service] > 0:  # Only print once
                             # Format timeout display smartly
@@ -319,7 +345,8 @@ def service_recovery_loop() -> None:
                         retry_count[service] = 0  # Reset counter on success
                         first_failure_time[service] = None
                     else:
-                        server_logger.warning(f"⚠️  {service.upper()} recovery failed. Will retry in {retry_interval}s...")
+                        service_retry_interval = retry_intervals.get(service, 15)  # Default to 15s if not configured
+                        server_logger.warning(f"⚠️  {service.upper()} recovery failed. Will retry in {service_retry_interval}s...")
                 else:
                     # Service is active, reset retry counter and failure time
                     if retry_count[service] != 0:
@@ -338,12 +365,15 @@ def service_recovery_loop() -> None:
                                 app_state.remove_monitor(monitor)
                             broadcast_service_status()
             
-            # Sleep for configured retry interval before next check
-            time.sleep(retry_interval)
+            # Sleep for the minimum retry interval to be responsive to all services
+            # Use minimum of all configured retry intervals
+            min_retry_interval = min(retry_intervals.values()) if retry_intervals else 15
+            time.sleep(min_retry_interval)
             
         except Exception as e:
             server_logger.error(f"⚠️  Error in service recovery loop: {e}")
-            time.sleep(retry_interval)
+            min_retry_interval = min(retry_intervals.values()) if retry_intervals else 15
+            time.sleep(min_retry_interval)
     
     server_logger.info("🔄 Service recovery thread stopped")
 

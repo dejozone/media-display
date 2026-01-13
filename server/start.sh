@@ -16,14 +16,14 @@ if [ "$1" = "--gunicorn" ]; then
     USE_GUNICORN=true
 fi
 
-# Load environment variables
-if [ -f "$PROJECT_ROOT/.env" ]; then
+# Load environment variables from server/.env
+if [ -f "$SCRIPT_DIR/.env" ]; then
     set -a
-    source "$PROJECT_ROOT/.env"
+    source "$SCRIPT_DIR/.env"
     set +a
-    echo "✓ Environment variables loaded from $PROJECT_ROOT/.env"
+    echo "✓ Environment variables loaded from $SCRIPT_DIR/.env"
 else
-    echo "⚠️  Warning: .env file not found at $PROJECT_ROOT/.env"
+    echo "⚠️  Warning: .env file not found at $SCRIPT_DIR/.env"
 fi
 
 # Activate virtual environment if it exists
@@ -49,9 +49,19 @@ if ! python -c "import flask_socketio" 2>/dev/null; then
     }
 fi
 
-# Get server configuration from environment or use defaults
+# Get server configuration from JSON config file
+ENV=${ENV:-dev}
+CONFIG_FILE="$SCRIPT_DIR/conf/${ENV}.json"
+
+if [ -f "$CONFIG_FILE" ]; then
+    PORT=$(python -c "import json; print(json.load(open('$CONFIG_FILE'))['websocket']['serverPort'])" 2>/dev/null || echo "5001")
+    echo "✓ Configuration loaded from $CONFIG_FILE"
+else
+    PORT=5001
+    echo "⚠️  Warning: Config file not found at $CONFIG_FILE, using default port $PORT"
+fi
+
 HOST=${SERVER_HOST:-0.0.0.0}
-PORT=${WEBSOCKET_SERVER_PORT:-5001}
 
 # Start the server
 echo ""
@@ -60,7 +70,7 @@ if [ "$USE_GUNICORN" = true ]; then
     echo "Server: http://${HOST}:${PORT}"
     echo "Working directory: $SCRIPT_DIR"
     echo ""
-    exec gunicorn -c gunicorn_config.py app:app
+    exec gunicorn -c gunicorn_config.py --bind ${HOST}:${PORT} app:app
 else
     echo "Starting Spotify Now Playing Server (Development Mode)..."
     echo "Working directory: $SCRIPT_DIR"

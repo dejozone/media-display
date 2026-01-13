@@ -10,9 +10,38 @@ import sys
 import signal
 import threading
 import socket
+import json
+from typing import Dict, Any
 from dotenv import load_dotenv
-from flask import Flask, send_from_directory, send_file, request, jsonify
+from flask import Flask, send_from_directory, send_file, request
 from flask_cors import CORS
+
+# Get the directory of this file
+_current_dir = os.path.dirname(os.path.abspath(__file__))
+
+# Load environment variables from webapp/.env
+_env_path = os.path.join(_current_dir, '.env')
+load_dotenv(_env_path)
+
+# Get environment name and use it to load corresponding config file
+_env = os.getenv('ENV', 'dev').lower()
+_config_file = f'{_env}.json'
+_config_path = os.path.join(_current_dir, 'conf', _config_file)
+
+try:
+    with open(_config_path, 'r') as f:
+        _json_config: Dict[str, Any] = json.load(f)
+except FileNotFoundError:
+    raise FileNotFoundError(f"Configuration file not found: {_config_path}")
+except json.JSONDecodeError as e:
+    raise ValueError(f"Invalid JSON in configuration file {_config_path}: {e}")
+
+# Configuration
+PORT = _json_config.get('server', {}).get('port', 8080)
+WEBAPP_SEND_FILE_MAX_AGE_DEFAULT = _json_config.get('server', {}).get('sendFileCacheMaxAge', 86400)
+WEBAPP_DIR_LISTING_MAX_AGE_DEFAULT = _json_config.get('server', {}).get('dirListingCacheMaxAge', 3600)
+WEBAPP_DIR = _current_dir
+
 # Utility function to get local IP addresses
 def get_local_ip():
     """Get the local IP address(es) of the server"""
@@ -42,19 +71,11 @@ def get_local_ip():
     
     return ips
 
-# 
-# Load environment variables
-load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '.env'))
-
-# Configuration
-PORT = int(os.getenv('WEBAPP_PORT', '8080'))
-WEBAPP_DIR = os.path.dirname(os.path.abspath(__file__))
-
 # Flask app for production (gunicorn)
 app = Flask(__name__, static_folder='.', static_url_path='')
-app.config['WEBAPP_SEND_FILE_MAX_AGE_DEFAULT'] = int(os.getenv('WEBAPP_SEND_FILE_MAX_AGE_DEFAULT', '86400'))  # Cache static files for 1 day
+app.config['WEBAPP_SEND_FILE_MAX_AGE_DEFAULT'] = WEBAPP_SEND_FILE_MAX_AGE_DEFAULT
+app.config['WEBAPP_DIR_LISTING_MAX_AGE_DEFAULT'] = WEBAPP_DIR_LISTING_MAX_AGE_DEFAULT
 CORS(app)
-app.config['WEBAPP_DIR_LISTING_MAX_AGE_DEFAULT'] = int(os.getenv('WEBAPP_DIR_LISTING_MAX_AGE_DEFAULT', '3600'))  # Cache directory listings for 1 hour
 
 @app.route('/')
 def index():

@@ -1,0 +1,7 @@
+{
+  "server": {
+    "port": 8081,
+    "sendFileCacheMaxAge": 86400,
+    "dirListingCacheMaxAge": 3600
+  }
+}

@@ -6,6 +6,7 @@ import time
 from typing import Optional, Dict, Any
 from lib.monitors.base import BaseMonitor
 from lib.utils.logger import monitor_logger
+from config import Config
 
 class SpotifyMonitor(BaseMonitor):
     """Monitor Spotify playback and broadcast updates"""
@@ -24,6 +25,10 @@ class SpotifyMonitor(BaseMonitor):
         self.app_state = app_state
         self.socketio = socketio
         self.last_device_name: Optional[str] = None
+        
+        # Pause polling optimization
+        self.consecutive_no_playback_count: int = 0
+        self.polling_paused: bool = False
     
     def get_current_playback(self) -> Optional[Dict[str, Any]]:
         """Get current playback information"""
@@ -55,13 +60,64 @@ class SpotifyMonitor(BaseMonitor):
     
     def _monitor_loop(self):
         """Main monitoring loop"""
+        from config import Config
         monitor_logger.info("Starting Spotify playback monitor...")
         
         while self.is_running:
             try:
+                # OPTIMIZATION: Check if higher-priority source is active BEFORE polling
+                # This reduces unnecessary API calls when Sonos (or other higher-priority sources) are playing
+                # Uses shared method from BaseMonitor - easy to extend for new services
+                if self.should_use_reduced_polling(self.app_state, Config.SPOTIFY_TAKEOVER_WAIT_TIME):
+                    current_track_data = self.app_state.get_track_data()
+                    # monitor_logger.debug(f"[SPOTIFY] Higher-priority source ({current_track_data.get('source')}) active, using reduced polling")
+                    time.sleep(Config.SPOTIFY_REDUCED_POLLING_INTERVAL)
+                    continue
+                
+                # If polling is paused, check less frequently
+                if self.polling_paused:
+                    time.sleep(Config.SPOTIFY_PAUSED_POLLING_INTERVAL)
+                    
+                    # Quick check if playback resumed
+                    track_data = self.get_current_playback()
+                    if track_data and track_data.get('is_playing'):
+                        monitor_logger.info("🎵 [SPOTIFY] Playback resumed, resuming normal polling")
+                        self.polling_paused = False
+                        self.consecutive_no_playback_count = 0
+                        # Continue to normal processing below
+                    else:
+                        # Still no playback, continue paused polling
+                        continue
+                
                 track_data = self.get_current_playback()
                 current_time = time.time()
+                # Re-fetch current track data in case it changed during API call
                 current_track_data = self.app_state.get_track_data()
+                
+                # Check for no playback and enter paused polling mode if needed
+                if not track_data or not track_data.get('is_playing'):
+                    self.consecutive_no_playback_count += 1
+                    
+                    # After configured consecutive checks with no playback, pause polling
+                    if self.consecutive_no_playback_count >= Config.SPOTIFY_CONSECUTIVE_NO_POLLS_BEFORE_PAUSE:
+                        monitor_logger.info(f"⏸️  [SPOTIFY] No playback detected for {self.consecutive_no_playback_count * 2}s, reducing polling frequency")
+                        self.polling_paused = True
+                        self.consecutive_no_playback_count = 0
+                        
+                        # Clear current track if it was from Spotify
+                        if current_track_data and current_track_data.get('source') == 'spotify':
+                            self.app_state.update_track_data(None)
+                            try:
+                                self.socketio.emit('track_update', None, namespace='/')
+                            except Exception:
+                                pass
+                            monitor_logger.info("⏹️  [SPOTIFY] No track playing")
+                    
+                    time.sleep(2)
+                    continue
+                
+                # Reset counter when playback is active
+                self.consecutive_no_playback_count = 0
                 
                 if track_data:
                     track_id = track_data['track_id']
@@ -77,6 +133,19 @@ class SpotifyMonitor(BaseMonitor):
                     device_changed = device_name != self.last_device_name
                     is_our_source = current_track_data and current_track_data.get('source') == 'spotify'
                     
+                    # OPTIMIZATION: Don't take over if higher-priority source is playing the SAME track
+                    # This prevents unnecessary back-and-forth when Sonos plays Spotify content
+                    if current_track_data and current_track_data.get('source') == 'sonos':
+                        # Check if it's the same track
+                        if comparable_track_id == current_comparable_id:
+                            # Same track on Sonos - don't interfere unless stale
+                            if time_since_last_update <= Config.SPOTIFY_TAKEOVER_WAIT_TIME:
+                                monitor_logger.debug(f"[SPOTIFY] Skipping update - Sonos already playing same track ({track_data['track_name']})")
+                                time.sleep(2)
+                                continue
+                            else:
+                                monitor_logger.info(f"🔄 [SPOTIFY] Sonos stale ({time_since_last_update:.1f}s), taking over same track")
+                    
                     # Determine if we should update
                     major_change = (
                         track_id != self.last_track_id or
@@ -86,7 +155,29 @@ class SpotifyMonitor(BaseMonitor):
                     )
                     
                     # Can we take over?
-                    can_take_over = self.should_source_takeover(current_track_data, time_since_last_update)
+                    # Spotify takeover logic:
+                    # 1. No current source → take over
+                    # 2. We have higher priority → use normal takeover logic
+                    # 3. Current source has higher priority (e.g., Sonos) BUT is stale (not playing) → take over
+                    # 4. Current source has higher priority AND is actively playing → do NOT take over
+                    can_take_over = False
+                    if current_track_data is None:
+                        # No current source, we can take over
+                        can_take_over = True
+                    else:
+                        current_priority = current_track_data.get('source_priority', 999)
+                        if current_priority > self.source_priority:
+                            # We have higher priority, use normal takeover logic
+                            can_take_over = self.should_source_takeover(current_track_data, time_since_last_update)
+                        else:
+                            # Current source has same or higher priority (like Sonos)
+                            # Check if it's stale (hasn't updated in configured time)
+                            # If stale, it's likely not playing anymore, so we can take over
+                            if time_since_last_update > Config.SPOTIFY_TAKEOVER_WAIT_TIME:
+                                can_take_over = True
+                            else:
+                                # Higher priority source is actively playing, don't take over
+                                can_take_over = False
                     
                     # For progress updates: only send if clients need progress
                     needs_progress_update = is_our_source and self.app_state.has_clients_needing_progress()
@@ -98,11 +189,12 @@ class SpotifyMonitor(BaseMonitor):
                         self.last_device_name = device_name
                         self.last_update_time = current_time
                         
-                        # Log when switching to Spotify as progress source
+                        # Log source switching with detailed context
                         if major_change and (current_track_data is None or current_track_data.get('source') != 'spotify'):
-                            monitor_logger.info("📊 Progress source: SPOTIFY (fallback)")
-                            monitor_logger.debug(f"   Switching from {current_track_data.get('source', 'none') if current_track_data else 'none'} (priority {current_track_data.get('source_priority', 'N/A') if current_track_data else 'N/A'}) to spotify (priority {self.source_priority})")
-                            monitor_logger.debug(f"   Reason: can_take_over={can_take_over}, time_since_last_update={int(time_since_last_update)}s")
+                            current_source = current_track_data.get('source', 'none').upper() if current_track_data else 'NONE'
+                            current_priority = current_track_data.get('source_priority', 'N/A') if current_track_data else 'N/A'
+                            monitor_logger.info(f"📊 [SPOTIFY] Taking control from {current_source} (priority {current_priority})")
+                            monitor_logger.debug(f"   Reason: major_change={major_change}, can_take_over={can_take_over}, staleness={time_since_last_update:.1f}s")
                         
                         self.app_state.update_track_data(track_data)
                         

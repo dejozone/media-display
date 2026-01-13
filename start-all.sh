@@ -23,16 +23,28 @@ NC='\033[0m' # No Color
 # Get project root
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 
-# Load environment variables
-if [ -f "$PROJECT_ROOT/.env" ]; then
-    set -a
-    source "$PROJECT_ROOT/.env"
-    set +a
+# Load environment variable from server/.env to determine config file
+ENV="dev"  # Default
+if [ -f "$PROJECT_ROOT/server/.env" ]; then
+    source "$PROJECT_ROOT/server/.env"
 fi
 
-# Configuration
-SERVER_PORT=${WEBSOCKET_SERVER_PORT:-5001}
-WEBAPP_PORT=${WEBAPP_PORT:-8081}
+# Read ports from JSON configuration files
+CONFIG_FILE="${ENV}.json"
+
+# Read server port from server/conf/{env}.json
+if [ -f "$PROJECT_ROOT/server/conf/$CONFIG_FILE" ]; then
+    SERVER_PORT=$(python3 -c "import json; print(json.load(open('$PROJECT_ROOT/server/conf/$CONFIG_FILE'))['websocket']['serverPort'])" 2>/dev/null || echo "5001")
+else
+    SERVER_PORT=5001
+fi
+
+# Read webapp port from webapp/conf/{env}.json
+if [ -f "$PROJECT_ROOT/webapp/conf/$CONFIG_FILE" ]; then
+    WEBAPP_PORT=$(python3 -c "import json; print(json.load(open('$PROJECT_ROOT/webapp/conf/$CONFIG_FILE'))['server']['port'])" 2>/dev/null || echo "8080")
+else
+    WEBAPP_PORT=8080
+fi
 # Always use Gunicorn for production-ready startup
 USE_GUNICORN=true
 
@@ -223,38 +235,29 @@ else
     echo -e "${YELLOW}⚠️  No cached Spotify credentials found${NC}"
 fi
 
-if [ "$AUTIn systemd mode, just log the requirement without prompting
-        if [ "$SYSTEMD_MODE" = true ]; then
-            # Extract authorization URL from log if available
-            AUTH_URL=$(grep -o "https://accounts\.spotify\.com/authorize[^[:space:]]*" "$PROJECT_ROOT/server.log" 2>/dev/null | head -1)
+if [ "$AUTH_NEEDED" = true ]; then
+    # In systemd mode, just log the requirement without prompting
+    if [ "$SYSTEMD_MODE" = true ]; then
+        # Extract authorization URL from log if available
+        AUTH_URL=$(grep -o "https://accounts\.spotify\.com/authorize[^[:space:]]*" "$PROJECT_ROOT/server.log" 2>/dev/null | head -1)
+        
+        if [ -n "$AUTH_URL" ]; then
+            DECODED_URL=$(python3 -c "import urllib.parse; print(urllib.parse.unquote('$AUTH_URL'))" 2>/dev/null || echo "$AUTH_URL")
+            echo -e "${YELLOW}⚠️  Spotify authentication required${NC}"
+            echo -e "${BLUE}Please authenticate using this link:${NC}"
+            echo -e "${GREEN}$DECODED_URL${NC}"
+        fi
+        
+        echo -e "${YELLOW}Note: Service will continue with limited functionality until authenticated${NC}"
+    else
+        # Extract authorization URL from log if available (simple approach)
+        AUTH_URL=$(grep -o "https://accounts\.spotify\.com/authorize[^[:space:]]*" "$PROJECT_ROOT/server.log" 2>/dev/null | head -1)
+        
+        if [ -n "$AUTH_URL" ]; then
+            # Decode URL for better readability
+            DECODED_URL=$(python3 -c "import urllib.parse; print(urllib.parse.unquote('$AUTH_URL'))" 2>/dev/null || echo "$AUTH_URL")
             
-            if [ -n "$AUTH_URL" ]; then
-                DECODED_URL=$(python3 -c "import urllib.parse; print(urllib.parse.unquote('$AUTH_URL'))" 2>/dev/null || echo "$AUTH_URL")
-                echo -e "${YELLOW}⚠️  Spotify authentication required${NC}"
-                echo -e "${BLUE}Please authenticate using this link:${NC}"
-                echo -e "${GREEN}$DECODED_URL${NC}"
-            fi
-            
-            echo -e "${YELLOW}Note: Service will continue with limited functionality until authenticated${NC}"
-        else
-            # Extract authorization URL from log if available (simple approach)
-            AUTH_URL=$(grep -o "https://accounts\.spotify\.com/authorize[^[:space:]]*" "$PROJECT_ROOT/server.log" 2>/dev/null | head -1)
-            
-            if [ -n "$AUTH_URL" ]; then
-                # Decode URL for better readability
-                DECODED_URL=$(python3 -c "import urllib.parse; print(urllib.parse.unquote('$AUTH_URL'))" 2>/dev/null || echo "$AUTH_URL")
-                
-                echo -e "${YELLOW}⚠️  Spotify authentication required${NC}"
-                echo -e "${BLUE}If browser didn't open automatically, use this link:${NC}"
-                echo -e "${GREEN}$DECODED_URL${NC}"
-                echo ""
-            else
-                echo -e "${YELLOW}⚠️  Please complete Spotify authentication in the browser${NC}"
-            fi
-            
-            echo -e "${BLUE}Press Enter when authentication is complete...${NC}"
-            read -r
-        fio -e "${YELLOW}⚠️  Spotify authentication required${NC}"
+            echo -e "${YELLOW}⚠️  Spotify authentication required${NC}"
             echo -e "${BLUE}If browser didn't open automatically, use this link:${NC}"
             echo -e "${GREEN}$DECODED_URL${NC}"
             echo ""
@@ -278,6 +281,21 @@ cd "$PROJECT_ROOT/webapp"
 PYTHONUNBUFFERED=1 stdbuf -oL -eL ./start.sh --gunicorn >> "$PROJECT_ROOT/webapp.log" 2>&1 &
 WEBAPP_PID=$!
 
+# Wait for webapp to be ready
+if ! wait_for_service $WEBAPP_PORT "Web Application" $WEBAPP_PID "$PROJECT_ROOT/webapp.log"; then
+    echo -e "${RED}Check webapp.log for errors${NC}"
+    cleanup
+    exit 1
+fi
+
+echo -e "${GREEN}✓ Webapp started successfully (PID: $WEBAPP_PID)${NC}"
+echo ""
+
+# Step 3: Open browser
+echo -e "${YELLOW}[3/3] Opening browser...${NC}"
+sleep 2  # Brief delay to ensure webapp is fully ready
+
+WEBAPP_URL="http://localhost:${WEBAPP_PORT}"
 
 # Only open browser in non-systemd mode
 if [ "$SYSTEMD_MODE" = false ]; then
@@ -289,25 +307,7 @@ if [ "$SYSTEMD_MODE" = false ]; then
         echo -e "${YELLOW}⚠️  Please open $WEBAPP_URL manually${NC}"
     fi
 else
-    echo -e "${BLUE}→ Browser access: $WEBAPP_URL
-
-echo -e "${GREEN}✓ Webapp started successfully (PID: $WEBAPP_PID)${NC}"
-echo ""
-
-# Step 3: Open browser
-echo -e "${YELLOW}[3/3] Opening browser...${NC}"
-sleep 2  # Brief delay to ensure webapp is fully ready
-
-WEBAPP_URL="http://localhost:${WEBAPP_PORT}"
-echo -e "${BLUE}→ Opening: $WEBAPP_URL${NC}"
-
-if [ "$SYSTEMD_MODE" = false ]; then
-    echo -e "${YELLOW}Press Ctrl+C to stop all services${NC}"
-    echo ""
-fiand -v open &> /dev/null; then
-    open "$WEBAPP_URL"
-else
-    echo -e "${YELLOW}⚠️  Please open $WEBAPP_URL manually${NC}"
+    echo -e "${BLUE}→ Browser access: $WEBAPP_URL${NC}"
 fi
 
 # Success message

@@ -1,0 +1,33 @@
+{
+  "svcMethod": "all",
+  "localCallbackSrvPort": 8888,
+  "svcRecoveryInitDelay": 15,
+  "logging": {
+    "level": "debug"
+  },
+  "websocket": {
+    "serverPort": 5001,
+    "subPath": "/notis/media-display/socket.io"
+  },
+  "sonos": {
+    "checkTakeoverInterval": 2,
+    "stopHeartBeatTimeNoPlayback": 3,
+    "pausedPollingInterval": 10,
+    "reducedPollingInterval": 10,
+    "discoverSvcInterval": 10,
+    "recoverAttemptWindowTime": 129600
+  },
+  "spotify": {
+    "takeoverWaitTime": 5,
+    "pausedPollingInterval": 10,
+    "reducedPollingInterval": 10,
+    "consecutiveNoPollsBeforePause": 3,
+    "discoverSvcInterval": 15,
+    "recoverAttemptWindowTime": 129600,
+    "api": {
+      "sslCertVerification": false,
+      "callbackRedirRootUrl": "https://media-display.projecttechcycle-dev.org:9080/spotify/callback",
+      "scope": "user-read-currently-playing user-read-playback-state"
+    }
+  }
+}

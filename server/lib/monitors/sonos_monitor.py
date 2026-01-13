@@ -223,14 +223,31 @@ class SonosMonitor(BaseMonitor):
                             'source_priority': self.source_priority,
                             'timestamp': time.time()
                         }
-                        self.app_state.update_track_data(track_data)
-                        self.last_track_id = self.create_track_identifier(track_data)
-                        self.last_update_time = time.time()
                         
-                        # Format device names for logging
-                        device_display = format_device_display(device_names)
-                        monitor_logger.info(f"  ℹ️  Initial state: {track_data['track_name']} - {track_data['artist']}")
-                        monitor_logger.info(f"  📱 Playing on: {device_display}")
+                        # Check if we should take over from current source
+                        current_track = self.app_state.get_track_data()
+                        should_takeover = (
+                            not current_track or
+                            current_track.get('source_priority', 999) > self.source_priority
+                        )
+                        
+                        if should_takeover:
+                            self.app_state.update_track_data(track_data)
+                            self.last_track_id = self.create_track_identifier(track_data)
+                            self.last_update_time = time.time()
+                            
+                            # Format device names for logging
+                            device_display = format_device_display(device_names)
+                            monitor_logger.info(f"  ℹ️  Initial state: {track_data['track_name']} - {track_data['artist']}")
+                            monitor_logger.info(f"  📱 Playing on: {device_display}")
+                            
+                            if current_track and current_track.get('source') != 'sonos':
+                                monitor_logger.info(f"  📊 Taking over from {current_track.get('source', 'unknown').upper()} (Sonos priority)")
+                        else:
+                            # Don't take over, but store for later takeover check
+                            monitor_logger.info(f"  ℹ️  Sonos detected: {track_data['track_name']} - {track_data['artist']}")
+                            monitor_logger.info(f"  ⏸️  Not taking over (current source has higher priority)")
+                        
                         return track_data
                         
                 except Exception as e:
@@ -242,10 +259,22 @@ class SonosMonitor(BaseMonitor):
         """
         Continuously poll for position updates.
         Also monitors event health and handles full state updates when events fail.
+        Additionally checks if Sonos should take over from lower-priority sources.
         """
+        from config import Config
+        
         while self.is_running:
             try:
-                time.sleep(2)  # Poll every 2 seconds
+                # OPTIMIZATION: Check if higher-priority source is active BEFORE polling
+                # This reduces unnecessary operations when a higher-priority service is playing
+                # (e.g., if Apple Music has priority 0, Sonos would reduce its activity)
+                if self.should_use_reduced_polling(self.app_state, Config.SPOTIFY_TAKEOVER_WAIT_TIME):
+                    current_track_data = self.app_state.get_track_data()
+                    # monitor_logger.debug(f"[SONOS] Higher-priority source ({current_track_data.get('source')}) active, using reduced polling")
+                    time.sleep(Config.SONOS_REDUCED_POLLING_INTERVAL)
+                    continue
+                
+                time.sleep(Config.SONOS_CHECK_TAKEOVER_INTERVAL)
                 
                 current_track_data = self.app_state.get_track_data()
                 
@@ -268,30 +297,81 @@ class SonosMonitor(BaseMonitor):
                     not self.events_active
                 )
                 
-                if should_poll_position or should_poll_full_state:
-                    for device_info in self.devices:
-                        if device_info['type'] == 'sonos':
-                            try:
-                                device = device_info['device']
-                                track = device.get_current_track_info()
-                                transport = device.get_current_transport_info()
-                                
-                                if track and track.get('title'):
-                                    position_ms = parse_time_to_ms(track.get('position', '0:00:00'))
-                                    duration_ms = parse_time_to_ms(track.get('duration', '0:00:00'))
+                # Send heartbeat updates to keep timestamp fresh (prevent other sources from thinking Sonos is stale)
+                # This runs when Sonos is the active source but clients don't need progress updates
+                should_send_heartbeat = (
+                    current_track_data and 
+                    current_track_data.get('source') == 'sonos' and
+                    not self.app_state.has_clients_needing_progress() and
+                    self.events_active and
+                    time.time() - current_track_data.get('timestamp', 0) > Config.SONOS_HEARTBEAT_INTERVAL
+                )
+                
+                # Check if Sonos should take over from lower-priority source
+                # This handles the case where Sonos recovers while another source is active
+                should_check_takeover = (
+                    current_track_data and
+                    current_track_data.get('source') != 'sonos' and
+                    current_track_data.get('source_priority', 999) > self.source_priority
+                )
+                
+                if should_poll_position or should_poll_full_state or should_check_takeover or should_send_heartbeat:
+                    # Handle heartbeat - verify Sonos is still playing before updating timestamp
+                    if should_send_heartbeat:
+                        # Query device to verify it's still playing before sending heartbeat
+                        for device_info in self.devices:
+                            if device_info['type'] == 'sonos':
+                                try:
+                                    device = device_info['device']
+                                    transport = device.get_current_transport_info()
                                     is_playing = transport.get('current_transport_state') == 'PLAYING'
                                     
-                                    # If events are down, check for track changes
-                                    if should_poll_full_state:
-                                        track_id = f"{track.get('title')}_{track.get('artist')}"
+                                    if is_playing:
+                                        # Sonos is still playing - update timestamp
+                                        fresh_track_data = self.app_state.get_track_data()
+                                        if fresh_track_data and fresh_track_data.get('source') == 'sonos':
+                                            fresh_track_data['timestamp'] = time.time()
+                                            self.app_state.update_track_data(fresh_track_data)
+                                    else:
+                                        # Not playing - let timestamp go stale so other sources can take over
+                                        # Clear track if Sonos was the source
+                                        fresh_track_data = self.app_state.get_track_data()
+                                        if fresh_track_data and fresh_track_data.get('source') == 'sonos' and not fresh_track_data.get('is_playing'):
+                                            monitor_logger.info("⏹️  [SONOS] Playback stopped, clearing track")
+                                            self.app_state.update_track_data(None)
+                                            try:
+                                                self.socketio.emit('track_update', None, namespace='/')
+                                            except Exception:
+                                                pass
+                                    
+                                    break  # Only need to check one device
+                                except Exception as e:
+                                    monitor_logger.warning(f"⚠️  [SONOS] Heartbeat check error: {e}")
+                    
+                    # For other conditions, we need to query the device
+                    if should_poll_position or should_poll_full_state or should_check_takeover:
+                        for device_info in self.devices:
+                            if device_info['type'] == 'sonos':
+                                try:
+                                    device = device_info['device']
+                                    track = device.get_current_track_info()
+                                    transport = device.get_current_transport_info()
+                                    
+                                    if track and track.get('title'):
+                                        position_ms = parse_time_to_ms(track.get('position', '0:00:00'))
+                                        duration_ms = parse_time_to_ms(track.get('duration', '0:00:00'))
+                                        is_playing = transport.get('current_transport_state') == 'PLAYING'
                                         
-                                        if self.last_track_id != track_id:
-                                            monitor_logger.info(f"🔄 [SONOS POLL] Track changed: {track.get('title')} - {track.get('artist')}")
-                                            monitor_logger.debug("   (Event subscriptions inactive, using polling for track detection)")
-                                            self.last_track_id = track_id
-                                            
+                                        # Check if Sonos should take over from lower-priority source
+                                        if should_check_takeover and is_playing:
+                                            track_id = f"{track.get('title')}_{track.get('artist')}"
                                             device_names = self.get_device_names(device)
-                                            current_track_data = {
+                                            
+                                            # Check if it's the same track
+                                            current_track_id = f"{current_track_data.get('track_name', '')}_{current_track_data.get('artist', '')}" if current_track_data else ""
+                                            is_same_track = track_id == current_track_id
+                                            
+                                            new_track_data = {
                                                 'track_name': track.get('title', 'Unknown'),
                                                 'artist': track.get('artist', 'Unknown Artist'),
                                                 'album': track.get('album', 'Unknown Album'),
@@ -307,24 +387,62 @@ class SonosMonitor(BaseMonitor):
                                                 'source_priority': self.source_priority,
                                                 'timestamp': time.time()
                                             }
-                                            self.app_state.update_track_data(current_track_data)
-                                    
-                                    # Always update position (whether events are working or not)
-                                    # Get fresh track data to avoid race condition with events
-                                    fresh_track_data = self.app_state.get_track_data()
-                                    if fresh_track_data and fresh_track_data.get('source') == 'sonos':
-                                        fresh_track_data['progress_ms'] = position_ms
-                                        fresh_track_data['duration_ms'] = duration_ms
-                                        fresh_track_data['is_playing'] = is_playing
-                                        fresh_track_data['timestamp'] = time.time()
+                                            
+                                            self.last_track_id = track_id
+                                            self.last_update_time = time.time()
+                                            self.app_state.update_track_data(new_track_data)
+                                            self.socketio.emit('track_update', new_track_data, namespace='/')
+                                            
+                                            current_source = current_track_data.get('source', 'unknown').upper()
+                                            current_priority = current_track_data.get('source_priority', 999)
+                                            same_track_note = " (same track)" if is_same_track else " (different track)"
+                                            monitor_logger.info(f"📊 Progress source: SONOS (priority)")
+                                            monitor_logger.info(f"   Taking over from {current_source} (priority {current_priority}){same_track_note}")
+                                            monitor_logger.info(f"🎵 [SONOS] {new_track_data['track_name']} - {new_track_data['artist']}")
                                         
-                                        self.app_state.update_track_data(fresh_track_data)
-                                        self.socketio.emit('track_update', fresh_track_data, namespace='/')
-                                
-                                break  # Only need to poll one device
-                                
-                            except Exception as e:
-                                monitor_logger.warning(f"⚠️  [SONOS] Polling error: {e}")
+                                        # If events are down, check for track changes
+                                        if should_poll_full_state:
+                                            track_id = f"{track.get('title')}_{track.get('artist')}"
+                                            
+                                            if self.last_track_id != track_id:
+                                                monitor_logger.info(f"🔄 [SONOS POLL] Track changed: {track.get('title')} - {track.get('artist')}")
+                                                self.last_track_id = track_id
+                                                
+                                                device_names = self.get_device_names(device)
+                                                current_track_data = {
+                                                    'track_name': track.get('title', 'Unknown'),
+                                                    'artist': track.get('artist', 'Unknown Artist'),
+                                                    'album': track.get('album', 'Unknown Album'),
+                                                    'album_art': track.get('album_art', None),
+                                                    'is_playing': is_playing,
+                                                    'progress_ms': position_ms,
+                                                    'duration_ms': duration_ms,
+                                                    'device': {
+                                                        'names': device_names,
+                                                        'type': 'Sonos Speaker'
+                                                    },
+                                                    'source': 'sonos',
+                                                    'source_priority': self.source_priority,
+                                                    'timestamp': time.time()
+                                                }
+                                                self.app_state.update_track_data(current_track_data)
+                                        
+                                        # Always update position (whether events are working or not)
+                                        # Get fresh track data to avoid race condition with events
+                                        fresh_track_data = self.app_state.get_track_data()
+                                        if fresh_track_data and fresh_track_data.get('source') == 'sonos':
+                                            fresh_track_data['progress_ms'] = position_ms
+                                            fresh_track_data['duration_ms'] = duration_ms
+                                            fresh_track_data['is_playing'] = is_playing
+                                            fresh_track_data['timestamp'] = time.time()
+                                            
+                                            self.app_state.update_track_data(fresh_track_data)
+                                            self.socketio.emit('track_update', fresh_track_data, namespace='/')
+                                        
+                                        break  # Only need to poll one device
+                                    
+                                except Exception as e:
+                                    monitor_logger.warning(f"⚠️  [SONOS] Polling error: {e}")
                                 
             except Exception as e:
                 monitor_logger.error(f"⚠️  [SONOS] Position polling loop error: {e}")

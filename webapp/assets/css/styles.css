@@ -725,12 +725,16 @@ body.rotate-270 .no-playback-state .icon-container {
 
 .album-art-container {
     position: relative;
-    width: 100%;
-    max-width: min(700px, 65vmin);
-    max-height: min(700px, 65vmin);
+    /* Remove width: 100% dependency - use viewport units directly */
+    width: min(1000px, 80vmin);
+    height: min(1000px, 80vmin);
+    max-width: 80vmin;
+    max-height: 80vmin;
     aspect-ratio: 1;
     z-index: 10;
     isolation: isolate;
+    /* Prevent flex from shrinking this */
+    flex-shrink: 0;
 }
 
 .album-art {
@@ -748,6 +752,8 @@ body.rotate-270 .no-playback-state .icon-container {
     will-change: box-shadow;
     transform: translateZ(0);
     backface-visibility: hidden;
+    /* Ensure image maintains container's square aspect ratio */
+    aspect-ratio: 1;
 }
 
 .album-art.glow-all-colors {
@@ -1732,8 +1738,8 @@ body:not(:has(.playback-status.playing)) .equalizer-bar {
     }
     
     body:not(.rotate-90):not(.rotate-270) .album-art-container {
-        max-width: min(700px, 70vmin);
-        max-height: min(700px, 70vmin);
+        max-width: min(700px, 80vmin);
+        max-height: min(700px, 80vmin);
         flex-shrink: 1;
     }
     

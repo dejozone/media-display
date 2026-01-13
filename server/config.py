@@ -3,56 +3,90 @@ Configuration management for the Now Playing Server.
 Centralized configuration with validation and type safety.
 """
 import os
-from typing import Literal, Optional
+import json
+from typing import Literal, Optional, Dict, Any
 from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+# Get the directory of this config file
+_current_dir = os.path.dirname(os.path.abspath(__file__))
+
+# Load environment variables from server/.env
+_env_path = os.path.join(_current_dir, '.env')
+load_dotenv(_env_path)
+
+# Get environment name and use it to load corresponding config file
+_env = os.getenv('ENV', 'dev').lower()
+_config_file = f'{_env}.json'
+_config_path = os.path.join(_current_dir, 'conf', _config_file)
+
+try:
+    with open(_config_path, 'r') as f:
+        _json_config: Dict[str, Any] = json.load(f)
+except FileNotFoundError:
+    raise FileNotFoundError(f"Configuration file not found: {_config_path}")
+except json.JSONDecodeError as e:
+    raise ValueError(f"Invalid JSON in configuration file {_config_path}: {e}")
 
 
 class Config:
     """Centralized configuration with validation"""
     
+    # Environment
+    ENV: str = _env
+    
     # Flask Configuration
     SECRET_KEY: str = os.getenv('SECRET_KEY', 'your-secret-key-change-in-production')
-    WEBAPP_SEND_FILE_MAX_AGE_DEFAULT: int = int(os.getenv('WEBAPP_SEND_FILE_MAX_AGE_DEFAULT', '86400'))  # 1 day in seconds
+    WEBAPP_SEND_FILE_MAX_AGE_DEFAULT: int = 86400  # 1 day in seconds
     
     # Server Configuration
-    SERVER_HOST: str = os.getenv('SERVER_HOST', '0.0.0.0')
-    WEBSOCKET_SERVER_PORT: int = int(os.getenv('WEBSOCKET_SERVER_PORT', '5001'))
-    WEBSOCKET_PATH: str = os.getenv('WEBSOCKET_PATH', '/socket.io')
+    SERVER_HOST: str = '0.0.0.0'
+    WEBSOCKET_SERVER_PORT: int = _json_config.get('websocket', {}).get('serverPort', 5001)
+    WEBSOCKET_PATH: str = _json_config.get('websocket', {}).get('subPath', '/socket.io')
     
-    # Spotify Configuration
+    # Spotify Configuration from .env
     SPOTIFY_CLIENT_ID: Optional[str] = os.getenv('SPOTIFY_CLIENT_ID')
     SPOTIFY_CLIENT_SECRET: Optional[str] = os.getenv('SPOTIFY_CLIENT_SECRET')
-    SPOTIFY_REDIRECT_URI: str = os.getenv('SPOTIFY_REDIRECT_URI', 'http://localhost:8888/callback')
+    
+    # Spotify Configuration from JSON
+    SPOTIFY_REDIRECT_URI: str = _json_config.get('spotify', {}).get('api', {}).get('callbackRedirRootUrl', 'http://localhost:8888/callback')
     SPOTIFY_CACHE_PATH: str = '.spotify_cache'
-    SPOTIFY_SCOPE: str = 'user-read-currently-playing user-read-playback-state'
+    SPOTIFY_SCOPE: str = _json_config.get('spotify', {}).get('api', {}).get('scope', 'user-read-currently-playing user-read-playback-state')
     
     # SSL Configuration
-    SSL_VERIFY_SPOTIFY: bool = os.getenv('SPOTIFY_SSL_CERT_VERIFICATION', 'true').lower() == 'true'
+    SSL_VERIFY_SPOTIFY: bool = _json_config.get('spotify', {}).get('api', {}).get('sslCertVerification', True)
     
     # OAuth Callback Server
-    LOCAL_CALLBACK_PORT: Optional[int] = None
-    _local_port_str = os.getenv('LOCAL_CALLBACK_PORT', '').strip()
-    if _local_port_str:
-        try:
-            LOCAL_CALLBACK_PORT = int(_local_port_str)
-        except ValueError:
-            print(f"⚠️  Invalid LOCAL_CALLBACK_PORT: '{_local_port_str}' (must be an integer)")
+    LOCAL_CALLBACK_PORT: Optional[int] = _json_config.get('localCallbackSrvPort')
     
     # Service Configuration
     MEDIA_SERVICE_METHOD: Literal['sonos', 'spotify', 'all'] = 'all'
-    _service_method = os.getenv('MEDIA_SERVICE_METHOD', 'all').lower().strip()
+    _service_method = _json_config.get('svcMethod', 'all').lower().strip()
     if _service_method in ['sonos', 'spotify', 'all']:
         MEDIA_SERVICE_METHOD = _service_method  # type: ignore
     else:
-        print(f"⚠️  Invalid MEDIA_SERVICE_METHOD: '{_service_method}' (defaulting to 'all')")
+        print(f"⚠️  Invalid svcMethod in config: '{_service_method}' (defaulting to 'all')")
     
     # Service Recovery
-    SERVICE_RECOVERY_WINDOW_TIME: int = int(os.getenv('SERVICE_RECOVERY_WINDOW_TIME', '86400'))  # seconds (default: 15 minutes)
-    SERVICE_RECOVERY_RETRY_INTERVAL: int = int(os.getenv('SERVICE_RECOVERY_RETRY_INTERVAL', '15'))  # seconds (default: 15s)
-    SERVICE_RECOVERY_INITIAL_DELAY: int = int(os.getenv('SERVICE_RECOVERY_INITIAL_DELAY', '15'))  # seconds to wait before starting recovery checks
+    SERVICE_RECOVERY_INITIAL_DELAY: int = _json_config.get('svcRecoveryInitDelay', 15)
+    
+    # Sonos Configuration
+    SONOS_CHECK_TAKEOVER_INTERVAL: int = _json_config.get('sonos', {}).get('checkTakeoverInterval', 2)
+    SONOS_HEARTBEAT_INTERVAL: int = _json_config.get('sonos', {}).get('stopHeartBeatTimeNoPlayback', 8)
+    SONOS_PAUSED_POLLING_INTERVAL: int = _json_config.get('sonos', {}).get('pausedPollingInterval', 10)
+    SONOS_REDUCED_POLLING_INTERVAL: int = _json_config.get('sonos', {}).get('reducedPollingInterval', 10)
+    SONOS_DISCOVER_SVC_INTERVAL: int = _json_config.get('sonos', {}).get('discoverSvcInterval', 15)
+    SONOS_RECOVER_ATTEMPT_WINDOW_TIME: int = _json_config.get('sonos', {}).get('recoverAttemptWindowTime', 86400)
+    
+    # Spotify Monitor Configuration
+    SPOTIFY_TAKEOVER_WAIT_TIME: int = _json_config.get('spotify', {}).get('takeoverWaitTime', 10)
+    SPOTIFY_PAUSED_POLLING_INTERVAL: int = _json_config.get('spotify', {}).get('pausedPollingInterval', 10)
+    SPOTIFY_REDUCED_POLLING_INTERVAL: int = _json_config.get('spotify', {}).get('reducedPollingInterval', 10)
+    SPOTIFY_CONSECUTIVE_NO_POLLS_BEFORE_PAUSE: int = _json_config.get('spotify', {}).get('consecutiveNoPollsBeforePause', 3)
+    SPOTIFY_DISCOVER_SVC_INTERVAL: int = _json_config.get('spotify', {}).get('discoverSvcInterval', 15)
+    SPOTIFY_RECOVER_ATTEMPT_WINDOW_TIME: int = _json_config.get('spotify', {}).get('recoverAttemptWindowTime', 86400)
+    
+    # Logging
+    LOG_LEVEL: str = _json_config.get('logging', {}).get('level', 'info').upper()
     
     # Path Configuration
     _current_file = os.path.abspath(__file__)
@@ -82,12 +116,12 @@ class Config:
         if cls.LOCAL_CALLBACK_PORT is not None and not (1024 <= cls.LOCAL_CALLBACK_PORT <= 65535):
             errors.append(f"LOCAL_CALLBACK_PORT must be between 1024-65535, got {cls.LOCAL_CALLBACK_PORT}")
         
-        # Validate recovery timeout
-        if cls.SERVICE_RECOVERY_WINDOW_TIME < 60:
-            warnings.append(f"SERVICE_RECOVERY_WINDOW_TIME is very low ({cls.SERVICE_RECOVERY_WINDOW_TIME}s)")
+        # Validate service-specific recovery timeouts
+        if Config.SONOS_RECOVER_ATTEMPT_WINDOW_TIME < 60:
+            warnings.append(f"SONOS_RECOVER_ATTEMPT_WINDOW_TIME is very low ({Config.SONOS_RECOVER_ATTEMPT_WINDOW_TIME}s)")
         
-        if cls.SERVICE_RECOVERY_RETRY_INTERVAL < 5:
-            warnings.append(f"SERVICE_RECOVERY_RETRY_INTERVAL is very low ({cls.SERVICE_RECOVERY_RETRY_INTERVAL}s)")
+        if Config.SPOTIFY_RECOVER_ATTEMPT_WINDOW_TIME < 60:
+            warnings.append(f"SPOTIFY_RECOVER_ATTEMPT_WINDOW_TIME is very low ({Config.SPOTIFY_RECOVER_ATTEMPT_WINDOW_TIME}s)")
         
         # Print warnings
         for warning in warnings:
@@ -104,20 +138,13 @@ class Config:
     def print_config(cls) -> None:
         """Print current configuration (for debugging)"""
         print("\n📋 Configuration:")
+        print(f"   ENV: {cls.ENV}")
         print(f"   MEDIA_SERVICE_METHOD: {cls.MEDIA_SERVICE_METHOD}")
         print(f"   SERVER_HOST: {cls.SERVER_HOST}")
         print(f"   WEBSOCKET_SERVER_PORT: {cls.WEBSOCKET_SERVER_PORT}")
         print(f"   WEBSOCKET_PATH: {cls.WEBSOCKET_PATH}")
         print(f"   SSL_VERIFY_SPOTIFY: {cls.SSL_VERIFY_SPOTIFY}")
-        
-        # Format recovery window time smartly
-        window_time = cls.SERVICE_RECOVERY_WINDOW_TIME
-        if window_time <= 60:
-            window_display = f"{window_time}s"
-        else:
-            window_display = f"{window_time / 60:.1f} minutes"
-        print(f"   SERVICE_RECOVERY_WINDOW_TIME: {window_display}")
-        print(f"   SERVICE_RECOVERY_RETRY_INTERVAL: {cls.SERVICE_RECOVERY_RETRY_INTERVAL}s")
+        print(f"   LOG_LEVEL: {cls.LOG_LEVEL}")
         
         if cls.LOCAL_CALLBACK_PORT:
             print(f"   LOCAL_CALLBACK_PORT: {cls.LOCAL_CALLBACK_PORT}")

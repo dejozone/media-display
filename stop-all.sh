@@ -10,16 +10,28 @@ NC='\033[0m' # No Color
 # Get project root
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 
-# Load environment variables
-if [ -f "$PROJECT_ROOT/.env" ]; then
-    set -a
-    source "$PROJECT_ROOT/.env"
-    set +a
+# Load environment variable from server/.env to determine config file
+ENV="dev"  # Default
+if [ -f "$PROJECT_ROOT/server/.env" ]; then
+    source "$PROJECT_ROOT/server/.env"
 fi
 
-# Configuration
-SERVER_PORT=${WEBSOCKET_SERVER_PORT:-5001}
-WEBAPP_PORT=${WEBAPP_PORT:-8081}
+# Read ports from JSON configuration files
+CONFIG_FILE="${ENV}.json"
+
+# Read server port from server/conf/{env}.json
+if [ -f "$PROJECT_ROOT/server/conf/$CONFIG_FILE" ]; then
+    SERVER_PORT=$(python3 -c "import json; print(json.load(open('$PROJECT_ROOT/server/conf/$CONFIG_FILE'))['websocket']['serverPort'])" 2>/dev/null || echo "5001")
+else
+    SERVER_PORT=5001
+fi
+
+# Read webapp port from webapp/conf/{env}.json
+if [ -f "$PROJECT_ROOT/webapp/conf/$CONFIG_FILE" ]; then
+    WEBAPP_PORT=$(python3 -c "import json; print(json.load(open('$PROJECT_ROOT/webapp/conf/$CONFIG_FILE'))['server']['port'])" 2>/dev/null || echo "8080")
+else
+    WEBAPP_PORT=8080
+fi
 
 echo -e "${YELLOW}Stopping Media Display services...${NC}"
 echo ""
