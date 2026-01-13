@@ -79,6 +79,39 @@ class BaseMonitor(ABC):
             self.monitor_thread.start()
             self.is_ready = True
     
+    def should_use_reduced_polling(self, app_state, takeover_wait_time: int) -> bool:
+        """
+        Check if a higher-priority source is active and fresh.
+        If so, this monitor should use reduced polling to avoid unnecessary operations.
+        
+        This method can be used by any monitor (Sonos, Spotify, Apple Music, etc.)
+        to determine if it should poll less frequently.
+        
+        Args:
+            app_state: Application state object
+            takeover_wait_time: Seconds to wait before considering source stale
+        
+        Returns:
+            bool: True if should use reduced polling (higher-priority source is fresh)
+        """
+        import time
+        
+        current_track_data = app_state.get_track_data()
+        
+        # No current source - use normal polling
+        if not current_track_data:
+            return False
+        
+        # Higher-priority source is active
+        if current_track_data.get('source_priority', 999) < self.source_priority:
+            time_since_last_update = time.time() - current_track_data.get('timestamp', 0)
+            
+            # Higher-priority source is fresh - use reduced polling
+            if time_since_last_update < takeover_wait_time:
+                return True
+        
+        return False
+    
     def _stop_thread(self, timeout: int = 5):
         """
         Helper to stop monitoring thread

@@ -67,16 +67,23 @@ class Config:
         print(f"⚠️  Invalid svcMethod in config: '{_service_method}' (defaulting to 'all')")
     
     # Service Recovery
-    SERVICE_RECOVERY_WINDOW_TIME: int = _json_config.get('svcRecoveryWindowTime', 86400)
-    SERVICE_RECOVERY_RETRY_INTERVAL: int = _json_config.get('svcRecoveryRetryInterval', 15)
     SERVICE_RECOVERY_INITIAL_DELAY: int = _json_config.get('svcRecoveryInitDelay', 15)
     
     # Sonos Configuration
     SONOS_CHECK_TAKEOVER_INTERVAL: int = _json_config.get('sonos', {}).get('checkTakeoverInterval', 2)
     SONOS_HEARTBEAT_INTERVAL: int = _json_config.get('sonos', {}).get('stopHeartBeatTimeNoPlayback', 8)
+    SONOS_PAUSED_POLLING_INTERVAL: int = _json_config.get('sonos', {}).get('pausedPollingInterval', 10)
+    SONOS_REDUCED_POLLING_INTERVAL: int = _json_config.get('sonos', {}).get('reducedPollingInterval', 10)
+    SONOS_DISCOVER_SVC_INTERVAL: int = _json_config.get('sonos', {}).get('discoverSvcInterval', 15)
+    SONOS_RECOVER_ATTEMPT_WINDOW_TIME: int = _json_config.get('sonos', {}).get('recoverAttemptWindowTime', 86400)
     
     # Spotify Monitor Configuration
     SPOTIFY_TAKEOVER_WAIT_TIME: int = _json_config.get('spotify', {}).get('takeoverWaitTime', 10)
+    SPOTIFY_PAUSED_POLLING_INTERVAL: int = _json_config.get('spotify', {}).get('pausedPollingInterval', 10)
+    SPOTIFY_REDUCED_POLLING_INTERVAL: int = _json_config.get('spotify', {}).get('reducedPollingInterval', 10)
+    SPOTIFY_CONSECUTIVE_NO_POLLS_BEFORE_PAUSE: int = _json_config.get('spotify', {}).get('consecutiveNoPollsBeforePause', 3)
+    SPOTIFY_DISCOVER_SVC_INTERVAL: int = _json_config.get('spotify', {}).get('discoverSvcInterval', 15)
+    SPOTIFY_RECOVER_ATTEMPT_WINDOW_TIME: int = _json_config.get('spotify', {}).get('recoverAttemptWindowTime', 86400)
     
     # Logging
     LOG_LEVEL: str = _json_config.get('logging', {}).get('level', 'info').upper()
@@ -109,12 +116,12 @@ class Config:
         if cls.LOCAL_CALLBACK_PORT is not None and not (1024 <= cls.LOCAL_CALLBACK_PORT <= 65535):
             errors.append(f"LOCAL_CALLBACK_PORT must be between 1024-65535, got {cls.LOCAL_CALLBACK_PORT}")
         
-        # Validate recovery timeout
-        if cls.SERVICE_RECOVERY_WINDOW_TIME < 60:
-            warnings.append(f"SERVICE_RECOVERY_WINDOW_TIME is very low ({cls.SERVICE_RECOVERY_WINDOW_TIME}s)")
+        # Validate service-specific recovery timeouts
+        if Config.SONOS_RECOVER_ATTEMPT_WINDOW_TIME < 60:
+            warnings.append(f"SONOS_RECOVER_ATTEMPT_WINDOW_TIME is very low ({Config.SONOS_RECOVER_ATTEMPT_WINDOW_TIME}s)")
         
-        if cls.SERVICE_RECOVERY_RETRY_INTERVAL < 5:
-            warnings.append(f"SERVICE_RECOVERY_RETRY_INTERVAL is very low ({cls.SERVICE_RECOVERY_RETRY_INTERVAL}s)")
+        if Config.SPOTIFY_RECOVER_ATTEMPT_WINDOW_TIME < 60:
+            warnings.append(f"SPOTIFY_RECOVER_ATTEMPT_WINDOW_TIME is very low ({Config.SPOTIFY_RECOVER_ATTEMPT_WINDOW_TIME}s)")
         
         # Print warnings
         for warning in warnings:
@@ -138,15 +145,6 @@ class Config:
         print(f"   WEBSOCKET_PATH: {cls.WEBSOCKET_PATH}")
         print(f"   SSL_VERIFY_SPOTIFY: {cls.SSL_VERIFY_SPOTIFY}")
         print(f"   LOG_LEVEL: {cls.LOG_LEVEL}")
-        
-        # Format recovery window time smartly
-        window_time = cls.SERVICE_RECOVERY_WINDOW_TIME
-        if window_time <= 60:
-            window_display = f"{window_time}s"
-        else:
-            window_display = f"{window_time / 60:.1f} minutes"
-        print(f"   SERVICE_RECOVERY_WINDOW_TIME: {window_display}")
-        print(f"   SERVICE_RECOVERY_RETRY_INTERVAL: {cls.SERVICE_RECOVERY_RETRY_INTERVAL}s")
         
         if cls.LOCAL_CALLBACK_PORT:
             print(f"   LOCAL_CALLBACK_PORT: {cls.LOCAL_CALLBACK_PORT}")

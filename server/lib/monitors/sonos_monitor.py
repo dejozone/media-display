@@ -265,6 +265,15 @@ class SonosMonitor(BaseMonitor):
         
         while self.is_running:
             try:
+                # OPTIMIZATION: Check if higher-priority source is active BEFORE polling
+                # This reduces unnecessary operations when a higher-priority service is playing
+                # (e.g., if Apple Music has priority 0, Sonos would reduce its activity)
+                if self.should_use_reduced_polling(self.app_state, Config.SPOTIFY_TAKEOVER_WAIT_TIME):
+                    current_track_data = self.app_state.get_track_data()
+                    monitor_logger.debug(f"[SONOS] Higher-priority source ({current_track_data.get('source')}) active, using reduced polling")
+                    time.sleep(Config.SONOS_REDUCED_POLLING_INTERVAL)
+                    continue
+                
                 time.sleep(Config.SONOS_CHECK_TAKEOVER_INTERVAL)
                 
                 current_track_data = self.app_state.get_track_data()
@@ -323,7 +332,17 @@ class SonosMonitor(BaseMonitor):
                                         if fresh_track_data and fresh_track_data.get('source') == 'sonos':
                                             fresh_track_data['timestamp'] = time.time()
                                             self.app_state.update_track_data(fresh_track_data)
-                                    # If not playing, let timestamp go stale so other sources can take over
+                                    else:
+                                        # Not playing - let timestamp go stale so other sources can take over
+                                        # Clear track if Sonos was the source
+                                        fresh_track_data = self.app_state.get_track_data()
+                                        if fresh_track_data and fresh_track_data.get('source') == 'sonos' and not fresh_track_data.get('is_playing'):
+                                            monitor_logger.info("⏹️  [SONOS] Playback stopped, clearing track")
+                                            self.app_state.update_track_data(None)
+                                            try:
+                                                self.socketio.emit('track_update', None, namespace='/')
+                                            except Exception:
+                                                pass
                                     
                                     break  # Only need to check one device
                                 except Exception as e:
@@ -347,6 +366,10 @@ class SonosMonitor(BaseMonitor):
                                         if should_check_takeover and is_playing:
                                             track_id = f"{track.get('title')}_{track.get('artist')}"
                                             device_names = self.get_device_names(device)
+                                            
+                                            # Check if it's the same track
+                                            current_track_id = f"{current_track_data.get('track_name', '')}_{current_track_data.get('artist', '')}" if current_track_data else ""
+                                            is_same_track = track_id == current_track_id
                                             
                                             new_track_data = {
                                                 'track_name': track.get('title', 'Unknown'),
@@ -372,8 +395,9 @@ class SonosMonitor(BaseMonitor):
                                             
                                             current_source = current_track_data.get('source', 'unknown').upper()
                                             current_priority = current_track_data.get('source_priority', 999)
+                                            same_track_note = " (same track)" if is_same_track else " (different track)"
                                             monitor_logger.info(f"📊 Progress source: SONOS (priority)")
-                                            monitor_logger.info(f"   Taking over from {current_source} (priority {current_priority})")
+                                            monitor_logger.info(f"   Taking over from {current_source} (priority {current_priority}){same_track_note}")
                                             monitor_logger.info(f"🎵 [SONOS] {new_track_data['track_name']} - {new_track_data['artist']}")
                                         
                                         # If events are down, check for track changes
