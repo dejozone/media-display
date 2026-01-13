@@ -216,6 +216,21 @@ def try_start_sonos() -> bool:
         if device_monitor.start():
             app_state.add_monitor(device_monitor)
             server_logger.info("✅ Sonos service recovered and activated")
+            
+            # Give Sonos a moment to get its initial state
+            time.sleep(1)
+            
+            # Check if Sonos has active playback and should take over from lower-priority source
+            current_track = app_state.get_track_data()
+            if current_track:
+                sonos_priority = device_monitor.source_priority
+                current_priority = current_track.get('source_priority', 999)
+                current_source = current_track.get('source', 'unknown')
+                
+                # If Sonos has higher priority (lower number) and Sonos is the new track, it should be active
+                if current_track.get('source') == 'sonos' and sonos_priority < current_priority:
+                    server_logger.info(f"✅ Sonos (priority {sonos_priority}) taking over from {current_source.upper()} (priority {current_priority})")
+            
             broadcast_service_status()
             return True
         else:

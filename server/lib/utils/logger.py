@@ -81,10 +81,15 @@ class StructuredLogger:
         return f" ({', '.join(pairs)})"
 
 
-# Get default log level from environment
+# Get default log level from config
 def _get_default_log_level() -> int:
-    """Get log level from LOG_LEVEL environment variable, default to INFO"""
-    level_name = os.getenv('LOG_LEVEL', 'INFO').upper()
+    """Get log level from Config.LOG_LEVEL, default to INFO"""
+    try:
+        from config import Config
+        level_name = Config.LOG_LEVEL.upper()
+    except:
+        level_name = 'INFO'
+    
     level_map = {
         'DEBUG': logging.DEBUG,
         'INFO': logging.INFO,

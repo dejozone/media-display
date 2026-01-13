@@ -71,6 +71,12 @@ class Config:
     SERVICE_RECOVERY_RETRY_INTERVAL: int = _json_config.get('svcRecoveryRetryInterval', 15)
     SERVICE_RECOVERY_INITIAL_DELAY: int = _json_config.get('svcRecoveryInitDelay', 15)
     
+    # Sonos Configuration
+    SONOS_CHECK_TAKEOVER_INTERVAL: int = _json_config.get('sonos', {}).get('checkTakeoverInterval', 2)
+    
+    # Spotify Monitor Configuration
+    SPOTIFY_TAKEOVER_WAIT_TIME: int = _json_config.get('spotify', {}).get('takeOverWaitTime', 10)
+    
     # Logging
     LOG_LEVEL: str = _json_config.get('logging', {}).get('level', 'info').upper()
     

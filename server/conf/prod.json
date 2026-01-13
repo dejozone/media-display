@@ -11,7 +11,11 @@
     "serverPort": 5001,
     "subPath": "/notis/media-display/socket.io"
   },
+  "sonos": {
+    "checkTakeoverInterval": 2
+  },
   "spotify": {
+    "takeOverWaitTime": 5,
     "api": {
       "sslCertVerification": true,
       "callbackRedirRootUrl": "https://media-display.projecttechcycle.org/spotify/callback",

@@ -6,6 +6,7 @@ import time
 from typing import Optional, Dict, Any
 from lib.monitors.base import BaseMonitor
 from lib.utils.logger import monitor_logger
+from config import Config
 
 class SpotifyMonitor(BaseMonitor):
     """Monitor Spotify playback and broadcast updates"""
@@ -86,7 +87,29 @@ class SpotifyMonitor(BaseMonitor):
                     )
                     
                     # Can we take over?
-                    can_take_over = self.should_source_takeover(current_track_data, time_since_last_update)
+                    # Spotify takeover logic:
+                    # 1. No current source → take over
+                    # 2. We have higher priority → use normal takeover logic
+                    # 3. Current source has higher priority (e.g., Sonos) BUT is stale (not playing) → take over
+                    # 4. Current source has higher priority AND is actively playing → do NOT take over
+                    can_take_over = False
+                    if current_track_data is None:
+                        # No current source, we can take over
+                        can_take_over = True
+                    else:
+                        current_priority = current_track_data.get('source_priority', 999)
+                        if current_priority > self.source_priority:
+                            # We have higher priority, use normal takeover logic
+                            can_take_over = self.should_source_takeover(current_track_data, time_since_last_update)
+                        else:
+                            # Current source has same or higher priority (like Sonos)
+                            # Check if it's stale (hasn't updated in configured time)
+                            # If stale, it's likely not playing anymore, so we can take over
+                            if time_since_last_update > Config.SPOTIFY_TAKEOVER_WAIT_TIME:
+                                can_take_over = True
+                            else:
+                                # Higher priority source is actively playing, don't take over
+                                can_take_over = False
                     
                     # For progress updates: only send if clients need progress
                     needs_progress_update = is_our_source and self.app_state.has_clients_needing_progress()
@@ -97,12 +120,6 @@ class SpotifyMonitor(BaseMonitor):
                         self.last_track_id = track_id
                         self.last_device_name = device_name
                         self.last_update_time = current_time
-                        
-                        # Log when switching to Spotify as progress source
-                        if major_change and (current_track_data is None or current_track_data.get('source') != 'spotify'):
-                            monitor_logger.info("📊 Progress source: SPOTIFY (fallback)")
-                            monitor_logger.debug(f"   Switching from {current_track_data.get('source', 'none') if current_track_data else 'none'} (priority {current_track_data.get('source_priority', 'N/A') if current_track_data else 'N/A'}) to spotify (priority {self.source_priority})")
-                            monitor_logger.debug(f"   Reason: can_take_over={can_take_over}, time_since_last_update={int(time_since_last_update)}s")
                         
                         self.app_state.update_track_data(track_data)
                         
