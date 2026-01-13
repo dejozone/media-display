@@ -843,6 +843,35 @@ function extractColors(imageElement, callback) {
         const pixels = imageData.data;
         const colorMap = {};
         
+        // Helper function to calculate color vibrancy (saturation + brightness)
+        const calculateVibrancy = (r, g, b) => {
+            // Convert RGB to HSV to get saturation
+            const max = Math.max(r, g, b);
+            const min = Math.min(r, g, b);
+            const delta = max - min;
+            
+            // Saturation (0-1)
+            const saturation = max === 0 ? 0 : delta / max;
+            
+            // Brightness/Value (0-255)
+            const brightness = max;
+            
+            // Vibrancy score: prioritize both saturation and brightness
+            // Normalize brightness to 0-1 range, then combine with saturation
+            // Weight saturation more heavily (70%) than brightness (30%)
+            const vibrancy = (saturation * 0.7) + ((brightness / 255) * 0.3);
+            
+            return vibrancy;
+        };
+        
+        // Helper function to calculate color difference (Euclidean distance in RGB space)
+        const calculateColorDistance = (color1, color2) => {
+            const rDiff = color1.r - color2.r;
+            const gDiff = color1.g - color2.g;
+            const bDiff = color1.b - color2.b;
+            return Math.sqrt(rDiff * rDiff + gDiff * gDiff + bDiff * bDiff);
+        };
+        
         // Sample pixels and count colors
         for (let i = 0; i < pixels.length; i += 4 * 5) { // Sample every 5th pixel for better coverage
             const r = pixels[i];
@@ -855,22 +884,93 @@ function extractColors(imageElement, callback) {
                 continue;
             }
             
-            // Group similar colors with finer precision
+            // Group similar colors with finer precision (bucket key for grouping)
             const key = `${Math.floor(r/15)*15},${Math.floor(g/15)*15},${Math.floor(b/15)*15}`;
-            colorMap[key] = (colorMap[key] || 0) + 1;
+            
+            if (!colorMap[key]) {
+                colorMap[key] = {
+                    count: 0,
+                    rSum: 0,
+                    gSum: 0,
+                    bSum: 0
+                };
+            }
+            // Accumulate actual pixel values for averaging later
+            colorMap[key].count += 1;
+            colorMap[key].rSum += r;
+            colorMap[key].gSum += g;
+            colorMap[key].bSum += b;
         }
         
-        // Get top colors
-        const sortedColors = Object.entries(colorMap)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 3)
-            .map(([color]) => {
-                const [r, g, b] = color.split(',').map(Number);
-                return { r, g, b };
-            });
+        // Calculate vibrancy score for each color and weight by abundance
+        const scoredColors = Object.values(colorMap).map(colorData => {
+            // Calculate average RGB from accumulated values (actual album colors)
+            const r = Math.round(colorData.rSum / colorData.count);
+            const g = Math.round(colorData.gSum / colorData.count);
+            const b = Math.round(colorData.bSum / colorData.count);
+            
+            const vibrancy = calculateVibrancy(r, g, b);
+            const abundance = colorData.count;
+            
+            // Combined score: vibrancy weighted heavily (60%) + abundance (40%)
+            // This prioritizes vibrant colors while still considering how common they are
+            const maxAbundance = Math.max(...Object.values(colorMap).map(c => c.count));
+            const normalizedAbundance = abundance / maxAbundance;
+            const score = (vibrancy * 0.6) + (normalizedAbundance * 0.4);
+            
+            return {
+                r, g, b,
+                vibrancy,
+                abundance,
+                score
+            };
+        });
         
-        if (sortedColors.length >= 2) {
-            callback(sortedColors);
+        // Sort by score (highest first)
+        const sortedByScore = scoredColors.sort((a, b) => b.score - a.score);
+        
+        // Select colors ensuring they're sufficiently different from each other
+        const selectedColors = [];
+        const MIN_COLOR_DISTANCE = 80; // Minimum RGB distance between colors (0-441 max possible)
+        
+        for (const color of sortedByScore) {
+            // First color is always added
+            if (selectedColors.length === 0) {
+                selectedColors.push(color);
+                continue;
+            }
+            
+            // Check if this color is sufficiently different from already selected colors
+            const isSufficientlyDifferent = selectedColors.every(selectedColor => {
+                const distance = calculateColorDistance(color, selectedColor);
+                return distance >= MIN_COLOR_DISTANCE;
+            });
+            
+            if (isSufficientlyDifferent) {
+                selectedColors.push(color);
+            }
+            
+            // Stop once we have 3 colors
+            if (selectedColors.length === 3) {
+                break;
+            }
+        }
+        
+        // If we couldn't find 3 sufficiently different colors, relax the constraint
+        // and fill remaining slots with next highest scoring colors
+        if (selectedColors.length < 3) {
+            for (const color of sortedByScore) {
+                if (!selectedColors.includes(color)) {
+                    selectedColors.push(color);
+                    if (selectedColors.length === 3) break;
+                }
+            }
+        }
+        
+        const finalColors = selectedColors.map(({ r, g, b }) => ({ r, g, b }));
+        
+        if (finalColors.length >= 2) {
+            callback(finalColors);
         }
     } catch (e) {
         console.warn('Could not extract colors from image:', e);
