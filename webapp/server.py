@@ -239,14 +239,14 @@ class CORSHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         # Set proper cache headers for assets
         if '/assets/images/screensavers/' in self.path:
             if self.path.endswith('/'):
-                # Directory listing - cache for 1 hour
-                self.send_header('Cache-Control', 'public, max-age=3600')
+                # Directory listing - cache using configured value
+                self.send_header('Cache-Control', f'public, max-age={WEBAPP_DIR_LISTING_MAX_AGE_DEFAULT}')
             else:
-                # Individual image - cache for 1 day
-                self.send_header('Cache-Control', 'public, max-age=86400, immutable')
+                # Individual image - cache using configured value
+                self.send_header('Cache-Control', f'public, max-age={WEBAPP_SEND_FILE_MAX_AGE_DEFAULT}, immutable')
         elif '/assets/' in self.path:
-            # Other assets - cache for 1 day
-            self.send_header('Cache-Control', 'public, max-age=86400')
+            # Other assets - cache using configured value
+            self.send_header('Cache-Control', f'public, max-age={WEBAPP_SEND_FILE_MAX_AGE_DEFAULT}')
         else:
             # HTML pages - no cache for development
             self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate')
