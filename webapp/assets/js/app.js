@@ -3227,6 +3227,11 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && document.fullscreenElement) {
         exitFullscreen();
     }
+    
+    // Right arrow key for rotation (-90 degrees counter-clockwise)
+    if (e.key === 'ArrowRight') {
+        rotateDisplay();
+    }
 });
 
 // Auto-request fullscreen after first user interaction
