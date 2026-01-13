@@ -73,6 +73,7 @@ class Config:
     
     # Sonos Configuration
     SONOS_CHECK_TAKEOVER_INTERVAL: int = _json_config.get('sonos', {}).get('checkTakeoverInterval', 2)
+    SONOS_HEARTBEAT_INTERVAL: int = _json_config.get('sonos', {}).get('stopHeartBeatTimeNoPlayback', 8)
     
     # Spotify Monitor Configuration
     SPOTIFY_TAKEOVER_WAIT_TIME: int = _json_config.get('spotify', {}).get('takeoverWaitTime', 10)

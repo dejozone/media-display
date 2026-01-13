@@ -295,7 +295,7 @@ class SonosMonitor(BaseMonitor):
                     current_track_data.get('source') == 'sonos' and
                     not self.app_state.has_clients_needing_progress() and
                     self.events_active and
-                    time.time() - current_track_data.get('timestamp', 0) > 8
+                    time.time() - current_track_data.get('timestamp', 0) > Config.SONOS_HEARTBEAT_INTERVAL
                 )
                 
                 # Check if Sonos should take over from lower-priority source

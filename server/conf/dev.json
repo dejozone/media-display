@@ -12,7 +12,8 @@
     "subPath": "/notis/media-display/socket.io"
   },
   "sonos": {
-    "checkTakeoverInterval": 2
+    "checkTakeoverInterval": 2,
+    "stopHeartBeatTimeNoPlayback": 8
   },
   "spotify": {
     "takeoverWaitTime": 5,
