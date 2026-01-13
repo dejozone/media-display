@@ -7,13 +7,30 @@ A full-screen display for music playback with real-time updates. Supports Sonos 
 ```
 media-display/
 ├── server/          # Backend WebSocket server
+│   ├── .env         # Environment variables (ENV, credentials)
 │   ├── app.py       # Main server application
+│   ├── config.py    # Configuration management
 │   ├── requirements.txt
-│   └── start.sh     # Server startup script
+│   ├── start.sh     # Server startup script
+│   ├── gunicorn_config.py
+│   ├── conf/        # Environment-specific configs
+│   │   ├── dev.json
+│   │   └── prod.json
+│   └── lib/         # Server modules
+│       ├── app_state.py
+│       ├── auth/    # Spotify authentication
+│       ├── monitors/  # Sonos & Spotify monitors
+│       └── utils/   # Utilities (logger, network, time)
 ├── webapp/          # Frontend web application
+│   ├── .env         # Environment variables (ENV)
 │   ├── index.html   # Main HTML file
 │   ├── server.py    # Development server
 │   ├── start.sh     # Webapp startup script
+│   ├── requirements.txt
+│   ├── gunicorn_config.py
+│   ├── conf/        # Environment-specific configs
+│   │   ├── dev.json
+│   │   └── prod.json
 │   └── assets/      # Static assets (organized structure)
 │       ├── css/
 │       │   └── styles.css      # Styling
@@ -21,36 +38,32 @@ media-display/
 │       │   └── app.js          # WebSocket client & display logic
 │       └── images/
 │           └── screensavers/   # Screensaver images
-└── test/            # Test scripts
-    ├── spotify_connect_test.py
-    ├── run_test.sh
-    ├── requirements.txt
+├── test/            # Test scripts
+│   ├── spotify_connect_test.py
+│   ├── run_test.sh
+│   └── requirements.txt
+├── start-all.sh     # Unified startup script
+└── stop-all.sh      # Unified stop script
 ```
 
 ## Quick Start
 
 ### 1. Configure Environment Variables
 
-Create a `.env` file in the root directory:
+Create a `server/.env` file:
 
 ```bash
-# Service Method Configuration (optional)
-# Options: 'sonos', 'spotify', 'all'
-# 'sonos' - Use Sonos API only (no authentication)
-# 'spotify' - Use Spotify Connect only (requires OAuth)
-# 'all' - Try Sonos first, fallback to Spotify (default)
-MEDIA_SERVICE_METHOD=all
-
-# Spotify Configuration (required for spotify/all modes)
+# Environment type: "dev" for dev.json file, "local" or "prod".
+ENV=dev
 SPOTIFY_CLIENT_ID=your_client_id
 SPOTIFY_CLIENT_SECRET=your_client_secret
-SPOTIFY_REDIRECT_URI=https://media.projecttechcycle-dev.org:9080/callback
-LOCAL_CALLBACK_PORT=8888
+```
 
-# Server Configuration
-SERVER_HOST=0.0.0.0
-SERVER_PORT=5001
-WEBAPP_PORT=8080
+Create a `webapp/.env` file:
+
+```bash
+# Environment type: "dev" for dev.json file, "local" or "prod".
+ENV=dev
 ```
 
 ### 2. Install Dependencies
@@ -279,7 +292,7 @@ The server can run on any machine with Python. For production:
 2. Configure firewall to allow WebSocket port (5001)
 3. Set `SERVER_HOST=0.0.0.0` to allow external connections
 4. For Sonos mode: Ensure server is on same local network as Sonos devices
-5. For Spotify mode: Configure OAuth credentials in `.env`
+6. For Spotify mode: Configure OAuth credentials in `server/.env`
 6. Set `MEDIA_SERVICE_METHOD` based on your environment
 
 ### Frontend Web App
@@ -315,6 +328,104 @@ const WEBSOCKET_URL = window.location.hostname === 'localhost'
 #### Add Screensaver Images
 
 Place your custom screensaver images in `webapp/assets/images/screensavers/` and update the `screensaverImages` array in `webapp/assets/js/app.js` (lines 22-37).
+
+## Configuration
+
+### Server Configuration (`server/conf/dev.json`)
+
+The server uses environment-specific JSON configuration files. All timing values are in seconds unless otherwise noted.
+
+#### Service Configuration
+- **`svcMethod`**: Service method to use (`"sonos"`, `"spotify"`, or `"all"`)
+  - `"sonos"` - Use Sonos API only
+  - `"spotify"` - Use Spotify Connect only  
+  - `"all"` - Try Sonos first, fallback to Spotify (default)
+
+- **`localCallbackSrvPort`**: Port for OAuth callback server (default: `8888`)
+  - Used during Spotify authentication flow
+  - Must match the redirect URI in Spotify app settings
+
+#### Service Recovery
+- **`svcRecoveryWindowTime`**: Maximum time window for service recovery attempts in seconds (default: `129600` = 36 hours)
+  - After this period, server stops trying to recover failed services
+
+- **`svcRecoveryRetryInterval`**: Interval between service recovery retry attempts in seconds (default: `15`)
+  - How often to retry starting a failed service
+
+- **`svcRecoveryInitDelay`**: Initial delay before first service recovery attempt in seconds (default: `15`)
+  - Prevents immediate retry on startup failure
+
+#### Logging
+- **`logging.level`**: Log verbosity level (`"debug"`, `"info"`, `"warning"`, `"error"`, `"critical"`)
+  - `"debug"` - Detailed diagnostic information
+  - `"info"` - General informational messages (default)
+  - `"warning"` - Warning messages
+  - `"error"` - Error messages only
+  - `"critical"` - Critical errors only
+
+#### WebSocket Configuration
+- **`websocket.serverPort`**: WebSocket server port (default: `5001`)
+  - Port where clients connect for real-time updates
+
+- **`websocket.subPath`**: WebSocket endpoint path (default: `"/socket.io"`)
+  - Used for nginx subpath proxying (e.g., `"/notis/media-display/socket.io"`)
+
+#### Sonos Configuration
+- **`sonos.checkTakeoverInterval`**: Interval for checking if Sonos should take over from lower-priority sources in seconds (default: `2`)
+  - How often to poll Sonos devices for playback state
+  - Also used for position updates when clients need progress
+
+- **`sonos.stopHeartBeatTimeNoPlayback`**: Minimum time before sending heartbeat updates to keep timestamp fresh in seconds (default: `8`)
+  - Prevents other sources from thinking Sonos is stale during playback
+  - Heartbeat only sent when events are active and no clients need progress updates
+
+#### Spotify Configuration
+- **`spotify.takeoverWaitTime`**: Time to wait before Spotify takes over from stale higher-priority source in seconds (default: `10`)
+  - Prevents flapping during brief Sonos pauses/buffering
+  - Lower values (3-5s) = more responsive but may cause brief source switches
+  - Higher values (10s+) = more stable but slower to respond to source changes
+
+- **`spotify.api.sslCertVerification`**: Enable/disable SSL certificate verification for Spotify API calls (default: `true`)
+  - Set to `false` for development with self-signed certificates
+  - Should be `true` in production
+
+- **`spotify.api.callbackRedirRootUrl`**: OAuth callback URL for Spotify authentication
+  - Must match the redirect URI configured in your Spotify app settings
+  - Example: `"https://media-display.projecttechcycle-dev.org:9080/spotify/callback"`
+
+- **`spotify.api.scope`**: OAuth scopes requested from Spotify (default: `"user-read-currently-playing user-read-playback-state"`)
+  - Required scopes for reading playback information
+  - Should not be changed unless additional API features are added
+
+### Web Application Configuration (`webapp/conf/dev.json`)
+
+The web application uses a simple configuration file for server settings.
+
+#### Server Configuration
+- **`server.port`**: Port for the web application server (default: `8081`)
+  - Where the webapp will be accessible (e.g., `http://localhost:8081`)
+
+- **`server.sendFileCacheMaxAge`**: Cache duration for static files in seconds (default: `86400` = 24 hours)
+  - How long browsers should cache CSS/JS/image files
+  - Longer durations improve performance but may require cache clearing after updates
+
+- **`server.dirListingCacheMaxAge`**: Cache duration for directory listings in seconds (default: `3600` = 1 hour)
+  - How long to cache file listing responses (e.g., screensaver image lists)
+  - Shorter duration ensures new images are discovered more quickly
+
+### Environment Variables (`server/.env`)
+
+These are loaded before the JSON configuration and contain sensitive credentials:
+
+- **`ENV`**: Environment name (`"dev"` or `"prod"`) - determines which JSON config file to load
+- **`SPOTIFY_CLIENT_ID`**: Spotify app client ID (required for Spotify mode)
+- **`SPOTIFY_CLIENT_SECRET`**: Spotify app client secret (required for Spotify mode)
+
+### Environment Variables (`webapp/.env`)
+
+The webapp requires a simple environment file:
+
+- **`ENV`**: Environment name (`"dev"` or `"prod"`) - determines which JSON config file to load from `webapp/conf/`
 
 ## User Preferences
 
@@ -379,7 +490,7 @@ These settings are device-specific and stored in the browser. To reset preferenc
 ## Troubleshooting
 
 ### Server won't start
-- Check `.env` file has correct Spotify credentials
+- Check `server/.env` file has correct Spotify credentials
 - Ensure port 8888 is not in use by another application
 - Verify nginx is proxying callback URL correctly
 
