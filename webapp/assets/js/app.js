@@ -1954,9 +1954,36 @@ function clearEqualizerFill() {
 // Update display with track data
 function updateDisplay(trackData) {
     if (!trackData) {
-        showNoPlayback();
-        hideProgressComet();
-        hideSunriseElement();
+        // No track data - behavior depends on whether we've seen music before
+        if (hasReceivedTrackData) {
+            // We had music before, treat null as "paused" - wait 5 minutes before screensaver
+            isPlaying = false;
+            document.body.classList.add('music-paused');
+            
+            // Pause (not hide) effects
+            if (progressEffectState === 'comet' || progressEffectState === 'album-comet' || progressEffectState === 'across-comet') {
+                pauseProgressComet();
+            } else if (progressEffectState === 'sunrise' || progressEffectState === 'blended-sunrise') {
+                pauseSunrise();
+            }
+            
+            // Update equalizer visibility for paused state
+            updateEqualizerVisibility();
+            
+            // Start 5-minute timer before showing screensaver
+            if (!pausedScreensaverTimeout) {
+                pausedScreensaverTimeout = setTimeout(() => {
+                    showNoPlayback();
+                    pausedScreensaverTimeout = null;
+                }, PAUSED_SCREENSAVER_DELAY);
+            }
+            // Keep showing now-playing UI while waiting (already visible from before)
+        } else {
+            // Fresh connection, no music ever played - show screensaver immediately
+            showNoPlayback();
+            hideProgressComet();
+            hideSunriseElement();
+        }
         return;
     }
     
