@@ -70,7 +70,7 @@ class SpotifyMonitor(BaseMonitor):
                 # Uses shared method from BaseMonitor - easy to extend for new services
                 if self.should_use_reduced_polling(self.app_state, Config.SPOTIFY_TAKEOVER_WAIT_TIME):
                     current_track_data = self.app_state.get_track_data()
-                    monitor_logger.debug(f"[SPOTIFY] Higher-priority source ({current_track_data.get('source')}) active, using reduced polling")
+                    # monitor_logger.debug(f"[SPOTIFY] Higher-priority source ({current_track_data.get('source')}) active, using reduced polling")
                     time.sleep(Config.SPOTIFY_REDUCED_POLLING_INTERVAL)
                     continue
                 

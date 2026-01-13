@@ -270,7 +270,7 @@ class SonosMonitor(BaseMonitor):
                 # (e.g., if Apple Music has priority 0, Sonos would reduce its activity)
                 if self.should_use_reduced_polling(self.app_state, Config.SPOTIFY_TAKEOVER_WAIT_TIME):
                     current_track_data = self.app_state.get_track_data()
-                    monitor_logger.debug(f"[SONOS] Higher-priority source ({current_track_data.get('source')}) active, using reduced polling")
+                    # monitor_logger.debug(f"[SONOS] Higher-priority source ({current_track_data.get('source')}) active, using reduced polling")
                     time.sleep(Config.SONOS_REDUCED_POLLING_INTERVAL)
                     continue
                 
