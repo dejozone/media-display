@@ -15,7 +15,7 @@
     "checkTakeoverInterval": 2
   },
   "spotify": {
-    "takeOverWaitTime": 5,
+    "takeoverWaitTime": 5,
     "api": {
       "sslCertVerification": true,
       "callbackRedirRootUrl": "https://media-display.projecttechcycle.org/spotify/callback",
