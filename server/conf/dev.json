@@ -17,7 +17,8 @@
     "discoverSvcInterval": 10,
     "recoverAttemptWindowTime": 129600,
     "retryInterval": 5,
-    "deviceRetryWindowTime": 129600
+    "deviceRetryWindowTime": 129600,
+    "eventStalenessThreshold": 30
   },
   "spotify": {
     "takeoverWaitTime": 5,

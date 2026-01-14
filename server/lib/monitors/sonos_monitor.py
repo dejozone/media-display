@@ -44,6 +44,8 @@ class SonosMonitor(BaseMonitor):
         self.last_event_time: float = 0
         self.event_failure_count: int = 0
         self.max_event_failures: int = 3  # Try to recover events after 3 consecutive failures
+        self.last_coordinator_check_time: float = 0  # Last time we verified coordinator subscriptions
+        self.event_subscription_start_time: Optional[float] = None  # When current subscriptions were established
         
         # Connection retry tracking
         self.connection_errors: int = 0
@@ -188,6 +190,7 @@ class SonosMonitor(BaseMonitor):
             monitor_logger.info(f"✅ [SONOS] Successfully reconnected and subscribed to {len(self.subscriptions)} coordinator(s)")
             self.events_active = True
             self.last_event_time = time.time()
+            self.event_subscription_start_time = time.time()
             
             # Get current state from reconnected coordinators
             self.get_initial_state()
@@ -354,6 +357,9 @@ class SonosMonitor(BaseMonitor):
                 except Exception as e:
                     monitor_logger.warning(f"  ✗ Failed to subscribe to {device_info['name']}: {e}")
         
+        if len(self.subscriptions) > 0:
+            self.event_subscription_start_time = time.time()
+        
         return len(self.subscriptions) > 0
     
     def get_initial_state(self) -> Optional[Dict[str, Any]]:
@@ -488,10 +494,41 @@ class SonosMonitor(BaseMonitor):
                 time.sleep(Config.SONOS_CHECK_TAKEOVER_INTERVAL)
                 
                 current_track_data = self.app_state.get_track_data()
+                current_time = time.time()
                 
-                # NOTE: We do NOT check event staleness based on time
-                # Sonos events only fire on state changes (track change, play/pause)
-                # NOT periodically during playback. Polling handles position updates.
+                # Check for stale event subscriptions
+                # Events should fire on track changes and play/pause state changes
+                # If Sonos is playing but we haven't received events for too long, subscriptions may have died
+                sonos_is_active_source = current_track_data and current_track_data.get('source') == 'sonos'
+                time_since_last_event = current_time - self.last_event_time if self.last_event_time > 0 else 0
+                subscription_age = current_time - self.event_subscription_start_time if self.event_subscription_start_time else 999999
+                
+                # Detect stale events: subscriptions are marked active but no events received recently
+                # AND we've given subscriptions enough time to establish (at least 10 seconds)
+                events_appear_stale = (
+                    self.events_active and
+                    subscription_age > 10 and
+                    time_since_last_event > Config.SONOS_EVENT_STALENESS_THRESHOLD
+                )
+                
+                if events_appear_stale:
+                    monitor_logger.warning(f"⚠️  [SONOS] Event subscriptions appear stale (no events for {int(time_since_last_event)}s)")
+                    monitor_logger.warning(f"   Subscription age: {int(subscription_age)}s, Last event: {int(time_since_last_event)}s ago")
+                    monitor_logger.info("🔄 [SONOS] Attempting to resubscribe to events...")
+                    
+                    # Mark events as inactive and trigger resubscription
+                    self.events_active = False
+                    
+                    # Try to resubscribe
+                    success = self._attempt_reconnection()
+                    if success:
+                        monitor_logger.info("✅ [SONOS] Event subscriptions re-established")
+                        self._reset_connection_tracking()
+                    else:
+                        monitor_logger.warning("⚠️  [SONOS] Resubscription failed, will retry...")
+                        # Set needs_reconnection to trigger retry on next loop
+                        self.needs_reconnection = True
+                        self.device_unreachable_start = current_time
                 
                 # Always poll for position when Sonos is active source and clients need it
                 should_poll_position = (
@@ -712,9 +749,11 @@ class SonosMonitor(BaseMonitor):
                 monitor_logger.info("✅ Event subscriptions active (track changes & playback state)")
                 self.events_active = True
                 self.last_event_time = time.time()
+                self.event_subscription_start_time = time.time()
             else:
                 monitor_logger.warning("⚠️  Event subscriptions failed, using polling only")
                 self.events_active = False
+                self.event_subscription_start_time = None
             
             # Get initial state
             self.get_initial_state()

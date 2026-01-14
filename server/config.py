@@ -78,6 +78,7 @@ class Config:
     SONOS_RECOVER_ATTEMPT_WINDOW_TIME: int = _json_config.get('sonos', {}).get('recoverAttemptWindowTime', 86400)
     SONOS_RETRY_INTERVAL: int = _json_config.get('sonos', {}).get('retryInterval', 5)
     SONOS_DEVICE_RETRY_WINDOW_TIME: int = _json_config.get('sonos', {}).get('deviceRetryWindowTime', 300)
+    SONOS_EVENT_STALENESS_THRESHOLD: int = _json_config.get('sonos', {}).get('eventStalenessThreshold', 30)
     
     # Spotify Monitor Configuration
     SPOTIFY_TAKEOVER_WAIT_TIME: int = _json_config.get('spotify', {}).get('takeoverWaitTime', 10)
