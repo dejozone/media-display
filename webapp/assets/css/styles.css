@@ -770,7 +770,10 @@ body.music-paused .album-art.glow-all-colors-fast,
 body.music-paused .album-art.glow-album-colors,
 body.music-paused .album-art.glow-album-colors-fast,
 body.music-paused .album-art.glow-white,
-body.music-paused .album-art.glow-white-fast {
+body.music-paused .album-art.glow-white-fast,
+body.music-paused .album-art.bass-white-glow,
+body.music-paused .album-art.bass-color-glow,
+body.music-paused .equalizer-bar {
     animation-play-state: paused !important;
 }
 

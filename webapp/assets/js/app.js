@@ -2096,8 +2096,10 @@ function updateDisplay(trackData) {
     // Update body class for pausing animations
     if (isPlaying) {
         document.body.classList.remove('music-paused');
+        console.log('🎵 Music playing - removed music-paused class');
     } else {
         document.body.classList.add('music-paused');
+        console.log('⏸️  Music paused - added music-paused class');
     }
     
     // Notify server about progress needs based on playback state and active effects
