@@ -223,15 +223,28 @@ class SpotifyMonitor(BaseMonitor):
                     device_changed = device_name != self.last_device_name
                     is_our_source = current_track_data and current_track_data.get('source') == 'spotify'
                     
-                    # OPTIMIZATION: Don't take over from higher-priority sources
-                    # Higher-priority sources (like Sonos) should only be replaced when they explicitly
-                    # clear their track or stop. We should not take over based on "staleness" timing
-                    # because higher-priority sources may have different update patterns (events vs polling)
+                    # OPTIMIZATION: Don't take over from higher-priority sources if playing SAME track on SAME device
+                    # This prevents ping-pong when Sonos plays Spotify content
+                    # BUT allow takeover if device changed (user explicitly switched to phone/laptop)
                     if current_track_data and current_track_data.get('source_priority', 999) < self.source_priority:
-                        # Higher priority source is active - don't interfere at all
-                        # monitor_logger.debug(f"[SPOTIFY] Skipping update - {current_track_data.get('source', 'unknown').upper()} (higher priority) is active")
-                        time.sleep(2)
-                        continue
+                        # Higher priority source (like Sonos) is active
+                        # Check if it's the same track AND same device
+                        current_device = current_track_data.get('device', {}).get('name', '')
+                        new_device = track_data.get('device', {}).get('name', '')
+                        
+                        if comparable_track_id == current_comparable_id and not device_changed:
+                            # Same track, same device - don't interfere, respect higher priority
+                            # monitor_logger.debug(f"[SPOTIFY] Skipping update - {current_track_data.get('source', 'unknown').upper()} already playing same track on same device")
+                            time.sleep(2)
+                            continue
+                        else:
+                            # Different track OR different device - user explicitly chose Spotify
+                            if device_changed:
+                                monitor_logger.info(f"📊 [SPOTIFY] Device changed - user switched to Spotify on {new_device}")
+                            else:
+                                monitor_logger.info(f"📊 [SPOTIFY] Different track detected - user switched to Spotify playback")
+                            # monitor_logger.debug(f"   Previous: {current_track_data.get('track_name')} on {current_device}")
+                            monitor_logger.info(f"Now playing on {new_device}")
                     
                     # Determine if we should update
                     major_change = (
@@ -242,11 +255,12 @@ class SpotifyMonitor(BaseMonitor):
                     )
                     
                     # Can we take over?
-                    # Spotify takeover logic (simplified):
+                    # Spotify takeover logic:
                     # 1. No current source → take over
-                    # 2. Current source has lower priority (higher number) → take over
-                    # 3. Current source has higher priority → NEVER take over (respect priority)
-                    # 4. We are already the active source → update as needed
+                    # 2. Current source has lower priority (higher number) → take over normally
+                    # 3. We are already the active source (same priority) → update as needed
+                    # 4. Current source has higher priority BUT (different track OR different device) → take over (user chose Spotify)
+                    # 5. Current source has higher priority AND (same track AND same device) → never take over (respect priority)
                     can_take_over = False
                     if current_track_data is None:
                         # No current source, we can take over
@@ -260,8 +274,10 @@ class SpotifyMonitor(BaseMonitor):
                             # Same priority (we are the active source), can update
                             can_take_over = is_our_source
                         else:
-                            # Higher priority source is active - never take over
-                            can_take_over = False
+                            # Higher priority source is active
+                            # Only take over if track or device changed (already checked above)
+                            # If we got here with same track and same device, we would have continued earlier
+                            can_take_over = True
                     
                     # For progress updates: only send if clients need progress
                     needs_progress_update = is_our_source and self.app_state.has_clients_needing_progress()
