@@ -18,7 +18,9 @@
     "recoverAttemptWindowTime": 129600,
     "retryInterval": 5,
     "deviceRetryWindowTime": 300,
-    "eventStalenessThreshold": 30
+    "eventStalenessThreshold": 30,
+    "healthCheckInterval": 60,
+    "coordinatorRediscInterval": 120
   },
   "spotify": {
     "takeoverWaitTime": 5,

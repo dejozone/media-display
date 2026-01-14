@@ -260,7 +260,7 @@ class SonosMonitor(BaseMonitor):
                         track = device.get_current_track_info()
                         
                         actual_state = transport.get('current_transport_state')
-                        actual_track_id = f"{track.get('title', '')}_{track.get('artist', '')}" if track else ""
+                        actual_track_id = f"{track.get('title', '')}_{track.get('artist', '')}" if track and track.get('title') else ""
                         
                         # If device is playing something
                         if actual_state in ['PLAYING', 'PAUSED_PLAYBACK'] and actual_track_id:
@@ -270,26 +270,31 @@ class SonosMonitor(BaseMonitor):
                                 app_is_playing = current_track.get('is_playing', False)
                                 actual_is_playing = actual_state == 'PLAYING'
                                 
-                                # If state doesn't match, subscriptions might be dead
-                                if app_track_id != actual_track_id or app_is_playing != actual_is_playing:
-                                    monitor_logger.warning(f"⚠️  [SONOS] State mismatch detected on {device_info['name']}")
-                                    monitor_logger.warning(f"   App state: {app_track_id} ({'playing' if app_is_playing else 'paused'})")
-                                    monitor_logger.warning(f"   Device state: {actual_track_id} ({'playing' if actual_is_playing else 'paused'})")
+                                # Only consider it a subscription failure if the TRACK changed (not just play/pause state)
+                                # Play/pause state mismatches can be timing/race conditions as events take time to arrive
+                                # A track change we didn't get an event for is a real subscription failure
+                                if app_track_id != actual_track_id:
+                                    monitor_logger.warning(f"⚠️  [SONOS] Track mismatch detected on {device_info['name']}")
+                                    monitor_logger.warning(f"   App state: {app_track_id}")
+                                    monitor_logger.warning(f"   Device state: {actual_track_id}")
+                                    monitor_logger.warning("   This indicates events are not being received - resubscribing...")
                                     return False
-                            else:
-                                # Device is playing but we don't have Sonos as active source
-                                # This could mean events are dead OR another source took over
-                                # Check timestamp to see if events are likely dead
-                                if current_track:
-                                    time_since_update = time.time() - current_track.get('timestamp', 0)
-                                    # If Sonos was the last source and it's been a while, events might be dead
-                                    if current_track.get('source') == 'sonos' and time_since_update > 30:
-                                        monitor_logger.warning(f"⚠️  [SONOS] Device {device_info['name']} is playing but app state is stale ({int(time_since_update)}s)")
-                                        return False
+                                
+                                # Log play/pause state differences but don't trigger resubscription
+                                if app_is_playing != actual_is_playing:
+                                    monitor_logger.debug(f"[SONOS] Play/pause state difference on {device_info['name']} (app: {'playing' if app_is_playing else 'paused'}, device: {'playing' if actual_is_playing else 'paused'}) - waiting for event")
+                        elif actual_state in ['PLAYING', 'PAUSED_PLAYBACK'] and not actual_track_id:
+                            # Device is in playback state but has no track info (paused with cleared track)
+                            # This is normal - track info gets cleared when paused for a while
+                            monitor_logger.debug(f"[SONOS] Device {device_info['name']} is {actual_state} but has no track info (normal when paused)")
                         
-                        # If we found a coordinator and checked it, subscriptions appear healthy
-                        return True
+                        # If we get here, subscriptions appear healthy
+                        if actual_state in ['PLAYING', 'PAUSED_PLAYBACK']:
+                            return True
                         
+                        # Continue checking other devices if this one is idle
+                        continue
+                    
                     except Exception as e:
                         error_str = str(e).lower()
                         is_connection_error = any(err in error_str for err in [
@@ -555,7 +560,7 @@ class SonosMonitor(BaseMonitor):
                 except Exception as e:
                     monitor_logger.warning(f"⚠️  Error getting initial state from {device_info['name']}: {e}")
         
-        monitor_logger.info("  ℹ️  No coordinators currently playing music")
+        monitor_logger.info("ℹ️  No coordinators currently playing music")
         return None
     
     def _poll_position_updates(self):
@@ -569,8 +574,6 @@ class SonosMonitor(BaseMonitor):
         
         last_health_check = time.time()
         last_coordinator_discovery_attempt = time.time()
-        HEALTH_CHECK_INTERVAL = 60  # Check subscription health every 60 seconds
-        COORDINATOR_REDISCOVERY_INTERVAL = 120  # Retry finding coordinators every 120 seconds when in polling mode
         
         while self.is_running:
             try:
@@ -624,8 +627,8 @@ class SonosMonitor(BaseMonitor):
                 # This is MUCH less aggressive than checking event staleness
                 # Sonos events are state-change events (play/pause/track change), not heartbeats
                 # A song playing for 3-5 minutes without events is completely normal
-                if self.events_active and (current_time - last_health_check) >= HEALTH_CHECK_INTERVAL:
-                    monitor_logger.debug("[SONOS] Performing periodic subscription health check...")
+                if self.events_active and (current_time - last_health_check) >= Config.SONOS_HEALTH_CHECK_INTERVAL:
+                    # monitor_logger.debug("[SONOS] Performing periodic subscription health check...")
                     
                     subscriptions_healthy = self._verify_subscriptions_health()
                     
@@ -653,7 +656,7 @@ class SonosMonitor(BaseMonitor):
                 # Periodically attempt to rediscover coordinators when in polling fallback mode
                 # This handles the case where coordinators appear after initial startup
                 # or after all devices were group members but some became coordinators again
-                if not self.events_active and (current_time - last_coordinator_discovery_attempt) >= COORDINATOR_REDISCOVERY_INTERVAL:
+                if not self.events_active and (current_time - last_coordinator_discovery_attempt) >= Config.SONOS_COORDINATOR_REDISCOVERY_INTERVAL:
                     monitor_logger.info("🔍 [SONOS] Attempting to rediscover coordinators (event-driven mode preferred)...")
                     
                     # Try to find and subscribe to coordinators
@@ -803,7 +806,7 @@ class SonosMonitor(BaseMonitor):
                                             same_track_note = " (same track)" if is_same_track else " (different track)"
                                             monitor_logger.info(f"📊 Progress source: SONOS (priority)")
                                             monitor_logger.info(f"Taking over from {current_source} (priority {current_priority}){same_track_note}")
-                                            monitor_logger.info(f"🎵 [SONOS] {new_track_data['track_name']} - {new_track_data['artist']}")
+                                            monitor_logger.debug(f"🎵 [SONOS] {new_track_data['track_name']} - {new_track_data['artist']}")
                                         
                                         # If events are down, check for track changes
                                         if should_poll_full_state:
