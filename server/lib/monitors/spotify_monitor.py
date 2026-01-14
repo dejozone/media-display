@@ -223,18 +223,15 @@ class SpotifyMonitor(BaseMonitor):
                     device_changed = device_name != self.last_device_name
                     is_our_source = current_track_data and current_track_data.get('source') == 'spotify'
                     
-                    # OPTIMIZATION: Don't take over if higher-priority source is playing the SAME track
-                    # This prevents unnecessary back-and-forth when Sonos plays Spotify content
-                    if current_track_data and current_track_data.get('source') == 'sonos':
-                        # Check if it's the same track
-                        if comparable_track_id == current_comparable_id:
-                            # Same track on Sonos - don't interfere unless stale
-                            if time_since_last_update <= Config.SPOTIFY_TAKEOVER_WAIT_TIME:
-                                monitor_logger.debug(f"[SPOTIFY] Skipping update - Sonos already playing same track ({track_data['track_name']})")
-                                time.sleep(2)
-                                continue
-                            else:
-                                monitor_logger.info(f"🔄 [SPOTIFY] Sonos stale ({time_since_last_update:.1f}s), taking over same track")
+                    # OPTIMIZATION: Don't take over from higher-priority sources
+                    # Higher-priority sources (like Sonos) should only be replaced when they explicitly
+                    # clear their track or stop. We should not take over based on "staleness" timing
+                    # because higher-priority sources may have different update patterns (events vs polling)
+                    if current_track_data and current_track_data.get('source_priority', 999) < self.source_priority:
+                        # Higher priority source is active - don't interfere at all
+                        # monitor_logger.debug(f"[SPOTIFY] Skipping update - {current_track_data.get('source', 'unknown').upper()} (higher priority) is active")
+                        time.sleep(2)
+                        continue
                     
                     # Determine if we should update
                     major_change = (
@@ -245,11 +242,11 @@ class SpotifyMonitor(BaseMonitor):
                     )
                     
                     # Can we take over?
-                    # Spotify takeover logic:
+                    # Spotify takeover logic (simplified):
                     # 1. No current source → take over
-                    # 2. We have higher priority → use normal takeover logic
-                    # 3. Current source has higher priority (e.g., Sonos) BUT is stale (not playing) → take over
-                    # 4. Current source has higher priority AND is actively playing → do NOT take over
+                    # 2. Current source has lower priority (higher number) → take over
+                    # 3. Current source has higher priority → NEVER take over (respect priority)
+                    # 4. We are already the active source → update as needed
                     can_take_over = False
                     if current_track_data is None:
                         # No current source, we can take over
@@ -259,15 +256,12 @@ class SpotifyMonitor(BaseMonitor):
                         if current_priority > self.source_priority:
                             # We have higher priority, use normal takeover logic
                             can_take_over = self.should_source_takeover(current_track_data, time_since_last_update)
+                        elif current_priority == self.source_priority:
+                            # Same priority (we are the active source), can update
+                            can_take_over = is_our_source
                         else:
-                            # Current source has same or higher priority (like Sonos)
-                            # Check if it's stale (hasn't updated in configured time)
-                            # If stale, it's likely not playing anymore, so we can take over
-                            if time_since_last_update > Config.SPOTIFY_TAKEOVER_WAIT_TIME:
-                                can_take_over = True
-                            else:
-                                # Higher priority source is actively playing, don't take over
-                                can_take_over = False
+                            # Higher priority source is active - never take over
+                            can_take_over = False
                     
                     # For progress updates: only send if clients need progress
                     needs_progress_update = is_our_source and self.app_state.has_clients_needing_progress()
