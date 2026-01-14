@@ -333,7 +333,7 @@ def service_recovery_loop() -> None:
                         remaining_display = f"{remaining_time}s"
                     else:
                         remaining_display = f"{remaining_time / 60:.1f} minutes"
-                    server_logger.info(f"🔄 Attempting to recover {service.upper()} service (attempt #{retry_count[service]}, timeout in {remaining_display})...")
+                    server_logger.info(f"🔄 Attempting to recover {service.upper()} service (attempt #{retry_count[service]}, will stop retrying in {remaining_display})...")
                     
                     success = False
                     if service == 'sonos':

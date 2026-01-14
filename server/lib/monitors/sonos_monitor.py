@@ -235,7 +235,7 @@ class SonosMonitor(BaseMonitor):
                     })
                 return True
             else:
-                monitor_logger.info("  ℹ️  No Sonos devices found")
+                # monitor_logger.info(" ℹ️  No Sonos devices found")
                 return False
         except Exception as e:
             monitor_logger.error(f"  ✗ Error discovering Sonos: {e}")
