@@ -529,6 +529,11 @@ class SonosMonitor(BaseMonitor):
                             if device_info['type'] == 'sonos':
                                 try:
                                     device = device_info['device']
+                                    
+                                    # Only check coordinators (they have the actual playback state)
+                                    if not device.is_coordinator:
+                                        continue
+                                    
                                     transport = device.get_current_transport_info()
                                     is_playing = transport.get('current_transport_state') == 'PLAYING'
                                     
@@ -570,6 +575,11 @@ class SonosMonitor(BaseMonitor):
                             if device_info['type'] == 'sonos':
                                 try:
                                     device = device_info['device']
+                                    
+                                    # Only check coordinators (they have the actual playback state)
+                                    if not device.is_coordinator:
+                                        continue
+                                    
                                     track = device.get_current_track_info()
                                     transport = device.get_current_transport_info()
                                     
