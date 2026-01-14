@@ -15,7 +15,9 @@
     "pausedPollingInterval": 10,
     "reducedPollingInterval": 10,
     "discoverSvcInterval": 10,
-    "recoverAttemptWindowTime": 129600
+    "recoverAttemptWindowTime": 129600,
+    "retryInterval": 5,
+    "deviceRetryWindowTime": 300
   },
   "spotify": {
     "takeoverWaitTime": 5,
@@ -24,6 +26,8 @@
     "consecutiveNoPollsBeforePause": 3,
     "discoverSvcInterval": 15,
     "recoverAttemptWindowTime": 129600,
+    "retryInterval": 5,
+    "deviceRetryWindowTime": 300,
     "api": {
       "sslCertVerification": false,
       "callbackRedirRootUrl": "https://media-display.projecttechcycle-dev.org:9080/spotify/callback",
