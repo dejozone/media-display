@@ -223,6 +223,102 @@ class SonosMonitor(BaseMonitor):
             self.events_active = False
             return False  # Trigger retry since subscriptions failed
     
+    def _verify_subscriptions_health(self) -> bool:
+        """
+        Verify that event subscriptions are still healthy by checking device state.
+        Returns True if subscriptions appear healthy, False if they need to be recreated.
+        
+        This should be called periodically (e.g., every 60 seconds) to detect:
+        1. Subscriptions that have silently died
+        2. Coordinator changes (devices regrouping)
+        3. Network issues
+        """
+        if not self.subscriptions:
+            monitor_logger.debug("[SONOS] No subscriptions to verify")
+            return False
+        
+        try:
+            # Get current track from app state (what we think is playing based on events)
+            current_track = self.app_state.get_track_data()
+            
+            # Check if we have any coordinators to verify
+            found_coordinator = False
+            
+            # Query actual device state
+            for device_info in self.devices:
+                if device_info['type'] == 'sonos':
+                    try:
+                        device = device_info['device']
+                        
+                        # Only check coordinators
+                        if not device.is_coordinator:
+                            continue
+                        
+                        found_coordinator = True
+                        
+                        transport = device.get_current_transport_info()
+                        track = device.get_current_track_info()
+                        
+                        actual_state = transport.get('current_transport_state')
+                        actual_track_id = f"{track.get('title', '')}_{track.get('artist', '')}" if track else ""
+                        
+                        # If device is playing something
+                        if actual_state in ['PLAYING', 'PAUSED_PLAYBACK'] and actual_track_id:
+                            # Check if our app state matches
+                            if current_track and current_track.get('source') == 'sonos':
+                                app_track_id = f"{current_track.get('track_name', '')}_{current_track.get('artist', '')}"
+                                app_is_playing = current_track.get('is_playing', False)
+                                actual_is_playing = actual_state == 'PLAYING'
+                                
+                                # If state doesn't match, subscriptions might be dead
+                                if app_track_id != actual_track_id or app_is_playing != actual_is_playing:
+                                    monitor_logger.warning(f"⚠️  [SONOS] State mismatch detected on {device_info['name']}")
+                                    monitor_logger.warning(f"   App state: {app_track_id} ({'playing' if app_is_playing else 'paused'})")
+                                    monitor_logger.warning(f"   Device state: {actual_track_id} ({'playing' if actual_is_playing else 'paused'})")
+                                    return False
+                            else:
+                                # Device is playing but we don't have Sonos as active source
+                                # This could mean events are dead OR another source took over
+                                # Check timestamp to see if events are likely dead
+                                if current_track:
+                                    time_since_update = time.time() - current_track.get('timestamp', 0)
+                                    # If Sonos was the last source and it's been a while, events might be dead
+                                    if current_track.get('source') == 'sonos' and time_since_update > 30:
+                                        monitor_logger.warning(f"⚠️  [SONOS] Device {device_info['name']} is playing but app state is stale ({int(time_since_update)}s)")
+                                        return False
+                        
+                        # If we found a coordinator and checked it, subscriptions appear healthy
+                        return True
+                        
+                    except Exception as e:
+                        error_str = str(e).lower()
+                        is_connection_error = any(err in error_str for err in [
+                            'connection refused', 'connection reset', 'connection aborted',
+                            'failed to establish', 'max retries', 'timed out', 'timeout'
+                        ])
+                        
+                        if is_connection_error:
+                            monitor_logger.warning(f"⚠️  [SONOS] Connection error during health check: {e}")
+                            # Connection errors mean we can't verify health - trigger reconnection
+                            return False
+                        else:
+                            monitor_logger.debug(f"  ✗ Error verifying {device_info['name']}: {e}")
+                            # Non-connection errors - try next device
+                            continue
+            
+            # If no coordinators found, subscriptions can't be verified
+            if not found_coordinator:
+                monitor_logger.warning("⚠️  [SONOS] No coordinators found during health check")
+                return False
+            
+            # Checked all devices, no issues found
+            return True
+            
+        except Exception as e:
+            monitor_logger.warning(f"⚠️  [SONOS] Error verifying subscription health: {e}")
+            # On unexpected errors, assume subscriptions might be unhealthy
+            return False
+    
     def get_device_names(self, coordinator_device) -> List[str]:
         """Get list of device names from a group"""
         try:
@@ -465,10 +561,13 @@ class SonosMonitor(BaseMonitor):
     def _poll_position_updates(self):
         """
         Continuously poll for position updates.
-        Also monitors event health and handles full state updates when events fail.
+        Periodically verifies event subscription health (not based on event frequency).
         Additionally checks if Sonos should take over from lower-priority sources.
         """
         from config import Config
+        
+        last_health_check = time.time()
+        HEALTH_CHECK_INTERVAL = 60  # Check subscription health every 60 seconds
         
         while self.is_running:
             try:
@@ -518,39 +617,35 @@ class SonosMonitor(BaseMonitor):
                 current_track_data = self.app_state.get_track_data()
                 current_time = time.time()
                 
-                # Check for stale event subscriptions
-                # Events should fire on track changes and play/pause state changes
-                # If Sonos is playing but we haven't received events for too long, subscriptions may have died
-                sonos_is_active_source = current_track_data and current_track_data.get('source') == 'sonos'
-                time_since_last_event = current_time - self.last_event_time if self.last_event_time > 0 else 0
-                subscription_age = current_time - self.event_subscription_start_time if self.event_subscription_start_time else 999999
-                
-                # Detect stale events: subscriptions are marked active but no events received recently
-                # AND we've given subscriptions enough time to establish (at least 10 seconds)
-                events_appear_stale = (
-                    self.events_active and
-                    subscription_age > 10 and
-                    time_since_last_event > Config.SONOS_EVENT_STALENESS_THRESHOLD
-                )
-                
-                if events_appear_stale:
-                    monitor_logger.warning(f"⚠️  [SONOS] Event subscriptions appear stale (no events for {int(time_since_last_event)}s)")
-                    monitor_logger.warning(f"Subscription age: {int(subscription_age)}s, Last event: {int(time_since_last_event)}s ago")
-                    monitor_logger.info("🔄 [SONOS] Attempting to resubscribe to events...")
+                # Periodically verify subscription health (every 60 seconds)
+                # This is MUCH less aggressive than checking event staleness
+                # Sonos events are state-change events (play/pause/track change), not heartbeats
+                # A song playing for 3-5 minutes without events is completely normal
+                if self.events_active and (current_time - last_health_check) >= HEALTH_CHECK_INTERVAL:
+                    monitor_logger.debug("[SONOS] Performing periodic subscription health check...")
                     
-                    # Mark events as inactive and trigger resubscription
-                    self.events_active = False
+                    subscriptions_healthy = self._verify_subscriptions_health()
                     
-                    # Try to resubscribe
-                    success = self._attempt_reconnection()
-                    if success:
-                        monitor_logger.info("✅ [SONOS] Event subscriptions re-established")
-                        self._reset_connection_tracking()
+                    if not subscriptions_healthy:
+                        monitor_logger.warning("⚠️  [SONOS] Subscription health check failed")
+                        monitor_logger.info("🔄 [SONOS] Recreating event subscriptions...")
+                        
+                        # Mark events as inactive and trigger resubscription
+                        self.events_active = False
+                        
+                        # Try to resubscribe
+                        success = self._attempt_reconnection()
+                        if success:
+                            monitor_logger.info("✅ [SONOS] Event subscriptions re-established")
+                            self._reset_connection_tracking()
+                        else:
+                            monitor_logger.warning("⚠️  [SONOS] Resubscription failed, will retry...")
+                            self.needs_reconnection = True
+                            self.device_unreachable_start = current_time
                     else:
-                        monitor_logger.warning("⚠️  [SONOS] Resubscription failed, will retry...")
-                        # Set needs_reconnection to trigger retry on next loop
-                        self.needs_reconnection = True
-                        self.device_unreachable_start = current_time
+                        monitor_logger.debug("[SONOS] Subscription health check passed")
+                    
+                    last_health_check = current_time
                 
                 # Always poll for position when Sonos is active source and clients need it
                 should_poll_position = (
