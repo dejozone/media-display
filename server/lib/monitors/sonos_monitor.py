@@ -44,6 +44,97 @@ class SonosMonitor(BaseMonitor):
         self.last_event_time: float = 0
         self.event_failure_count: int = 0
         self.max_event_failures: int = 3  # Try to recover events after 3 consecutive failures
+        
+        # Connection retry tracking
+        self.connection_errors: int = 0
+        self.last_connection_error_time: Optional[float] = None
+        self.device_unreachable_start: Optional[float] = None
+        self.needs_reconnection: bool = False  # Flag to trigger device reconnection
+    
+    def _handle_connection_error(self, error: Exception) -> None:
+        """Handle connection errors with retry logic"""
+        from config import Config
+        
+        current_time = time.time()
+        self.connection_errors += 1
+        self.last_connection_error_time = current_time
+        
+        # Track when device first became unreachable
+        if self.device_unreachable_start is None:
+            self.device_unreachable_start = current_time
+            monitor_logger.warning(f"⚠️  [SONOS] Device connection lost: {error}")
+            monitor_logger.info(f"🔄 Starting retry attempts (every {Config.SONOS_RETRY_INTERVAL}s for up to {Config.SONOS_DEVICE_RETRY_WINDOW_TIME}s)")
+            monitor_logger.info(f"   Will attempt to reconnect to all discovered Sonos devices")
+        
+        # Mark that we need to attempt reconnection
+        self.needs_reconnection = True
+        
+        # Check if we've exceeded retry window
+        elapsed = current_time - self.device_unreachable_start
+        if elapsed > Config.SONOS_DEVICE_RETRY_WINDOW_TIME:
+            monitor_logger.error(f"❌ [SONOS] Devices unreachable for {int(elapsed)}s (exceeded {Config.SONOS_DEVICE_RETRY_WINDOW_TIME}s limit)")
+            monitor_logger.error(f"   Total connection errors: {self.connection_errors}")
+            monitor_logger.error(f"   Marking service as unhealthy for recovery")
+            self.is_ready = False
+            self.events_active = False
+            self.needs_reconnection = False
+        else:
+            remaining = Config.SONOS_DEVICE_RETRY_WINDOW_TIME - elapsed
+            monitor_logger.warning(f"⚠️  [SONOS] Connection error #{self.connection_errors}: {error}")
+            monitor_logger.info(f"🔄 Will retry reconnection in {Config.SONOS_RETRY_INTERVAL}s (timeout in {int(remaining)}s)")
+    
+    def _reset_connection_tracking(self) -> None:
+        """Reset connection error tracking after successful operation"""
+        if self.connection_errors > 0:
+            monitor_logger.info(f"✅ [SONOS] Connection restored after {self.connection_errors} errors")
+        self.connection_errors = 0
+        self.last_connection_error_time = None
+        self.device_unreachable_start = None
+        self.needs_reconnection = False
+    
+    def _attempt_reconnection(self) -> bool:
+        """Attempt to reconnect to Sonos devices. Returns True if at least one device succeeds."""
+        monitor_logger.info("🔄 [SONOS] Attempting to reconnect to devices...")
+        
+        # Clear old subscriptions
+        for sub in self.subscriptions:
+            try:
+                sub.unsubscribe()
+            except:
+                pass
+        self.subscriptions.clear()
+        
+        # Rediscover devices
+        old_device_count = len(self.devices)
+        self.devices.clear()
+        
+        has_devices = self.discover_sonos_devices()
+        
+        if not has_devices:
+            monitor_logger.warning(f"⚠️  [SONOS] No devices found during reconnection attempt")
+            return False
+        
+        new_device_count = len(self.devices)
+        if new_device_count != old_device_count:
+            monitor_logger.info(f"ℹ️  [SONOS] Device count changed: {old_device_count} → {new_device_count}")
+        
+        # Try to subscribe to events on discovered devices
+        events_subscribed = self.subscribe_to_devices()
+        
+        if events_subscribed:
+            monitor_logger.info(f"✅ [SONOS] Successfully reconnected and subscribed to {len(self.subscriptions)} device(s)")
+            self.events_active = True
+            self.last_event_time = time.time()
+            
+            # Get current state from reconnected devices
+            self.get_initial_state()
+            
+            return True
+        else:
+            monitor_logger.warning(f"⚠️  [SONOS] Reconnected to {new_device_count} device(s) but event subscription failed")
+            self.events_active = False
+            # Still return True if we found devices (polling can continue)
+            return has_devices
     
     def get_device_names(self, coordinator_device) -> List[str]:
         """Get list of device names from a group"""
@@ -157,8 +248,16 @@ class SonosMonitor(BaseMonitor):
                         monitor_logger.info(f"{status} [SONOS EVENT] {track_data['track_name']} - {track_data['artist']}")
                         
         except Exception as e:
-            monitor_logger.error(f"Error handling Sonos event: {e}")
-            self.event_failure_count += 1
+            # Check if this is a connection error
+            error_str = str(e)
+            is_connection_error = any(keyword in error_str.lower() for keyword in 
+                ['connection', 'refused', 'reset', 'timeout', 'unreachable', 'max retries'])
+            
+            if is_connection_error:
+                self._handle_connection_error(e)
+            else:
+                monitor_logger.error(f"Error handling Sonos event: {e}")
+                self.event_failure_count += 1
     
     def subscribe_to_devices(self) -> bool:
         """Subscribe to events from all discovered devices"""
@@ -265,6 +364,33 @@ class SonosMonitor(BaseMonitor):
         
         while self.is_running:
             try:
+                # Check if we need to attempt reconnection
+                if self.needs_reconnection:
+                    from config import Config
+                    
+                    # Check if we're still within retry window
+                    if self.device_unreachable_start:
+                        elapsed = time.time() - self.device_unreachable_start
+                        if elapsed <= Config.SONOS_DEVICE_RETRY_WINDOW_TIME:
+                            # Wait before retry
+                            time.sleep(Config.SONOS_RETRY_INTERVAL)
+                            
+                            # Attempt reconnection to all devices
+                            success = self._attempt_reconnection()
+                            
+                            if success:
+                                # At least one device connected successfully
+                                self._reset_connection_tracking()
+                                monitor_logger.info("✅ [SONOS] Device reconnection successful, resuming normal operation")
+                            else:
+                                # Reconnection failed, will retry on next iteration
+                                monitor_logger.warning("⚠️  [SONOS] Reconnection attempt failed, will retry...")
+                        else:
+                            # Exceeded retry window, mark as failed
+                            self._handle_connection_error(Exception("Retry window exceeded"))
+                    
+                    continue
+                
                 # OPTIMIZATION: Check if higher-priority source is active BEFORE polling
                 # This reduces unnecessary operations when a higher-priority service is playing
                 # (e.g., if Apple Music has priority 0, Sonos would reduce its activity)
@@ -344,9 +470,19 @@ class SonosMonitor(BaseMonitor):
                                             except Exception:
                                                 pass
                                     
+                                    # Reset connection error tracking on successful operation
+                                    self._reset_connection_tracking()
+                                    
                                     break  # Only need to check one device
                                 except Exception as e:
-                                    monitor_logger.warning(f"⚠️  [SONOS] Heartbeat check error: {e}")
+                                    error_str = str(e)
+                                    is_connection_error = any(keyword in error_str.lower() for keyword in 
+                                        ['connection', 'refused', 'reset', 'timeout', 'unreachable', 'max retries'])
+                                    
+                                    if is_connection_error:
+                                        self._handle_connection_error(e)
+                                    else:
+                                        monitor_logger.warning(f"⚠️  [SONOS] Heartbeat check error: {e}")
                     
                     # For other conditions, we need to query the device
                     if should_poll_position or should_poll_full_state or should_check_takeover:
@@ -439,10 +575,20 @@ class SonosMonitor(BaseMonitor):
                                             self.app_state.update_track_data(fresh_track_data)
                                             self.socketio.emit('track_update', fresh_track_data, namespace='/')
                                         
+                                        # Reset connection error tracking on successful operation
+                                        self._reset_connection_tracking()
                                         break  # Only need to poll one device
                                     
                                 except Exception as e:
-                                    monitor_logger.warning(f"⚠️  [SONOS] Polling error: {e}")
+                                    error_str = str(e)
+                                    is_connection_error = any(keyword in error_str.lower() for keyword in 
+                                        ['connection', 'refused', 'reset', 'timeout', 'unreachable', 'max retries'])
+                                    
+                                    if is_connection_error:
+                                        self._handle_connection_error(e)
+                                        # Don't wait here - let the reconnection logic at top of loop handle timing
+                                    else:
+                                        monitor_logger.warning(f"⚠️  [SONOS] Polling error: {e}")
                                 
             except Exception as e:
                 monitor_logger.error(f"⚠️  [SONOS] Position polling loop error: {e}")

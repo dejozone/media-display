@@ -76,6 +76,8 @@ class Config:
     SONOS_REDUCED_POLLING_INTERVAL: int = _json_config.get('sonos', {}).get('reducedPollingInterval', 10)
     SONOS_DISCOVER_SVC_INTERVAL: int = _json_config.get('sonos', {}).get('discoverSvcInterval', 15)
     SONOS_RECOVER_ATTEMPT_WINDOW_TIME: int = _json_config.get('sonos', {}).get('recoverAttemptWindowTime', 86400)
+    SONOS_RETRY_INTERVAL: int = _json_config.get('sonos', {}).get('retryInterval', 5)
+    SONOS_DEVICE_RETRY_WINDOW_TIME: int = _json_config.get('sonos', {}).get('deviceRetryWindowTime', 300)
     
     # Spotify Monitor Configuration
     SPOTIFY_TAKEOVER_WAIT_TIME: int = _json_config.get('spotify', {}).get('takeoverWaitTime', 10)
@@ -84,6 +86,8 @@ class Config:
     SPOTIFY_CONSECUTIVE_NO_POLLS_BEFORE_PAUSE: int = _json_config.get('spotify', {}).get('consecutiveNoPollsBeforePause', 3)
     SPOTIFY_DISCOVER_SVC_INTERVAL: int = _json_config.get('spotify', {}).get('discoverSvcInterval', 15)
     SPOTIFY_RECOVER_ATTEMPT_WINDOW_TIME: int = _json_config.get('spotify', {}).get('recoverAttemptWindowTime', 86400)
+    SPOTIFY_RETRY_INTERVAL: int = _json_config.get('spotify', {}).get('retryInterval', 5)
+    SPOTIFY_DEVICE_RETRY_WINDOW_TIME: int = _json_config.get('spotify', {}).get('deviceRetryWindowTime', 300)
     
     # Logging
     LOG_LEVEL: str = _json_config.get('logging', {}).get('level', 'info').upper()

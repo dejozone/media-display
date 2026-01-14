@@ -29,11 +29,66 @@ class SpotifyMonitor(BaseMonitor):
         # Pause polling optimization
         self.consecutive_no_playback_count: int = 0
         self.polling_paused: bool = False
+        
+        # Connection retry tracking
+        self.connection_errors: int = 0
+        self.last_connection_error_time: Optional[float] = None
+        self.api_unreachable_start: Optional[float] = None
+        self.needs_reconnection: bool = False  # Flag to trigger reconnection attempts
+        
+        # Connection retry tracking
+        self.connection_errors: int = 0
+        self.last_connection_error_time: Optional[float] = None
+        self.api_unreachable_start: Optional[float] = None
+        self.needs_reconnection: bool = False  # Flag to trigger reconnection attempts
+    
+    def _handle_connection_error(self, error: Exception) -> None:
+        """Handle connection errors with retry logic"""
+        from config import Config
+        
+        current_time = time.time()
+        self.connection_errors += 1
+        self.last_connection_error_time = current_time
+        
+        # Track when API first became unreachable
+        if self.api_unreachable_start is None:
+            self.api_unreachable_start = current_time
+            monitor_logger.warning(f"⚠️  [SPOTIFY] API connection lost: {error}")
+            monitor_logger.info(f"🔄 Starting retry attempts (every {Config.SPOTIFY_RETRY_INTERVAL}s for up to {Config.SPOTIFY_DEVICE_RETRY_WINDOW_TIME}s)")
+        
+        # Mark that we need to attempt reconnection
+        self.needs_reconnection = True
+        
+        # Check if we've exceeded retry window
+        elapsed = current_time - self.api_unreachable_start
+        if elapsed > Config.SPOTIFY_DEVICE_RETRY_WINDOW_TIME:
+            monitor_logger.error(f"❌ [SPOTIFY] API unreachable for {int(elapsed)}s (exceeded {Config.SPOTIFY_DEVICE_RETRY_WINDOW_TIME}s limit)")
+            monitor_logger.error(f"   Total connection errors: {self.connection_errors}")
+            monitor_logger.error(f"   Marking service as unhealthy for recovery")
+            self.is_ready = False
+            self.needs_reconnection = False
+        else:
+            remaining = Config.SPOTIFY_DEVICE_RETRY_WINDOW_TIME - elapsed
+            monitor_logger.warning(f"⚠️  [SPOTIFY] Connection error #{self.connection_errors}: {error}")
+            monitor_logger.info(f"🔄 Will retry API call in {Config.SPOTIFY_RETRY_INTERVAL}s (timeout in {int(remaining)}s)")
+    
+    def _reset_connection_tracking(self) -> None:
+        """Reset connection error tracking after successful operation"""
+        if self.connection_errors > 0:
+            monitor_logger.info(f"✅ [SPOTIFY] API connection restored after {self.connection_errors} errors")
+        self.connection_errors = 0
+        self.last_connection_error_time = None
+        self.api_unreachable_start = None
+        self.needs_reconnection = False
     
     def get_current_playback(self) -> Optional[Dict[str, Any]]:
         """Get current playback information"""
         try:
             current = self.sp.current_playback()
+            
+            # Reset connection error tracking on successful API call
+            self._reset_connection_tracking()
+            
             if current and current.get('item'):
                 track = current['item']
                 return {
@@ -55,7 +110,15 @@ class SpotifyMonitor(BaseMonitor):
                 }
             return None
         except Exception as e:
-            monitor_logger.error(f"Error getting playback: {e}")
+            # Check if this is a connection error
+            error_str = str(e)
+            is_connection_error = any(keyword in error_str.lower() for keyword in 
+                ['connection', 'refused', 'reset', 'timeout', 'unreachable', 'max retries', 'ssl', 'certificate'])
+            
+            if is_connection_error:
+                self._handle_connection_error(e)
+            else:
+                monitor_logger.error(f"Error getting playback: {e}")
             return None
     
     def _monitor_loop(self):
@@ -65,6 +128,33 @@ class SpotifyMonitor(BaseMonitor):
         
         while self.is_running:
             try:
+                # Check if we need to attempt reconnection
+                if self.needs_reconnection:
+                    from config import Config
+                    
+                    # Check if we're still within retry window
+                    if self.api_unreachable_start:
+                        elapsed = time.time() - self.api_unreachable_start
+                        if elapsed <= Config.SPOTIFY_DEVICE_RETRY_WINDOW_TIME:
+                            # Wait before retry
+                            time.sleep(Config.SPOTIFY_RETRY_INTERVAL)
+                            
+                            # Try to make an API call to test connection
+                            monitor_logger.info("🔄 [SPOTIFY] Attempting to reconnect to API...")
+                            track_data = self.get_current_playback()
+                            
+                            if not self.needs_reconnection:
+                                # Connection was successful (reset was called)
+                                monitor_logger.info("✅ [SPOTIFY] API reconnection successful, resuming normal operation")
+                            else:
+                                # Still failing
+                                monitor_logger.warning("⚠️  [SPOTIFY] Reconnection attempt failed, will retry...")
+                        else:
+                            # Exceeded retry window, mark as failed
+                            self._handle_connection_error(Exception("Retry window exceeded"))
+                    
+                    continue
+                
                 # OPTIMIZATION: Check if higher-priority source is active BEFORE polling
                 # This reduces unnecessary API calls when Sonos (or other higher-priority sources) are playing
                 # Uses shared method from BaseMonitor - easy to extend for new services
