@@ -563,11 +563,14 @@ class SonosMonitor(BaseMonitor):
         Continuously poll for position updates.
         Periodically verifies event subscription health (not based on event frequency).
         Additionally checks if Sonos should take over from lower-priority sources.
+        When in polling fallback mode (no coordinators/events), periodically retries coordinator discovery.
         """
         from config import Config
         
         last_health_check = time.time()
+        last_coordinator_discovery_attempt = time.time()
         HEALTH_CHECK_INTERVAL = 60  # Check subscription health every 60 seconds
+        COORDINATOR_REDISCOVERY_INTERVAL = 120  # Retry finding coordinators every 120 seconds when in polling mode
         
         while self.is_running:
             try:
@@ -646,6 +649,23 @@ class SonosMonitor(BaseMonitor):
                         monitor_logger.debug("[SONOS] Subscription health check passed")
                     
                     last_health_check = current_time
+                
+                # Periodically attempt to rediscover coordinators when in polling fallback mode
+                # This handles the case where coordinators appear after initial startup
+                # or after all devices were group members but some became coordinators again
+                if not self.events_active and (current_time - last_coordinator_discovery_attempt) >= COORDINATOR_REDISCOVERY_INTERVAL:
+                    monitor_logger.info("🔍 [SONOS] Attempting to rediscover coordinators (event-driven mode preferred)...")
+                    
+                    # Try to find and subscribe to coordinators
+                    success = self._attempt_reconnection()
+                    
+                    if success and self.events_active:
+                        monitor_logger.info("✅ [SONOS] Coordinators found! Switching from polling to event-driven mode")
+                        self._reset_connection_tracking()
+                    else:
+                        monitor_logger.debug("[SONOS] No coordinators found yet, continuing with polling fallback")
+                    
+                    last_coordinator_discovery_attempt = current_time
                 
                 # Always poll for position when Sonos is active source and clients need it
                 should_poll_position = (
