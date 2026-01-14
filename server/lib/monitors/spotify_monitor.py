@@ -148,7 +148,12 @@ class SpotifyMonitor(BaseMonitor):
                                 monitor_logger.info("✅ [SPOTIFY] API reconnection successful, resuming normal operation")
                             else:
                                 # Still failing
-                                monitor_logger.warning("⚠️  [SPOTIFY] Reconnection attempt failed, will retry...")
+                                remaining = Config.SPOTIFY_DEVICE_RETRY_WINDOW_TIME - elapsed
+                                if remaining <= 60:
+                                    time_str = f"{int(remaining)}s"
+                                else:
+                                    time_str = f"{remaining / 60:.1f}min"
+                                monitor_logger.warning(f"⚠️  [SPOTIFY] Reconnection attempt failed, will retry... (timeout in {time_str})")
                         else:
                             # Exceeded retry window, mark as failed
                             self._handle_connection_error(Exception("Retry window exceeded"))

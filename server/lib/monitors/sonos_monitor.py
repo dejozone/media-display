@@ -464,7 +464,12 @@ class SonosMonitor(BaseMonitor):
                                 monitor_logger.info("✅ [SONOS] Device reconnection successful, resuming normal operation")
                             else:
                                 # Reconnection failed, will retry on next iteration
-                                monitor_logger.warning("⚠️  [SONOS] Reconnection attempt failed, will retry...")
+                                remaining = Config.SONOS_DEVICE_RETRY_WINDOW_TIME - elapsed
+                                if remaining <= 60:
+                                    time_str = f"{int(remaining)}s"
+                                else:
+                                    time_str = f"{remaining / 60:.1f}min"
+                                monitor_logger.warning(f"⚠️  [SONOS] Reconnection attempt failed, will retry... (timeout in {time_str})")
                         else:
                             # Exceeded retry window, mark as failed
                             self._handle_connection_error(Exception("Retry window exceeded"))
