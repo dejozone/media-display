@@ -66,7 +66,7 @@ class SonosMonitor(BaseMonitor):
             self.device_unreachable_start = current_time
             monitor_logger.warning(f"⚠️  [SONOS] Device connection lost: {error}")
             monitor_logger.info(f"🔄 Starting retry attempts (every {Config.SONOS_RETRY_INTERVAL}s for up to {Config.SONOS_DEVICE_RETRY_WINDOW_TIME}s)")
-            monitor_logger.info(f"   Will attempt to reconnect to all discovered Sonos devices")
+            monitor_logger.info(f"Will attempt to reconnect to all discovered Sonos devices")
         
         # Mark that we need to attempt reconnection
         self.needs_reconnection = True
@@ -75,8 +75,8 @@ class SonosMonitor(BaseMonitor):
         elapsed = current_time - self.device_unreachable_start
         if elapsed > Config.SONOS_DEVICE_RETRY_WINDOW_TIME:
             monitor_logger.error(f"❌ [SONOS] Devices unreachable for {int(elapsed)}s (exceeded {Config.SONOS_DEVICE_RETRY_WINDOW_TIME}s limit)")
-            monitor_logger.error(f"   Total connection errors: {self.connection_errors}")
-            monitor_logger.error(f"   Marking service as unhealthy for recovery")
+            monitor_logger.error(f"Total connection errors: {self.connection_errors}")
+            monitor_logger.error(f"Marking service as unhealthy for recovery")
             self.is_ready = False
             self.events_active = False
             self.needs_reconnection = False
@@ -106,7 +106,7 @@ class SonosMonitor(BaseMonitor):
                     
                     # Only check coordinators (group leaders)
                     if not device.is_coordinator:
-                        monitor_logger.debug(f"  ⏭️  Skipping {device_info['name']} (group member, not coordinator)")
+                        monitor_logger.debug(f"⏭️  Skipping {device_info['name']} (group member, not coordinator)")
                         continue
                     
                     transport = device.get_current_transport_info()
@@ -120,12 +120,12 @@ class SonosMonitor(BaseMonitor):
                     if is_active:
                         device_info['transport_state'] = transport.get('current_transport_state')
                         active_coordinators.append(device_info)
-                        monitor_logger.debug(f"  ✓ {device_info['name']} (coordinator) - {transport.get('current_transport_state')}")
+                        monitor_logger.debug(f"✓ {device_info['name']} (coordinator) - {transport.get('current_transport_state')}")
                     else:
-                        monitor_logger.debug(f"  ⏹️  {device_info['name']} (coordinator) - idle")
+                        monitor_logger.debug(f"⏹️  {device_info['name']} (coordinator) - idle")
                         
                 except Exception as e:
-                    monitor_logger.debug(f"  ✗ Error checking {device_info['name']}: {e}")
+                    monitor_logger.debug(f"✗ Error checking {device_info['name']}: {e}")
         
         # Return active coordinators if any, otherwise return all coordinators
         # This ensures we always have subscriptions to detect when playback starts
@@ -169,7 +169,7 @@ class SonosMonitor(BaseMonitor):
         
         if not coordinators_to_subscribe:
             monitor_logger.warning("⚠️  [SONOS] No coordinators found (all devices are group members)")
-            monitor_logger.info("   Will retry in next polling cycle to find coordinators")
+            monitor_logger.info("Will retry in next polling cycle to find coordinators")
             self.events_active = False
             # Return False to trigger retry mechanism since we have no way to receive events
             return False
@@ -198,14 +198,14 @@ class SonosMonitor(BaseMonitor):
                 
                 state = device_info.get('transport_state', 'idle')
                 if state in ['PLAYING', 'PAUSED_PLAYBACK']:
-                    monitor_logger.info(f"  ✓ Subscribed to {device_info['name']} ({state})")
+                    monitor_logger.info(f"✓ Subscribed to {device_info['name']} ({state})")
                 else:
-                    monitor_logger.info(f"  ✓ Subscribed to {device_info['name']} (idle, monitoring for playback)")
+                    monitor_logger.info(f"✓ Subscribed to {device_info['name']} (idle, monitoring for playback)")
                 
                 events_subscribed = True
                 
             except Exception as e:
-                monitor_logger.warning(f"  ✗ Failed to subscribe to {device_info['name']}: {e}")
+                monitor_logger.warning(f"✗ Failed to subscribe to {device_info['name']}: {e}")
         
         if events_subscribed:
             monitor_logger.info(f"✅ [SONOS] Successfully reconnected and subscribed to {len(self.subscriptions)} coordinator(s)")
@@ -236,7 +236,7 @@ class SonosMonitor(BaseMonitor):
             else:
                 return [coordinator_device.player_name]
         except Exception as e:
-            monitor_logger.warning(f"  ⚠️  Error getting device names: {e}")
+            monitor_logger.warning(f"⚠️  Error getting device names: {e}")
             return [coordinator_device.player_name]
     
     def discover_sonos_devices(self) -> bool:
@@ -249,7 +249,7 @@ class SonosMonitor(BaseMonitor):
             devices = soco.discover(timeout=5)
             if devices:
                 for device in devices:
-                    monitor_logger.info(f"  ✓ Found Sonos: {device.player_name} ({device.ip_address})")
+                    monitor_logger.info(f"✓ Found Sonos: {device.player_name} ({device.ip_address})")
                     self.devices.append({
                         'type': 'sonos',
                         'device': device,
@@ -260,7 +260,7 @@ class SonosMonitor(BaseMonitor):
                 # monitor_logger.info(" ℹ️  No Sonos devices found")
                 return False
         except Exception as e:
-            monitor_logger.error(f"  ✗ Error discovering Sonos: {e}")
+            monitor_logger.error(f"✗ Error discovering Sonos: {e}")
             return False
     
     def on_sonos_event(self, event):
@@ -326,7 +326,7 @@ class SonosMonitor(BaseMonitor):
                         # Log when switching to Sonos as progress source
                         if current_track_data and current_track_data.get('source') != 'sonos':
                             monitor_logger.info("📊 Progress source: SONOS (priority)")
-                            monitor_logger.debug(f"   Switching from {current_track_data.get('source', 'none')} (priority {current_track_data.get('source_priority', 'N/A')}) to sonos (priority {self.source_priority})")
+                            monitor_logger.debug(f"Switching from {current_track_data.get('source', 'none')} (priority {current_track_data.get('source_priority', 'N/A')}) to sonos (priority {self.source_priority})")
                         
                         self.app_state.update_track_data(track_data)
                         self.socketio.emit('track_update', track_data, namespace='/')
@@ -360,7 +360,7 @@ class SonosMonitor(BaseMonitor):
                     
                     # Only subscribe to coordinators (group leaders have the playback state)
                     if not device.is_coordinator:
-                        monitor_logger.debug(f"  ⏭️  Skipping {device_info['name']} (group member)")
+                        monitor_logger.debug(f"⏭️  Skipping {device_info['name']} (group member)")
                         continue
                     
                     # Subscribe to AVTransport events (play/pause/track change)
@@ -374,10 +374,10 @@ class SonosMonitor(BaseMonitor):
                     sub.callback = self.on_sonos_event
                     
                     self.subscriptions.append(sub)
-                    monitor_logger.info(f"  ✓ Subscribed to {device_info['name']} (coordinator)")
+                    monitor_logger.info(f"✓ Subscribed to {device_info['name']} (coordinator)")
                     
                 except Exception as e:
-                    monitor_logger.warning(f"  ✗ Failed to subscribe to {device_info['name']}: {e}")
+                    monitor_logger.warning(f"✗ Failed to subscribe to {device_info['name']}: {e}")
         
         if len(self.subscriptions) > 0:
             self.event_subscription_start_time = time.time()
@@ -443,21 +443,21 @@ class SonosMonitor(BaseMonitor):
                             # Format device names for logging
                             device_display = format_device_display(device_names)
                             state = "▶️  PLAYING" if track_data['is_playing'] else "⏸️  PAUSED"
-                            monitor_logger.info(f"  ℹ️  Initial state ({state}): {track_data['track_name']} - {track_data['artist']}")
-                            monitor_logger.info(f"  📱 Playing on: {device_display}")
+                            monitor_logger.info(f"ℹ️  Initial state ({state}): {track_data['track_name']} - {track_data['artist']}")
+                            monitor_logger.info(f"📱 Playing on: {device_display}")
                             
                             if current_track and current_track.get('source') != 'sonos':
-                                monitor_logger.info(f"  📊 Taking over from {current_track.get('source', 'unknown').upper()} (Sonos priority)")
+                                monitor_logger.info(f"📊 Taking over from {current_track.get('source', 'unknown').upper()} (Sonos priority)")
                         else:
                             # Don't take over, but store for later takeover check
                             state = "▶️  PLAYING" if track_data['is_playing'] else "⏸️  PAUSED"
-                            monitor_logger.info(f"  ℹ️  Sonos detected ({state}): {track_data['track_name']} - {track_data['artist']}")
-                            monitor_logger.info(f"  ⏸️  Not taking over (current source has higher priority)")
+                            monitor_logger.info(f"ℹ️  Sonos detected ({state}): {track_data['track_name']} - {track_data['artist']}")
+                            monitor_logger.info(f"⏸️  Not taking over (current source has higher priority)")
                         
                         return track_data
                         
                 except Exception as e:
-                    monitor_logger.warning(f"  ⚠️  Error getting initial state from {device_info['name']}: {e}")
+                    monitor_logger.warning(f"⚠️  Error getting initial state from {device_info['name']}: {e}")
         
         monitor_logger.info("  ℹ️  No coordinators currently playing music")
         return None
@@ -535,7 +535,7 @@ class SonosMonitor(BaseMonitor):
                 
                 if events_appear_stale:
                     monitor_logger.warning(f"⚠️  [SONOS] Event subscriptions appear stale (no events for {int(time_since_last_event)}s)")
-                    monitor_logger.warning(f"   Subscription age: {int(subscription_age)}s, Last event: {int(time_since_last_event)}s ago")
+                    monitor_logger.warning(f"Subscription age: {int(subscription_age)}s, Last event: {int(time_since_last_event)}s ago")
                     monitor_logger.info("🔄 [SONOS] Attempting to resubscribe to events...")
                     
                     # Mark events as inactive and trigger resubscription
@@ -687,7 +687,7 @@ class SonosMonitor(BaseMonitor):
                                             current_priority = current_track_data.get('source_priority', 999)
                                             same_track_note = " (same track)" if is_same_track else " (different track)"
                                             monitor_logger.info(f"📊 Progress source: SONOS (priority)")
-                                            monitor_logger.info(f"   Taking over from {current_source} (priority {current_priority}){same_track_note}")
+                                            monitor_logger.info(f"Taking over from {current_source} (priority {current_priority}){same_track_note}")
                                             monitor_logger.info(f"🎵 [SONOS] {new_track_data['track_name']} - {new_track_data['artist']}")
                                         
                                         # If events are down, check for track changes

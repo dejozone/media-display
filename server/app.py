@@ -28,8 +28,8 @@ from lib.utils.logger import server_logger
 # Configure SSL verification for Spotify API (from Config)
 if not Config.SSL_VERIFY_SPOTIFY:
     server_logger.warning("⚠️  SSL certificate verification DISABLED for Spotify endpoints")
-    server_logger.warning("   Applies to: api.spotify.com, accounts.spotify.com")
-    server_logger.warning("   This should only be used in development/testing environments")
+    server_logger.warning("Applies to: api.spotify.com, accounts.spotify.com")
+    server_logger.warning("This should only be used in development/testing environments")
     # Suppress only the InsecureRequestWarning from urllib3
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 else:
@@ -296,8 +296,8 @@ def service_recovery_loop() -> None:
     
     # Give initial startup time before starting recovery checks
     server_logger.info("🔄 Service recovery thread started")
-    server_logger.info(f"   Monitoring services: {', '.join(sorted(desired_services))}")
-    server_logger.info(f"   Waiting {Config.SERVICE_RECOVERY_INITIAL_DELAY}s for initial service startup...")
+    server_logger.info(f"Monitoring services: {', '.join(sorted(desired_services))}")
+    server_logger.info(f"Waiting {Config.SERVICE_RECOVERY_INITIAL_DELAY}s for initial service startup...")
     time.sleep(Config.SERVICE_RECOVERY_INITIAL_DELAY)
     
     while recovery_running:
@@ -322,7 +322,7 @@ def service_recovery_loop() -> None:
                             else:
                                 timeout_display = f"{max_retry_duration / 60:.1f} minutes"
                             server_logger.warning(f"⏱️  {service.upper()} service recovery timeout ({timeout_display} exceeded)")
-                            server_logger.warning(f"   Stopped retrying after {retry_count[service]} attempts")
+                            server_logger.warning(f"Stopped retrying after {retry_count[service]} attempts")
                             retry_count[service] = -1  # Mark as timed out
                         continue  # Skip this service
                     
@@ -517,7 +517,7 @@ def main() -> int:
         local_ips = get_local_ip()
         for ip in local_ips:
             protocol = 'wss' if ip.startswith('127.') or ip == 'localhost' else 'ws'
-            server_logger.info(f"  {protocol}://{ip}:{port}/")
+            server_logger.info(f"{protocol}://{ip}:{port}/")
         
         server_logger.info("Press Ctrl+C to stop")
         
