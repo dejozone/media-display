@@ -241,8 +241,8 @@ class SpotifyMonitor(BaseMonitor):
                             # Different track OR different device - user explicitly chose Spotify
                             if device_changed:
                                 monitor_logger.info(f"📊 [SPOTIFY] Device changed - user switched to Spotify on {new_device}")
-                            else:
-                                monitor_logger.info(f"📊 [SPOTIFY] Different track detected - user switched to Spotify playback")
+                            # else:
+                            #     monitor_logger.info(f"📊 [SPOTIFY] Different track detected - user switched to Spotify playback")
                             # monitor_logger.debug(f"   Previous: {current_track_data.get('track_name')} on {current_device}")
                             monitor_logger.info(f"Now playing on {new_device}")
                     
