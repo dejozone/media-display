@@ -95,8 +95,9 @@ class SonosMonitor(BaseMonitor):
         self.needs_reconnection = False
     
     def _find_active_coordinators(self) -> List[Dict[str, Any]]:
-        """Find Sonos coordinator devices (group leaders) that are currently playing"""
+        """Find Sonos coordinator devices (group leaders)"""
         coordinators = []
+        active_coordinators = []
         
         for device_info in self.devices:
             if device_info['type'] == 'sonos':
@@ -110,12 +111,15 @@ class SonosMonitor(BaseMonitor):
                     
                     transport = device.get_current_transport_info()
                     
+                    # Track all coordinators
+                    coordinators.append(device_info)
+                    
                     # Check if coordinator is playing or paused (has active playback)
                     is_active = transport.get('current_transport_state') in ['PLAYING', 'PAUSED_PLAYBACK']
                     
                     if is_active:
                         device_info['transport_state'] = transport.get('current_transport_state')
-                        coordinators.append(device_info)
+                        active_coordinators.append(device_info)
                         monitor_logger.debug(f"  ✓ {device_info['name']} (coordinator) - {transport.get('current_transport_state')}")
                     else:
                         monitor_logger.debug(f"  ⏹️  {device_info['name']} (coordinator) - idle")
@@ -123,7 +127,15 @@ class SonosMonitor(BaseMonitor):
                 except Exception as e:
                     monitor_logger.debug(f"  ✗ Error checking {device_info['name']}: {e}")
         
-        return coordinators
+        # Return active coordinators if any, otherwise return all coordinators
+        # This ensures we always have subscriptions to detect when playback starts
+        if active_coordinators:
+            return active_coordinators
+        elif coordinators:
+            monitor_logger.info(f"ℹ️  No active playback found, subscribing to all {len(coordinators)} coordinator(s) to detect future playback")
+            return coordinators
+        else:
+            return []
     
     def _attempt_reconnection(self) -> bool:
         """Attempt to reconnect to Sonos devices. Returns True if at least one coordinator is found."""
@@ -151,21 +163,24 @@ class SonosMonitor(BaseMonitor):
         if new_device_count != old_device_count:
             monitor_logger.info(f"ℹ️  [SONOS] Device count changed: {old_device_count} → {new_device_count}")
         
-        # Find active coordinators (devices actually playing/paused with music)
+        # Find coordinators (active or idle)
         monitor_logger.info("🔍 [SONOS] Checking for active coordinators...")
-        active_coordinators = self._find_active_coordinators()
+        coordinators_to_subscribe = self._find_active_coordinators()
         
-        if not active_coordinators:
-            monitor_logger.info("ℹ️  [SONOS] No coordinators with active playback found")
-            # Still consider this a success - devices are available, just not playing
+        if not coordinators_to_subscribe:
+            monitor_logger.warning("⚠️  [SONOS] No coordinators found (all devices are group members)")
+            monitor_logger.info("   Will retry in next polling cycle to find coordinators")
             self.events_active = False
-            return True
+            # Return False to trigger retry mechanism since we have no way to receive events
+            return False
         
-        monitor_logger.info(f"✓ Found {len(active_coordinators)} coordinator(s) with active playback")
+        active_count = sum(1 for d in coordinators_to_subscribe if d.get('transport_state') in ['PLAYING', 'PAUSED_PLAYBACK'])
+        if active_count > 0:
+            monitor_logger.info(f"✓ Found {active_count} coordinator(s) with active playback")
         
-        # Subscribe only to active coordinators
+        # Subscribe to coordinators
         events_subscribed = False
-        for device_info in active_coordinators:
+        for device_info in coordinators_to_subscribe:
             try:
                 device = device_info['device']
                 
@@ -180,7 +195,13 @@ class SonosMonitor(BaseMonitor):
                 sub.callback = self.on_sonos_event
                 
                 self.subscriptions.append(sub)
-                monitor_logger.info(f"  ✓ Subscribed to {device_info['name']} ({device_info['transport_state']})")
+                
+                state = device_info.get('transport_state', 'idle')
+                if state in ['PLAYING', 'PAUSED_PLAYBACK']:
+                    monitor_logger.info(f"  ✓ Subscribed to {device_info['name']} ({state})")
+                else:
+                    monitor_logger.info(f"  ✓ Subscribed to {device_info['name']} (idle, monitoring for playback)")
+                
                 events_subscribed = True
                 
             except Exception as e:
@@ -192,14 +213,15 @@ class SonosMonitor(BaseMonitor):
             self.last_event_time = time.time()
             self.event_subscription_start_time = time.time()
             
-            # Get current state from reconnected coordinators
-            self.get_initial_state()
+            # Get current state from reconnected coordinators (only if there's active playback)
+            if active_count > 0:
+                self.get_initial_state()
             
             return True
         else:
-            monitor_logger.warning(f"⚠️  [SONOS] Found {len(active_coordinators)} coordinator(s) but event subscription failed")
+            monitor_logger.warning(f"⚠️  [SONOS] Found {len(coordinators_to_subscribe)} coordinator(s) but event subscription failed")
             self.events_active = False
-            return True  # Still return True since we found devices
+            return False  # Trigger retry since subscriptions failed
     
     def get_device_names(self, coordinator_device) -> List[str]:
         """Get list of device names from a group"""
