@@ -240,6 +240,16 @@ Once started, the display will:
 - **F key**: Toggle fullscreen
 - **ESC**: Exit fullscreen
 
+### Gesture Controls
+- **Swipe Right** (touch or mouse drag): Cycle through equalizer effects
+  - Works with both touch devices and mouse drag gestures
+  - Disabled in screensaver mode
+  - 10 modes: Off → Normal → White Border → White → Navy → Blue Spectrum → Colors → Color Spectrum → Fast White Album Glow → Fast Color Album Glow
+- **Swipe Left** (touch or mouse drag): Cycle through progress effects
+  - Works with both touch devices and mouse drag gestures
+  - Disabled in screensaver mode
+  - 7 modes: Off → Edge Comet → Album Comet → Across Comet → Sunrise & Sunset → Blended Sunrise & Sunset → Equalizer Fill
+
 ### Interactive Elements
 - **Settings Icon** (gear): Expand/collapse settings panel
 - **Light Bulb Icon**: Cycle through glow effects
@@ -450,7 +460,23 @@ The server uses environment-specific JSON configuration files. All timing values
 - **`sonos.recoverAttemptWindowTime`**: Maximum time window for Sonos recovery attempts in seconds (default: `129600` = 36 hours)
   - After this period, server stops trying to recover Sonos service
 
-- **`sonos.maxConsecutiveFailures`**: Number of consecutive heartbeat failures before clearing track in seconds (default: `3`)
+- **`sonos.retryInterval`**: Interval between retry attempts when service connection fails in seconds (default: `5`)
+  - How often to retry connecting to Sonos devices during recovery
+  - Used in conjunction with `discoverSvcInterval` for connection recovery
+
+- **`sonos.deviceRetryWindowTime`**: Maximum time window for individual device connection attempts in seconds (default: `129600` = 36 hours)
+  - After this period, stops trying to connect to specific unreachable devices
+  - Prevents indefinite retry loops for permanently offline devices
+
+- **`sonos.healthCheckInterval`**: Interval for performing health checks on Sonos connections in seconds (default: `60`)
+  - Regular interval to verify Sonos service and device connectivity
+  - Helps detect and recover from silent connection failures
+
+- **`sonos.coordinatorRediscInterval`**: Interval for rediscovering group coordinator changes in seconds (default: `120`)
+  - How often to check for Sonos group coordinator changes
+  - Important for multi-room setups where speakers are grouped/ungrouped
+
+- **`sonos.maxConsecutiveFailures`**: Number of consecutive heartbeat failures before clearing track (default: `3`)
   - Allows lower-priority services to take over when Sonos becomes unreachable
   - Prevents stale data when network changes or devices go offline
 
@@ -477,6 +503,14 @@ The server uses environment-specific JSON configuration files. All timing values
 
 - **`spotify.recoverAttemptWindowTime`**: Maximum time window for Spotify recovery attempts in seconds (default: `129600` = 36 hours)
   - After this period, server stops trying to recover Spotify service
+
+- **`spotify.retryInterval`**: Interval between retry attempts when service connection fails in seconds (default: `5`)
+  - How often to retry connecting to Spotify API during recovery
+  - Used in conjunction with `discoverSvcInterval` for connection recovery
+
+- **`spotify.deviceRetryWindowTime`**: Maximum time window for device-specific connection attempts in seconds (default: `129600` = 36 hours)
+  - After this period, stops trying to connect to specific unreachable devices
+  - Prevents indefinite retry loops for permanently offline devices
 
 - **`spotify.maxConsecutiveFailures`**: Number of consecutive API failures before entering paused mode (default: `5`)
   - Prevents excessive retries when network is down
