@@ -1103,6 +1103,9 @@ body.rotate-270 .app-settings {
     overflow-wrap: break-word;
     white-space: normal;
     box-sizing: border-box;
+    overflow: hidden;
+    hyphens: auto;
+    -webkit-hyphens: auto;
 }
 
 .service-label.show {

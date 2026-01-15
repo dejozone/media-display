@@ -2353,7 +2353,7 @@ function showServiceLabel(text, targetElement = null, useNewlines = false) {
     if (useNewlines) {
         label.style.whiteSpace = 'pre-line';
     } else {
-        label.style.whiteSpace = 'nowrap';
+        label.style.whiteSpace = 'normal'; // Changed from 'nowrap' to allow wrapping
     }
     
     // Get rotation state - use negative degrees to match container counter-clockwise rotation
