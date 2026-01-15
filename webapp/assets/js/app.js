@@ -165,11 +165,11 @@ async function loadScreensaverImages(forceRefresh = false) {
         screensaverImages = images;
         screensaverImagesLoaded = true;
         
-        if (forceRefresh && previousCount !== images.length) {
-            console.log(`Screensaver images refreshed: ${previousCount} -> ${images.length} images`);
-        } else {
-            console.log(`Loaded ${images.length} screensaver image paths (will load on-demand)`);
-        }
+        // if (forceRefresh && previousCount !== images.length) {
+        //     console.log(`Screensaver images refreshed: ${previousCount} -> ${images.length} images`);
+        // } else {
+        //     console.log(`Loaded ${images.length} screensaver image paths (will load on-demand)`);
+        // }
         
         return screensaverImages;
     } catch (error) {
@@ -190,11 +190,11 @@ function startScreensaverRefresh() {
     
     // Refresh screensaver list at configured interval
     screensaverRefreshInterval = setInterval(async () => {
-        console.log('Background refresh: Updating screensaver images list...');
+        // console.log('Background refresh: Updating screensaver images list...');
         await loadScreensaverImages(true); // Force refresh
     }, CONFIG.SCREENSAVER_REFRESH_INTERVAL);
     
-    console.log(`Screensaver background refresh enabled (every ${CONFIG.SCREENSAVER_REFRESH_INTERVAL / 60000} minutes)`);
+    // console.log(`Screensaver background refresh enabled (every ${CONFIG.SCREENSAVER_REFRESH_INTERVAL / 60000} minutes)`);
 }
 
 // Load image on-demand - browser will use cache if available
@@ -397,10 +397,10 @@ function connectWebSocket() {
         // Notify server of current progress effect state
         if (progressEffectState !== 'off') {
             socket.emit('enable_progress');
-            console.log('📊 Re-enabled progress updates after reconnect');
+            // console.log('📊 Re-enabled progress updates after reconnect');
         } else {
             socket.emit('disable_progress');
-            console.log('⏸️  Progress disabled (state: off)');
+            // console.log('⏸️  Progress disabled (state: off)');
         }
     });
     
@@ -424,7 +424,7 @@ function connectWebSocket() {
         } else if (waitingForRetry && reconnectCycle > 1) {
             // In retry cycle after first attempt - show screensaver
             showNoPlayback();
-            console.log('Showing screensaver - connection attempts will continue in background');
+            // console.log('Showing screensaver - connection attempts will continue in background');
         } else if (!hasReceivedTrackData && reconnectCycle === 0) {
             // Initial connection attempt - show loading, don't show screensaver yet
             // (screensaver will show after 5-minute timer if still failing)
@@ -435,7 +435,7 @@ function connectWebSocket() {
         } else if (hasReceivedTrackData) {
             // Had data before, now disconnected - show screensaver
             showNoPlayback();
-            console.log('Showing screensaver - connection attempts will continue in background');
+            // console.log('Showing screensaver - connection attempts will continue in background');
         } else {
             // Default: show loading
             showLoading('Connecting...');
@@ -489,12 +489,12 @@ function connectWebSocket() {
                 if (reconnectCycle === 1 && !hasReceivedTrackData) {
                     // First connection retry cycle - wait before showing screensaver
                     const screensaverDelayMinutes = CONFIG.SCREENSAVER_PAUSED_DELAY_MINUTES;
-                    console.log(`Initial connection failed. Screensaver will activate in ${screensaverDelayMinutes} minutes if connection not restored.`);
+                    // console.log(`Initial connection failed. Screensaver will activate in ${screensaverDelayMinutes} minutes if connection not restored.`);
                     showLoading(`Connection failed - retrying in ${screensaverDelayMinutes} minutes`);
                     
                     // Set timer to show screensaver after configured delay
                     initialScreensaverTimeout = setTimeout(() => {
-                        console.log(`${screensaverDelayMinutes} minutes elapsed - activating screensaver`);
+                        // console.log(`${screensaverDelayMinutes} minutes elapsed - activating screensaver`);
                         showNoPlayback();
                         initialScreensaverTimeout = null;
                     }, screensaverDelayMinutes * 60 * 1000);
@@ -503,7 +503,7 @@ function connectWebSocket() {
                     if (!currentlyInScreensaver && !isShowingNowPlaying) {
                         showNoPlayback();
                     }
-                    console.log('Screensaver active - retrying in background');
+                    // console.log('Screensaver active - retrying in background');
                 }
                 updateConnectionStatus('connection-failed');
                 
@@ -512,7 +512,7 @@ function connectWebSocket() {
                 
                 // Wait 5 minutes then reset and try again
                 retryWaitTimeout = setTimeout(() => {
-                    console.log(`Retry cycle ${reconnectCycle + 1} starting after ${waitMinutes} minute wait`);
+                    // console.log(`Retry cycle ${reconnectCycle + 1} starting after ${waitMinutes} minute wait`);
                     reconnectAttempts = 0;
                     waitingForRetry = false;
                     
@@ -668,7 +668,7 @@ async function startScreensaverCycle() {
             // Only show timeout error if we're in retry mode AND 30 minutes have elapsed
             // Don't show error if images are loading successfully
             if (isRetrying && elapsedTotal > 30 * 60 * 1000) {
-                console.log('Retry timeout (30 minutes) reached while attempting to load failed images');
+                // console.log('Retry timeout (30 minutes) reached while attempting to load failed images');
                 showScreensaverError('Image Load Failed', 'Unable to load images after 30 minutes');
                 return;
             }
@@ -678,14 +678,14 @@ async function startScreensaverCycle() {
                 if (retryState.retryPhase === 'active') {
                     // Check if 1 minute of retrying has passed
                     if (elapsedSinceRetry > 60 * 1000) {
-                        console.log('Retry phase complete. Pausing for 5 minutes...');
+                        // console.log('Retry phase complete. Pausing for 5 minutes...');
                         retryState.retryPhase = 'paused';
                         retryState.lastRetryTime = now;
                         showScreensaverError('Image Load Failed', 'Retrying in 5 minutes...');
                         
                         // Schedule resume after 5 minutes
                         retryState.retryTimeoutId = setTimeout(() => {
-                            console.log('Resuming retry attempts...');
+                            // console.log('Resuming retry attempts...');
                             retryState.retryPhase = 'active';
                             retryState.lastRetryTime = Date.now();
                             loadImage(index, true);
@@ -721,11 +721,11 @@ async function startScreensaverCycle() {
                 if (screensaverImages.length > 1) {
                     const nextIndex = (index + 1) % screensaverImages.length;
                     if (nextIndex !== index) {
-                        console.log('Trying next image...');
+                        // console.log('Trying next image...');
                         setTimeout(() => loadImage(nextIndex, true), 2000);
                     } else {
                         // Tried all images, wait and retry
-                        console.log('All images failed. Retrying...');
+                        // console.log('All images failed. Retrying...');
                         setTimeout(() => loadImage(index, true), 3000);
                     }
                 } else {
@@ -1139,7 +1139,7 @@ function createProgressComet() {
     document.body.appendChild(comet);
     elements.progressComet = comet;
     
-    console.log('Progress comet created');
+    // console.log('Progress comet created');
 }
 
 // Update progress comet position and colors
@@ -1510,7 +1510,7 @@ function createSunriseElement() {
     document.body.appendChild(container);
     elements.sunriseContainer = container;
     
-    console.log('Sunrise & Sunset element created');
+    // console.log('Sunrise & Sunset element created');
 }
 
 // Trigger a random shooting star animation
@@ -1893,7 +1893,7 @@ function showSunriseElement() {
         // Start random shooting star spawning
         startShootingStarSpawning();
         
-        console.log('Sunrise element shown');
+        // console.log('Sunrise element shown');
     }
 }
 
@@ -1933,7 +1933,7 @@ function resumeSunrise() {
         sunriseAnimationState.animationFrameId = requestAnimationFrame(animateSunrise);
         // Resume shooting star spawning
         startShootingStarSpawning();
-        console.log('Sunrise animation resumed');
+        // console.log('Sunrise animation resumed');
     }
 }
 
@@ -2105,11 +2105,11 @@ function updateDisplay(trackData) {
         if (isPlaying && !wasPlaying) {
             // Music started playing - request progress updates
             socket.emit('enable_progress');
-            console.log('Music playing - requesting progress updates from server');
+            // console.log('Music playing - requesting progress updates from server');
         } else if (!isPlaying && wasPlaying) {
             // Music paused - stop progress updates
             socket.emit('disable_progress');
-            console.log('Music paused - stopping progress updates from server');
+            // console.log('Music paused - stopping progress updates from server');
         }
     }
     
@@ -2834,7 +2834,7 @@ function rotateDisplay() {
         applyGradientBackground(currentAlbumColors);
     }
     
-    console.log('Display rotated to:', rotationState, 'degrees');
+    // console.log('Display rotated to:', rotationState, 'degrees');
 }
 
 // Restore rotation state from localStorage
@@ -2879,7 +2879,7 @@ function cycleGlowState() {
     const glowIcon = document.getElementById('glow-icon');
     showServiceLabel(EFFECT_NAMES.GLOW[glowState], glowIcon);
     
-    console.log('Glow state changed to:', glowState);
+    // console.log('Glow state changed to:', glowState);
 }
 
 // Apply current glow state to all elements
@@ -3113,7 +3113,7 @@ function cycleProgressEffectState() {
     const progressEffectIcon = document.getElementById('progress-effect-icon');
     showServiceLabel(EFFECT_NAMES.PROGRESS[progressEffectState], progressEffectIcon);
     
-    console.log('Progress effect state changed to:', progressEffectState);
+    // console.log('Progress effect state changed to:', progressEffectState);
 }
 
 // Apply current progress effect state
@@ -3130,11 +3130,11 @@ function applyProgressEffectState() {
         if (progressEffectState !== 'off') {
             // Client needs progress updates
             socket.emit('enable_progress');
-            console.log('📊 Requested progress updates from server');
+            // console.log('📊 Requested progress updates from server');
         } else {
             // Client doesn't need progress updates
             socket.emit('disable_progress');
-            console.log('⏸️  Disabled progress updates from server');
+            // console.log('⏸️  Disabled progress updates from server');
         }
     }
     
@@ -3236,7 +3236,7 @@ function resetAllEffects() {
     localStorage.setItem('progressEffectState', progressEffectState);
     applyProgressEffectState();
     
-    console.log('All effects reset to default state');
+    // console.log('All effects reset to default state');
 }
 
 // Update fullscreen icon state based on fullscreen status
