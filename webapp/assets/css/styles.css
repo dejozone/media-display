@@ -764,20 +764,20 @@ body.rotate-270 .no-playback-state .icon-container {
     animation: catGlow 1.5s ease-in-out infinite;
 }
 
-/* Pause glow animations when music is paused */
-body.music-paused .album-art.glow-all-colors,
-body.music-paused .album-art.glow-all-colors-fast,
-body.music-paused .album-art.glow-album-colors,
-body.music-paused .album-art.glow-album-colors-fast,
-body.music-paused .album-art.glow-white,
-body.music-paused .album-art.glow-white-fast,
-body.music-paused .album-art.bass-white-glow,
-body.music-paused .album-art.bass-color-glow,
-body.music-paused .equalizer-bar,
-body.music-paused .progress-comet::before,
-body.music-paused .progress-comet::after,
-body.music-paused .sunrise-stars .star,
-body.music-paused .shooting-star {
+/* Pause glow animations when music is paused (but NOT in screensaver mode) */
+body.music-paused:not(.no-playback-active) .album-art.glow-all-colors,
+body.music-paused:not(.no-playback-active) .album-art.glow-all-colors-fast,
+body.music-paused:not(.no-playback-active) .album-art.glow-album-colors,
+body.music-paused:not(.no-playback-active) .album-art.glow-album-colors-fast,
+body.music-paused:not(.no-playback-active) .album-art.glow-white,
+body.music-paused:not(.no-playback-active) .album-art.glow-white-fast,
+body.music-paused:not(.no-playback-active) .album-art.bass-white-glow,
+body.music-paused:not(.no-playback-active) .album-art.bass-color-glow,
+body.music-paused:not(.no-playback-active) .equalizer-bar,
+body.music-paused:not(.no-playback-active) .progress-comet::before,
+body.music-paused:not(.no-playback-active) .progress-comet::after,
+body.music-paused:not(.no-playback-active) .sunrise-stars .star,
+body.music-paused:not(.no-playback-active) .shooting-star {
     animation-play-state: paused !important;
 }
 
