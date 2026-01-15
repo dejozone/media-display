@@ -1095,6 +1095,10 @@ body.rotate-270 .app-settings {
     z-index: 1001;
     max-width: 50%;
     text-align: center;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    white-space: normal;
+    box-sizing: border-box;
 }
 
 .service-label.show {
@@ -1425,17 +1429,15 @@ body:not(:has(.playback-status.playing)) .equalizer-bar {
     border: 1px solid rgba(230, 235, 245, 0.6);
 }
 
-/* Spectrum mode - ROYGBIV from left to right (50 bars, 7 colors with blended shades) */
-/* Red shades - bars 1-7 */
+/* Spectrum mode - ROYGBIV from left to right (26 bars, full color spectrum) */
 /* Spectrum equalizer - uses CSS custom properties set via JavaScript */
 .equalizer.equalizer-spectrum .equalizer-bar {
-    --bar-hue: calc(0 + (var(--bar-index, 0) * 270 / 50)); /* Red (0) to Violet (270) */
+    --bar-hue: calc(0 + (var(--bar-index, 0) * 300 / 26)); /* Red (0) to Violet (300) - full ROYGBIV */
     background: linear-gradient(
         to top,
-        hsl(var(--bar-hue), 100%, 35%) 0%,
-        hsl(var(--bar-hue), 100%, 45%) 100%
+        hsla(var(--bar-hue), 100%, 35%, 0.3) 0%,
+        hsla(var(--bar-hue), 100%, 45%, 0.3) 100%
     ) !important;
-    opacity: 0.5;
 }
 
 /* Blue spectrum equalizer - uses CSS custom properties set via JavaScript */
@@ -1443,8 +1445,8 @@ body:not(:has(.playback-status.playing)) .equalizer-bar {
     --bar-lightness: calc(10 + (var(--bar-index, 0) * 50 / 50)); /* Lightness from 10% to 60% */
     background: linear-gradient(
         to top,
-        hsl(240, 100%, calc(var(--bar-lightness) * 1%), 0.5),
-        hsl(240, 100%, calc((var(--bar-lightness) + 5) * 1%), 0.5)
+        hsla(240, 100%, calc(var(--bar-lightness) * 1%), 0.5),
+        hsla(240, 100%, calc((var(--bar-lightness) + 5) * 1%), 0.5)
     ) !important;
 }
 

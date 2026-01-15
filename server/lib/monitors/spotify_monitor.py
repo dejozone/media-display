@@ -6,7 +6,6 @@ import time
 from typing import Optional, Dict, Any
 from lib.monitors.base import BaseMonitor
 from lib.utils.logger import monitor_logger
-from config import Config
 
 class SpotifyMonitor(BaseMonitor):
     """Monitor Spotify playback and broadcast updates"""
@@ -63,8 +62,8 @@ class SpotifyMonitor(BaseMonitor):
         elapsed = current_time - self.api_unreachable_start
         if elapsed > Config.SPOTIFY_DEVICE_RETRY_WINDOW_TIME:
             monitor_logger.error(f"❌ [SPOTIFY] API unreachable for {int(elapsed)}s (exceeded {Config.SPOTIFY_DEVICE_RETRY_WINDOW_TIME}s limit)")
-            monitor_logger.error(f"   Total connection errors: {self.connection_errors}")
-            monitor_logger.error(f"   Marking service as unhealthy for recovery")
+            monitor_logger.error(f"Total connection errors: {self.connection_errors}")
+            monitor_logger.error(f"Marking service as unhealthy for recovery")
             self.is_ready = False
             self.needs_reconnection = False
         else:
@@ -148,7 +147,12 @@ class SpotifyMonitor(BaseMonitor):
                                 monitor_logger.info("✅ [SPOTIFY] API reconnection successful, resuming normal operation")
                             else:
                                 # Still failing
-                                monitor_logger.warning("⚠️  [SPOTIFY] Reconnection attempt failed, will retry...")
+                                remaining = Config.SPOTIFY_DEVICE_RETRY_WINDOW_TIME - elapsed
+                                if remaining <= 60:
+                                    time_str = f"{int(remaining)}s"
+                                else:
+                                    time_str = f"{remaining / 60:.1f}min"
+                                monitor_logger.warning(f"⚠️  [SPOTIFY] Reconnection attempt failed, will retry... (timeout in {time_str})")
                         else:
                             # Exceeded retry window, mark as failed
                             self._handle_connection_error(Exception("Retry window exceeded"))
@@ -243,8 +247,8 @@ class SpotifyMonitor(BaseMonitor):
                                 monitor_logger.info(f"📊 [SPOTIFY] Device changed - user switched to Spotify on {new_device}")
                             # else:
                             #     monitor_logger.info(f"📊 [SPOTIFY] Different track detected - user switched to Spotify playback")
-                            # monitor_logger.debug(f"   Previous: {current_track_data.get('track_name')} on {current_device}")
-                            monitor_logger.info(f"Now playing on {new_device}")
+                            # monitor_logger.debug(f"Previous: {current_track_data.get('track_name')} on {current_device}")
+                            # monitor_logger.info(f"Now playing on {new_device}")
                     
                     # Determine if we should update
                     major_change = (
@@ -294,7 +298,7 @@ class SpotifyMonitor(BaseMonitor):
                             current_source = current_track_data.get('source', 'none').upper() if current_track_data else 'NONE'
                             current_priority = current_track_data.get('source_priority', 'N/A') if current_track_data else 'N/A'
                             monitor_logger.info(f"📊 [SPOTIFY] Taking control from {current_source} (priority {current_priority})")
-                            monitor_logger.debug(f"   Reason: major_change={major_change}, can_take_over={can_take_over}, staleness={time_since_last_update:.1f}s")
+                            monitor_logger.debug(f"Reason: major_change={major_change}, can_take_over={can_take_over}, staleness={time_since_last_update:.1f}s")
                         
                         self.app_state.update_track_data(track_data)
                         

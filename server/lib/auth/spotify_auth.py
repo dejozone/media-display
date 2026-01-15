@@ -139,7 +139,7 @@ class SpotifyAuthWithServer:
                 else:
                     auth_logger.error(f"✗ Error starting callback server: {e}")
                     if 'Address already in use' in str(e):
-                        auth_logger.error(f"  Port {port} is already in use.")
+                        auth_logger.error(f"Port {port} is already in use.")
                     raise
         
     def get_spotify_client(self):
