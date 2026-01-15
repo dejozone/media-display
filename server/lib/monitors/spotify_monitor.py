@@ -6,7 +6,6 @@ import time
 from typing import Optional, Dict, Any
 from lib.monitors.base import BaseMonitor
 from lib.utils.logger import monitor_logger
-from config import Config
 
 class SpotifyMonitor(BaseMonitor):
     """Monitor Spotify playback and broadcast updates"""
