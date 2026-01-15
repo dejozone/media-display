@@ -22,7 +22,7 @@ from lib.app_state import AppState
 from lib.monitors.spotify_monitor import SpotifyMonitor
 from lib.monitors.sonos_monitor import SonosMonitor, SONOS_AVAILABLE
 from lib.auth.spotify_auth import SpotifyAuthWithServer
-from lib.utils.network import get_local_ip
+# from lib.utils.network import get_local_ip
 from lib.utils.logger import server_logger
 
 # Configure SSL verification for Spotify API (from Config)
@@ -514,10 +514,10 @@ def main() -> int:
         server_logger.info("WebSocket endpoints:")
         
         # Show all accessible endpoints
-        local_ips = get_local_ip()
-        for ip in local_ips:
-            protocol = 'wss' if ip.startswith('127.') or ip == 'localhost' else 'ws'
-            server_logger.info(f"{protocol}://{ip}:{port}/")
+        # local_ips = get_local_ip()
+        # for ip in local_ips:
+        #     protocol = 'wss' if ip.startswith('127.') or ip == 'localhost' else 'ws'
+        #     server_logger.info(f"{protocol}://{ip}:{port}/")
         
         server_logger.info("Press Ctrl+C to stop")
         
