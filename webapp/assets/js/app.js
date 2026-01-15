@@ -2554,7 +2554,7 @@ function setupServiceIconHandlers() {
         }
     };
     
-    // Touch handling for dock toggle
+    // Touch handling for dock toggle and swipe gestures
     let touchHandled = false;
     let touchStartX = 0, touchStartY = 0, touchStartTime = 0;
     
@@ -2567,10 +2567,32 @@ function setupServiceIconHandlers() {
     
     document.body.addEventListener('touchend', (e) => {
         const touch = e.changedTouches[0];
-        const deltaX = Math.abs(touch.clientX - touchStartX);
-        const deltaY = Math.abs(touch.clientY - touchStartY);
+        const deltaX = touch.clientX - touchStartX;
+        const deltaY = touch.clientY - touchStartY;
+        const absDeltaX = Math.abs(deltaX);
+        const absDeltaY = Math.abs(deltaY);
         const duration = Date.now() - touchStartTime;
-        const isTap = deltaX < 10 && deltaY < 10 && duration < 300;
+        const isTap = absDeltaX < 10 && absDeltaY < 10 && duration < 300;
+        
+        // Check for swipe right gesture
+        const isSwipeRight = !isTap && deltaX > 100 && absDeltaX > absDeltaY * 2 && duration < 500;
+        
+        if (isSwipeRight) {
+            cycleEqualizerState();
+            touchHandled = true;
+            setTimeout(() => { touchHandled = false; }, 500);
+            return;
+        }
+        
+        // Check for swipe left gesture
+        const isSwipeLeft = !isTap && deltaX < -100 && absDeltaX > absDeltaY * 2 && duration < 500;
+        
+        if (isSwipeLeft) {
+            cycleProgressEffectState();
+            touchHandled = true;
+            setTimeout(() => { touchHandled = false; }, 500);
+            return;
+        }
         
         if (!isTap) return;
         
@@ -2605,6 +2627,50 @@ function setupServiceIconHandlers() {
         }
         
         appSettings.classList.contains('expanded') ? dockTimer.collapse() : dockTimer.expand();
+    });
+    
+    // Mouse swipe handling for equalizer cycling
+    let mouseDown = false;
+    let mouseStartX = 0, mouseStartY = 0, mouseStartTime = 0;
+    
+    document.body.addEventListener('mousedown', (e) => {
+        mouseDown = true;
+        mouseStartX = e.clientX;
+        mouseStartY = e.clientY;
+        mouseStartTime = Date.now();
+    });
+    
+    document.body.addEventListener('mouseup', (e) => {
+        if (!mouseDown) return;
+        
+        const deltaX = e.clientX - mouseStartX;
+        const deltaY = e.clientY - mouseStartY;
+        const absDeltaX = Math.abs(deltaX);
+        const absDeltaY = Math.abs(deltaY);
+        const duration = Date.now() - mouseStartTime;
+        
+        mouseDown = false;
+        
+        // Check for swipe right gesture with mouse
+        const isSwipeRight = deltaX > 100 && absDeltaX > absDeltaY * 2 && duration < 500;
+        
+        if (isSwipeRight) {
+            cycleEqualizerState();
+            e.preventDefault();
+            return;
+        }
+        
+        // Check for swipe left gesture with mouse
+        const isSwipeLeft = deltaX < -100 && absDeltaX > absDeltaY * 2 && duration < 500;
+        
+        if (isSwipeLeft) {
+            cycleProgressEffectState();
+            e.preventDefault();
+        }
+    });
+    
+    document.body.addEventListener('mouseleave', () => {
+        mouseDown = false;
     });
     
     // Prevent label from closing itself
