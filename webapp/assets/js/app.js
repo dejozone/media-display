@@ -2578,7 +2578,10 @@ function setupServiceIconHandlers() {
         const isSwipeRight = !isTap && deltaX > 100 && absDeltaX > absDeltaY * 2 && duration < 500;
         
         if (isSwipeRight) {
-            cycleEqualizerState();
+            // Don't allow effect changes in screensaver mode
+            if (!document.body.classList.contains('no-playback-active')) {
+                cycleEqualizerState();
+            }
             touchHandled = true;
             setTimeout(() => { touchHandled = false; }, 500);
             return;
@@ -2588,7 +2591,10 @@ function setupServiceIconHandlers() {
         const isSwipeLeft = !isTap && deltaX < -100 && absDeltaX > absDeltaY * 2 && duration < 500;
         
         if (isSwipeLeft) {
-            cycleProgressEffectState();
+            // Don't allow effect changes in screensaver mode
+            if (!document.body.classList.contains('no-playback-active')) {
+                cycleProgressEffectState();
+            }
             touchHandled = true;
             setTimeout(() => { touchHandled = false; }, 500);
             return;
@@ -2655,7 +2661,10 @@ function setupServiceIconHandlers() {
         const isSwipeRight = deltaX > 100 && absDeltaX > absDeltaY * 2 && duration < 500;
         
         if (isSwipeRight) {
-            cycleEqualizerState();
+            // Don't allow effect changes in screensaver mode
+            if (!document.body.classList.contains('no-playback-active')) {
+                cycleEqualizerState();
+            }
             e.preventDefault();
             return;
         }
@@ -2664,7 +2673,10 @@ function setupServiceIconHandlers() {
         const isSwipeLeft = deltaX < -100 && absDeltaX > absDeltaY * 2 && duration < 500;
         
         if (isSwipeLeft) {
-            cycleProgressEffectState();
+            // Don't allow effect changes in screensaver mode
+            if (!document.body.classList.contains('no-playback-active')) {
+                cycleProgressEffectState();
+            }
             e.preventDefault();
         }
     });
