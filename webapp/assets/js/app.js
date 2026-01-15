@@ -1411,18 +1411,25 @@ function showProgressComet() {
     }
     
     if (elements.progressComet) {
-        // Update position BEFORE making visible to avoid visual jump
+        // Always update position to show current state (even when paused)
         updateProgressComet();
         
+        // Make element visible
         elements.progressComet.classList.remove('hidden');
         
-        // Start animation loop if playing
-        if (progressState.isPlaying) {
+        // Start animation loop ONLY if playing AND has valid duration data
+        if (progressState.isPlaying && progressState.durationMs > 0) {
             if (progressState.animationFrameId) {
                 cancelAnimationFrame(progressState.animationFrameId);
             }
             progressState.lastUpdateTime = Date.now();
             progressState.animationFrameId = requestAnimationFrame(animateProgressComet);
+        } else {
+            // Ensure animation is stopped when paused or no duration
+            if (progressState.animationFrameId) {
+                cancelAnimationFrame(progressState.animationFrameId);
+                progressState.animationFrameId = null;
+            }
         }
     }
 }
@@ -1876,22 +1883,31 @@ function showSunriseElement() {
     }
     
     if (elements.sunriseContainer) {
-        // Update position BEFORE making visible to avoid visual jump
+        // Always update position to show current state (even when paused)
         updateSunriseElement();
         
+        // Make element visible
         elements.sunriseContainer.classList.remove('hidden');
         
-        // Start animation loop if playing
-        if (progressState.isPlaying) {
+        // Start animation loop ONLY if playing AND has valid duration data
+        if (progressState.isPlaying && progressState.durationMs > 0) {
             if (sunriseAnimationState.animationFrameId) {
                 cancelAnimationFrame(sunriseAnimationState.animationFrameId);
             }
             sunriseAnimationState.lastUpdateTime = Date.now();
             sunriseAnimationState.animationFrameId = requestAnimationFrame(animateSunrise);
+            
+            // Start random shooting star spawning (only when playing)
+            startShootingStarSpawning();
+        } else {
+            // Ensure animation is stopped when paused or no duration
+            if (sunriseAnimationState.animationFrameId) {
+                cancelAnimationFrame(sunriseAnimationState.animationFrameId);
+                sunriseAnimationState.animationFrameId = null;
+            }
+            // Stop shooting stars when paused
+            stopShootingStarSpawning();
         }
-        
-        // Start random shooting star spawning
-        startShootingStarSpawning();
         
         // console.log('Sunrise element shown');
     }
@@ -2058,6 +2074,7 @@ function updateDisplay(trackData) {
         if (hasReceivedTrackData) {
             // We had music before, treat null as "paused" - wait 5 minutes before screensaver
             isPlaying = false;
+            progressState.isPlaying = false; // CRITICAL: Update progressState too!
             document.body.classList.add('music-paused');
             
             // Pause (not hide) effects
@@ -2121,9 +2138,12 @@ function updateDisplay(trackData) {
         progressState.isPlaying = trackData.is_playing;
         progressState.lastUpdateTime = Date.now();
         
-        // Update comet and sunrise position
-        updateProgressComet();
-        updateSunriseElement();
+        // Update comet and sunrise position only when playing
+        // When paused, don't update to avoid visual movement
+        if (trackData.is_playing) {
+            updateProgressComet();
+            updateSunriseElement();
+        }
         
         // Handle play/pause state changes
         if (trackData.is_playing && !wasProgressPlaying) {
@@ -3125,24 +3145,36 @@ function applyProgressEffectState() {
     // Remove all effect classes
     progressEffectIcon.classList.remove('effect-comet', 'effect-album-comet', 'effect-across-comet', 'effect-sunrise', 'effect-blended-sunrise', 'effect-equalizer-fill');
     
+    // Stop all animations first to ensure clean state
+    if (progressState.animationFrameId) {
+        cancelAnimationFrame(progressState.animationFrameId);
+        progressState.animationFrameId = null;
+    }
+    if (sunriseAnimationState.animationFrameId) {
+        cancelAnimationFrame(sunriseAnimationState.animationFrameId);
+        sunriseAnimationState.animationFrameId = null;
+    }
+    stopShootingStarSpawning();
+    
     // Notify server about progress needs
     if (socket && socket.connected) {
-        if (progressEffectState !== 'off') {
-            // Client needs progress updates
+        if (progressEffectState !== 'off' && isPlaying) {
+            // Client needs progress updates (only when playing)
             socket.emit('enable_progress');
             // console.log('📊 Requested progress updates from server');
-        } else {
-            // Client doesn't need progress updates
+        } else if (progressEffectState === 'off') {
+            // Effect turned off - disable progress updates
             socket.emit('disable_progress');
             // console.log('⏸️  Disabled progress updates from server');
         }
+        // Note: When paused with effect on, don't send anything - let server continue
     }
     
     // Apply current state
     if (progressEffectState === 'comet') {
         progressEffectIcon.classList.add('effect-comet');
         // Show comet if there's valid progress data
-        if (progressState.durationMs > 0 && isPlaying) {
+        if (progressState.durationMs > 0) {
             showProgressComet();
         }
         // Hide sunrise
@@ -3152,7 +3184,7 @@ function applyProgressEffectState() {
     } else if (progressEffectState === 'album-comet') {
         progressEffectIcon.classList.add('effect-album-comet');
         // Show comet if there's valid progress data
-        if (progressState.durationMs > 0 && isPlaying) {
+        if (progressState.durationMs > 0) {
             showProgressComet();
         }
         // Hide sunrise
@@ -3162,7 +3194,7 @@ function applyProgressEffectState() {
     } else if (progressEffectState === 'across-comet') {
         progressEffectIcon.classList.add('effect-across-comet');
         // Show comet if there's valid progress data
-        if (progressState.durationMs > 0 && isPlaying) {
+        if (progressState.durationMs > 0) {
             showProgressComet();
         }
         // Hide sunrise
@@ -3174,7 +3206,7 @@ function applyProgressEffectState() {
         // Hide comet
         hideProgressComet();
         // Show sunrise if there's valid progress data
-        if (progressState.durationMs > 0 && isPlaying) {
+        if (progressState.durationMs > 0) {
             showSunriseElement();
         }
         // Turn off equalizer fill
@@ -3184,7 +3216,7 @@ function applyProgressEffectState() {
         // Hide comet
         hideProgressComet();
         // Show sunrise if there's valid progress data
-        if (progressState.durationMs > 0 && isPlaying) {
+        if (progressState.durationMs > 0) {
             showSunriseElement();
         }
         // Turn off equalizer fill

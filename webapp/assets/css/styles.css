@@ -773,7 +773,11 @@ body.music-paused .album-art.glow-white,
 body.music-paused .album-art.glow-white-fast,
 body.music-paused .album-art.bass-white-glow,
 body.music-paused .album-art.bass-color-glow,
-body.music-paused .equalizer-bar {
+body.music-paused .equalizer-bar,
+body.music-paused .progress-comet::before,
+body.music-paused .progress-comet::after,
+body.music-paused .sunrise-stars .star,
+body.music-paused .shooting-star {
     animation-play-state: paused !important;
 }
 
