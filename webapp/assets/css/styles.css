@@ -1095,6 +1095,10 @@ body.rotate-270 .app-settings {
     z-index: 1001;
     max-width: 50%;
     text-align: center;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    white-space: normal;
+    box-sizing: border-box;
 }
 
 .service-label.show {
