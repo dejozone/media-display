@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
 Configuration Management
-Loads and manages all application settings from environment variables
+Loads application settings from environment variables (.env) and JSON config files (conf/{ENV}.json)
 """
 import os
+import json
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -23,26 +24,45 @@ elif ROOT_ENV_FILE.exists():
 else:
     print(f"⚠️  No .env file found at: {SERVER_ENV_FILE} or {ROOT_ENV_FILE}")
 
+# Load JSON configuration based on ENV
+ENV = os.getenv('ENV', 'dev')
+CONF_DIR = SERVER_DIR / 'conf'
+CONF_FILE = CONF_DIR / f'{ENV}.json'
+
+if not CONF_FILE.exists():
+    raise FileNotFoundError(f"Configuration file not found: {CONF_FILE}")
+
+with open(CONF_FILE, 'r') as f:
+    CONFIG = json.load(f)
+    print(f"✅ Loaded configuration from: {CONF_FILE}")
+
 
 class Config:
-    """Application configuration"""
+    """Application configuration - combines environment variables (.env) and JSON config (conf/{ENV}.json)"""
     
     # =============================================================================
-    # SERVER SETTINGS
+    # ENVIRONMENT
     # =============================================================================
-    HOST = os.getenv('HOST', '0.0.0.0')
-    PORT = int(os.getenv('PORT', 5001))
-    DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
-    SECRET_KEY = os.getenv('SECRET_KEY', os.urandom(32).hex())
+    ENV = ENV
     
     # =============================================================================
-    # DATABASE SETTINGS
+    # SERVER SETTINGS (from JSON config)
     # =============================================================================
-    POSTGRES_USER = os.getenv('POSTGRES_USER', 'nowplaying')
-    POSTGRES_PASSWORD = os.getenv('POSTGRES_PASSWORD', 'nowplaying_dev_password')
-    POSTGRES_DB = os.getenv('POSTGRES_DB', 'nowplaying')
-    POSTGRES_HOST = os.getenv('POSTGRES_HOST', 'localhost')
-    POSTGRES_PORT = int(os.getenv('POSTGRES_PORT', 5432))
+    HOST = CONFIG['server']['host']
+    PORT = CONFIG['server']['port']
+    DEBUG = CONFIG['server']['debug']
+    SECRET_KEY = os.getenv('SECRET_KEY', os.urandom(32).hex())  # from .env
+    
+    # =============================================================================
+    # DATABASE SETTINGS (combined from JSON config and .env)
+    # =============================================================================
+    POSTGRES_HOST = CONFIG['database']['host']
+    POSTGRES_PORT = CONFIG['database']['port']
+    POSTGRES_DB = CONFIG['database']['name']
+    POSTGRES_USER = CONFIG['database']['user']
+    POSTGRES_PASSWORD = os.getenv('POSTGRES_PASSWORD', 'change_me')  # from .env (secure)
+    DB_POOL_MIN_CONN = CONFIG['database']['poolMinConn']
+    DB_POOL_MAX_CONN = CONFIG['database']['poolMaxConn']
     
     # Construct DATABASE_URL
     DATABASE_URL = os.getenv(
@@ -51,73 +71,66 @@ class Config:
     )
     
     # =============================================================================
-    # CORS SETTINGS
+    # CORS SETTINGS (from JSON config)
     # =============================================================================
-    CORS_ORIGINS = os.getenv('CORS_ORIGINS', 'http://localhost:3000,http://localhost:5001').split(',')
+    CORS_ORIGINS = CONFIG['cors']['origins']
     
     # =============================================================================
-    # WEBSOCKET SETTINGS
+    # WEBSOCKET SETTINGS (from JSON config)
     # =============================================================================
-    WEBSOCKET_PATH = os.getenv('WEBSOCKET_PATH', '/ws/socket.io')
-    WEBSOCKET_CORS_ALLOWED_ORIGINS = CORS_ORIGINS
+    WEBSOCKET_PATH = CONFIG['websocket']['path']
+    WEBSOCKET_ASYNC_MODE = CONFIG['websocket']['asyncMode']
+    WEBSOCKET_CORS_ALLOWED_ORIGINS = CONFIG['websocket']['corsAllowedOrigins']
     
     # =============================================================================
-    # GOOGLE OAUTH SETTINGS
+    # GOOGLE OAUTH SETTINGS (combined from JSON config and .env)
     # =============================================================================
-    GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID')
-    GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET')
-    GOOGLE_REDIRECT_URI = os.getenv(
-        'GOOGLE_REDIRECT_URI',
-        f'http://{HOST}:{PORT}/auth/google/callback'
-    )
+    GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID')  # from .env (secure)
+    GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET')  # from .env (secure)
+    GOOGLE_REDIRECT_URI = CONFIG['google']['redirectUri']
     
     # =============================================================================
-    # SPOTIFY OAUTH SETTINGS
+    # SPOTIFY OAUTH SETTINGS (combined from JSON config and .env)
     # =============================================================================
-    SPOTIFY_CLIENT_ID = os.getenv('SPOTIFY_CLIENT_ID')
-    SPOTIFY_CLIENT_SECRET = os.getenv('SPOTIFY_CLIENT_SECRET')
-    SPOTIFY_REDIRECT_URI = os.getenv(
-        'SPOTIFY_REDIRECT_URI',
-        f'http://{HOST}:{PORT}/auth/spotify/callback'
-    )
-    SPOTIFY_SCOPE = os.getenv(
-        'SPOTIFY_SCOPE',
-        'user-read-currently-playing user-read-playback-state user-read-email user-read-private'
-    )
+    SPOTIFY_CLIENT_ID = os.getenv('SPOTIFY_CLIENT_ID')  # from .env (secure)
+    SPOTIFY_CLIENT_SECRET = os.getenv('SPOTIFY_CLIENT_SECRET')  # from .env (secure)
+    SPOTIFY_REDIRECT_URI = CONFIG['spotify']['redirectUri']
+    SPOTIFY_SCOPE = CONFIG['spotify']['scope']
     
     # =============================================================================
-    # JWT SETTINGS
+    # JWT SETTINGS (combined from JSON config and .env)
     # =============================================================================
-    JWT_SECRET = os.getenv('JWT_SECRET', SECRET_KEY)
-    JWT_ALGORITHM = 'HS256'
-    JWT_EXPIRATION_HOURS = int(os.getenv('JWT_EXPIRATION_HOURS', 24))
+    JWT_SECRET = os.getenv('JWT_SECRET', SECRET_KEY)  # from .env (secure)
+    JWT_ALGORITHM = CONFIG['jwt']['algorithm']
+    JWT_EXPIRATION_HOURS = CONFIG['jwt']['expirationHours']
     
     # =============================================================================
-    # SESSION SETTINGS
+    # SESSION SETTINGS (from JSON config)
     # =============================================================================
-    SESSION_TIMEOUT_MINUTES = int(os.getenv('SESSION_TIMEOUT_MINUTES', 30))
+    SESSION_TIMEOUT_MINUTES = CONFIG['session']['timeoutMinutes']
     
     # =============================================================================
-    # RATE LIMITING
+    # RATE LIMITING (from JSON config)
     # =============================================================================
-    RATE_LIMIT_SPOTIFY_API = int(os.getenv('RATE_LIMIT_SPOTIFY_API', 100))  # calls per minute per user
+    RATE_LIMIT_SPOTIFY_API = CONFIG['rateLimit']['spotifyApiCallsPerMinute']
     
     # =============================================================================
-    # LOGGING
+    # LOGGING (from JSON config)
     # =============================================================================
-    LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
-    LOG_FORMAT = os.getenv('LOG_FORMAT', 'detailed')  # 'simple' or 'detailed'
+    LOG_LEVEL = CONFIG['logging']['level']
+    LOG_FORMAT = CONFIG['logging']['format']
     
     # =============================================================================
-    # SSL/TLS
+    # SSL/TLS (from JSON config)
     # =============================================================================
-    SSL_VERIFY = os.getenv('SSL_VERIFY', 'True').lower() == 'true'
+    SSL_VERIFY = CONFIG['ssl']['verify']
     
     # =============================================================================
     # PATHS
     # =============================================================================
     SERVER_DIR = SERVER_DIR
     ROOT_DIR = ROOT_DIR
+    CONF_DIR = CONF_DIR
     
     @classmethod
     def validate(cls):
@@ -148,12 +161,15 @@ class Config:
         print("\n" + "=" * 60)
         print("APPLICATION CONFIGURATION")
         print("=" * 60)
-        print(f"Environment:        {'Development' if cls.DEBUG else 'Production'}")
+        print(f"Environment:        {cls.ENV} ({'Development' if cls.DEBUG else 'Production'})")
+        print(f"Config File:        {CONF_FILE}")
         print(f"Server:             {cls.HOST}:{cls.PORT}")
         print(f"Database:           {cls.POSTGRES_HOST}:{cls.POSTGRES_PORT}/{cls.POSTGRES_DB}")
         print(f"Database User:      {cls.POSTGRES_USER}")
+        print(f"DB Pool:            {cls.DB_POOL_MIN_CONN}-{cls.DB_POOL_MAX_CONN} connections")
         print(f"CORS Origins:       {', '.join(cls.CORS_ORIGINS)}")
         print(f"WebSocket Path:     {cls.WEBSOCKET_PATH}")
+        print(f"WebSocket Mode:     {cls.WEBSOCKET_ASYNC_MODE}")
         print(f"JWT Expiration:     {cls.JWT_EXPIRATION_HOURS} hours")
         print(f"Session Timeout:    {cls.SESSION_TIMEOUT_MINUTES} minutes")
         print(f"Log Level:          {cls.LOG_LEVEL}")

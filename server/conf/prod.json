@@ -1,0 +1,49 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 5000,
+    "debug": false
+  },
+  "database": {
+    "host": "localhost",
+    "port": 5432,
+    "name": "nowplaying",
+    "user": "nowplaying",
+    "poolMinConn": 5,
+    "poolMaxConn": 20
+  },
+  "google": {
+    "redirectUri": "https://yourdomain.com/auth/google/callback"
+  },
+  "spotify": {
+    "redirectUri": "https://yourdomain.com/auth/spotify/callback",
+    "scope": "user-read-currently-playing user-read-playback-state user-read-email user-read-private"
+  },
+  "cors": {
+    "origins": [
+      "https://yourdomain.com"
+    ]
+  },
+  "jwt": {
+    "algorithm": "HS256",
+    "expirationHours": 24
+  },
+  "session": {
+    "timeoutMinutes": 60
+  },
+  "rateLimit": {
+    "spotifyApiCallsPerMinute": 100
+  },
+  "logging": {
+    "level": "INFO",
+    "format": "detailed"
+  },
+  "websocket": {
+    "path": "/ws/socket.io",
+    "asyncMode": "eventlet",
+    "corsAllowedOrigins": "https://yourdomain.com"
+  },
+  "ssl": {
+    "verify": true
+  }
+}
