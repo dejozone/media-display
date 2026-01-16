@@ -6,7 +6,7 @@ services:
     container_name: nowplaying-db
     restart: unless-stopped
     env_file:
-      - ../.env  # Load environment variables from root .env file
+      - .env  # Load environment variables from docker/.env file
     environment:
       POSTGRES_DB: nowplaying
       POSTGRES_USER: ${POSTGRES_USER:-nowplaying}
@@ -37,7 +37,7 @@ services:
     container_name: nowplaying-pgadmin
     restart: unless-stopped
     env_file:
-      - ../.env  # Load environment variables from root .env file
+      - .env  # Load environment variables from docker/.env file
     environment:
       PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@nowplaying.local}
       PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}

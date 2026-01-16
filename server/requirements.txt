@@ -1,0 +1,32 @@
+# =============================================================================
+# Now Playing Server - Python Dependencies
+# =============================================================================
+
+# Core Web Framework
+Flask==3.1.2
+Flask-SocketIO==5.6.0
+Flask-CORS==6.0.2
+
+# WebSocket Support
+python-socketio==5.16.0
+eventlet==0.40.4
+
+# Database
+psycopg2-binary==2.9.11
+
+# Authentication & Security
+PyJWT==2.10.1
+requests==2.32.5
+
+# Environment & Configuration
+python-dotenv==1.2.1
+
+# Utilities
+python-dateutil==2.9.0.post0
+
+# Development Dependencies (optional - install with: pip install -r requirements-dev.txt)
+# pytest==7.4.3
+# pytest-cov==4.1.0
+# black==23.12.1
+# flake8==7.0.0
+# mypy==1.8.0

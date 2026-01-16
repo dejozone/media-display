@@ -52,10 +52,10 @@ If you set `INIT_SCHEMA=false` in `.env`:
 ```
 media-display/
 ├── old/                    # Legacy code (preserved)
-├── .env                    # Environment configuration (root level)
-├── .env.example            # Environment template
 ├── docker/                 # Docker configs & scripts
 │   ├── docker-compose.yml
+│   ├── .env                # Docker environment config
+│   ├── .env.example        # Docker config template
 │   ├── start.sh           # Start services
 │   ├── stop.sh            # Stop services
 │   ├── init-schema.sh     # Initialize schema
@@ -64,6 +64,9 @@ media-display/
 ├── database/
 │   └── schema.sql         # Database schema
 ├── server/                # Backend (coming next)
+│   ├── .env               # Server environment config
+│   ├── .env.example       # Server config template
+│   └── ...
 ├── client/                # Frontend (coming next)
 └── README.md
 ```
@@ -142,10 +145,14 @@ Access at: http://localhost:5050
 
 ## 🔧 Configuration
 
-Environment variables in `.env` (root directory):
+### Environment Files (All Gitignored)
 
+**1. Docker Environment** (`docker/.env`):
 ```bash
-# Database
+# Copy from template
+cp docker/.env.example docker/.env
+
+# Database credentials
 POSTGRES_USER=nowplaying
 POSTGRES_PASSWORD=nowplaying_dev_password
 POSTGRES_DB=nowplaying
@@ -157,6 +164,22 @@ INIT_SCHEMA=true
 PGADMIN_EMAIL=admin@nowplaying.local
 PGADMIN_PASSWORD=admin
 ```
+
+**2. Server Environment** (`server/.env`):
+```bash
+# Copy from template
+cp server/.env.example server/.env
+
+# Edit server/.env with your values:
+# - OAuth credentials (Google, Spotify)
+# - Database connection (should match docker/.env)
+# - Server settings (host, port, debug)
+# - Logging levels
+```
+
+**Note:** Each component has its own `.env` file for complete independence:
+- `docker/.env` - PostgreSQL and Docker services
+- `server/.env` - Python backend application
 
 ## 📚 Documentation
 
