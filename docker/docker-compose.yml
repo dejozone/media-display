@@ -1,0 +1,64 @@
+name: nowplaying
+
+services:
+  postgres:
+    image: postgres:18.1-alpine
+    container_name: nowplaying-db
+    restart: unless-stopped
+    env_file:
+      - ../.env  # Load environment variables from root .env file
+    environment:
+      POSTGRES_DB: nowplaying
+      POSTGRES_USER: ${POSTGRES_USER:-nowplaying}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nowplaying_dev_password}
+      # Optional: Initialize with schema on first run
+      # Set INIT_SCHEMA=true to auto-load schema.sql
+      INIT_SCHEMA: ${INIT_SCHEMA:-false}
+    ports:
+      - "5432:5432"
+    volumes:
+      # Persist database data
+      - postgres_data:/var/lib/postgresql/data
+      # Mount schema file (optional init)
+      - ../database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      # Mount initialization script
+      - ./init-db.sh:/docker-entrypoint-initdb.d/00-init.sh:ro
+    networks:
+      - nowplaying-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nowplaying} -d nowplaying"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Optional: pgAdmin for database management
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: nowplaying-pgadmin
+    restart: unless-stopped
+    env_file:
+      - ../.env  # Load environment variables from root .env file
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@nowplaying.local}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - nowplaying-network
+    depends_on:
+      - postgres
+    profiles:
+      - tools  # Only start with: docker-compose --profile tools up
+
+volumes:
+  postgres_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+
+networks:
+  nowplaying-network:
+    driver: bridge
