@@ -705,6 +705,13 @@ async function startScreensaverCycle() {
                 elements.screensaverImage.style.opacity = '1';
                 retryState.currentImageLoaded = true;
                 // console.log(`✓ Successfully loaded: ${imageSrc}`);
+                
+                // Extract colors from screensaver image and apply to background (same as album art)
+                extractColors(elements.screensaverImage, (colors) => {
+                    applyGradientBackground(colors);
+                    applyGlowColors(elements.screensaverImage, colors);
+                });
+                
                 // Remove handlers after use
                 elements.screensaverImage.removeEventListener('load', handleLoad);
                 elements.screensaverImage.removeEventListener('error', handleError);

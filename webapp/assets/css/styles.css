@@ -71,7 +71,7 @@ body.rotate-270 {
 
 body.no-playback-active {
     --bg-angle: 135deg;
-    animation: backgroundCycle var(--duration-slow) ease-in-out infinite;
+    /* Animation removed - background colors now extracted from screensaver images */
 }
 
 /* Rotation-specific background animations for screensaver mode */
@@ -87,6 +87,7 @@ body.no-playback-active.rotate-270 {
     --bg-angle: 225deg;
 }
 
+/* Background cycle animation removed - now using image-extracted colors
 @keyframes backgroundCycle {
     0% { background: linear-gradient(var(--bg-angle, 135deg), #4a1942, #1f0a1f, #3d1f47); }
     14% { background: linear-gradient(var(--bg-angle, 135deg), #4a1f0a, #1f0a00, #3d2a1f); }
@@ -97,6 +98,7 @@ body.no-playback-active.rotate-270 {
     84% { background: linear-gradient(var(--bg-angle, 135deg), #4a0a2a, #1f000f, #3d1f2f); }
     100% { background: linear-gradient(var(--bg-angle, 135deg), #4a1942, #1f0a1f, #3d1f47); }
 }
+*/
 
 body::before {
     content: '';
