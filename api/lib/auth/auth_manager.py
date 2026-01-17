@@ -210,6 +210,29 @@ class AuthManager:
             (str(user_id), provider, provider_id, avatar_url, is_selected),
         )
 
+    def _reassign_spotify_identity(self, old_user_id: str, new_user_id: str, spotify_id: str, avatar_url: Optional[str]) -> None:
+        # Move identity and tokens to the new user, then remove the old user record
+        self._execute(
+            """
+            UPDATE identities
+            SET user_id = %s, avatar_url = COALESCE(%s, avatar_url), is_selected = TRUE
+            WHERE provider = 'spotify' AND provider_id = %s
+            """,
+            (str(new_user_id), avatar_url, spotify_id),
+        )
+        self._execute(
+            """
+            UPDATE spotify_tokens
+            SET user_id = %s
+            WHERE user_id = %s
+            """,
+            (str(new_user_id), str(old_user_id)),
+        )
+        # Deselect other identities for the new user and select this spotify identity
+        self._select_identity(str(new_user_id), 'spotify', spotify_id)
+        # Remove old user row now that associations are moved
+        self._execute("DELETE FROM users WHERE id = %s", (str(old_user_id),))
+
     def _select_identity(self, user_id: str, provider: str, provider_id: str) -> None:
         # Select the given identity for the user and deselect others
         self._execute(
@@ -359,10 +382,15 @@ class AuthManager:
                     logger.error(f"Spotify login failed: link_user_id {link_user_id} not found")
                     return None
                 if identity and identity['user_id'] != user['id']:
-                    logger.error(
-                        "Spotify login failed: spotify identity already linked to different user"
+                    old_user_id = identity['user_id']
+                    logger.warning(
+                        "Reassigning spotify identity %s from user %s to user %s",
+                        spotify_id,
+                        old_user_id,
+                        user['id'],
                     )
-                    return None
+                    self._reassign_spotify_identity(old_user_id, user['id'], spotify_id, avatar_url)
+                    identity = {'user_id': user['id'], 'provider': 'spotify', 'provider_id': spotify_id}
             else:
                 if identity:
                     user = self._get_user_by_id(identity['user_id'])
