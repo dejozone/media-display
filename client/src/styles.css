@@ -122,11 +122,15 @@ button:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
 .eyebrow { font-size: 12px; letter-spacing: 0.6px; text-transform: uppercase; color: #9fb1d0; }
 .pill { padding: 6px 10px; border-radius: 999px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); font-size: 12px; }
 .np-body { display: flex; gap: 14px; margin-top: 16px; align-items: center; }
-.artwork.placeholder { width: 72px; height: 72px; border-radius: 12px; background: linear-gradient(135deg, #24324f, #1a2338); opacity: 0.7; }
+.artwork { width: 72px; height: 72px; border-radius: 12px; background-size: cover; background-position: center; background-color: #1a2338; }
+.artwork.placeholder { background: linear-gradient(135deg, #24324f, #1a2338); opacity: 0.7; }
 .meta { flex: 1; display: grid; gap: 8px; }
 .line { height: 10px; border-radius: 6px; background: rgba(255,255,255,0.12); }
 .line.thick { height: 14px; }
 .line.short { width: 60%; }
+.track-title { font-weight: 700; font-size: 16px; color: #f3f6fb; }
+.track-artist { color: #cfd5e1; font-size: 14px; }
+.track-album { color: #9fb1d0; font-size: 13px; }
 
 hr {
   margin: 18px 0;

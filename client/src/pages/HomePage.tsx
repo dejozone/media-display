@@ -17,6 +17,9 @@ export default function HomePage() {
   const [user, setUser] = useState<User | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [nowPlaying, setNowPlaying] = useState<any>(null);
+  const [nowError, setNowError] = useState<string | null>(null);
+  const [nowLoading, setNowLoading] = useState(true);
 
   useEffect(() => {
     const token = getAuthToken();
@@ -30,14 +33,40 @@ export default function HomePage() {
           headers: { Authorization: `Bearer ${token}` }
         });
         setUser(res.data.user);
+        if (res.data.user?.provider === 'spotify') {
+          await fetchNowPlaying(token);
+        } else {
+          setNowLoading(false);
+        }
       } catch (e: any) {
         setError(e?.response?.data?.error || 'Failed to load user');
+        setNowLoading(false);
       } finally {
         setLoading(false);
       }
     };
     fetchUser();
   }, [navigate]);
+
+  const fetchNowPlaying = async (jwtToken: string) => {
+    setNowLoading(true);
+    setNowError(null);
+    setNowPlaying(null);
+    try {
+      const res = await axios.get(`${API_BASE_URL}/api/spotify/now-playing`, {
+        headers: { Authorization: `Bearer ${jwtToken}` }
+      });
+      if (!res.data || Object.keys(res.data).length === 0) {
+        setNowPlaying(null);
+      } else {
+        setNowPlaying(res.data);
+      }
+    } catch (e: any) {
+      setNowError(e?.response?.data?.error || 'Failed to load Now Playing');
+    } finally {
+      setNowLoading(false);
+    }
+  };
 
   const logout = () => {
     clearAuthToken();
@@ -66,7 +95,7 @@ export default function HomePage() {
           <div className="logo">Media Display</div>
           <div className="user-pill">
             <span>{user?.name || user?.email || 'User'}</span>
-            <button onClick={logout} className="chip">Logout</button>
+            {/* <button onClick={logout} className="chip">Logout</button> */}
           </div>
         </header>
 
@@ -81,7 +110,7 @@ export default function HomePage() {
                   {user.provider !== 'spotify' && (
                     <button onClick={enableSpotify} className="primary">Enable Spotify</button>
                   )}
-                  <button onClick={logout} className="secondary">Logout</button>
+                  {/* <button onClick={logout} className="secondary">Logout</button> */}
                 </div>
               </>
             ) : (
@@ -93,15 +122,34 @@ export default function HomePage() {
           <div className="card now-playing">
             <div className="np-header">
               <span className="eyebrow">Now Playing</span>
-              <span className="pill">Coming soon</span>
+              <span className="pill">Live</span>
             </div>
             <div className="np-body">
-              <div className="artwork placeholder" />
-              <div className="meta">
-                <div className="line thick" />
-                <div className="line" />
-                <div className="line short" />
-              </div>
+              {user?.provider !== 'spotify' ? (
+                <p className="hint">Connect Spotify to see Now Playing.</p>
+              ) : nowLoading ? (
+                <>
+                  <div className="artwork placeholder" />
+                  <div className="meta">
+                    <div className="line thick" />
+                    <div className="line" />
+                    <div className="line short" />
+                  </div>
+                </>
+              ) : nowError ? (
+                <p className="error">{nowError === 'spotify_not_connected_or_token_invalid' ? 'Connect Spotify to see Now Playing.' : nowError}</p>
+              ) : nowPlaying && nowPlaying.item ? (
+                <>
+                  <div className="artwork" style={{ backgroundImage: `url(${nowPlaying.item.album?.images?.[0]?.url || ''})` }} />
+                  <div className="meta">
+                    <div className="track-title">{nowPlaying.item.name}</div>
+                    <div className="track-artist">{nowPlaying.item.artists?.map((a: any) => a.name).join(', ')}</div>
+                    <div className="track-album">{nowPlaying.item.album?.name}</div>
+                  </div>
+                </>
+              ) : (
+                <p className="hint">Nothing playing right now.</p>
+              )}
             </div>
             <p className="hint">We will display track info from Spotify and Sonos here.</p>
           </div>
