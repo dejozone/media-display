@@ -35,7 +35,17 @@ a { color: inherit; text-decoration: none; }
 
 .logo { font-weight: 700; letter-spacing: 0.4px; font-size: 20px; }
 
-.user-pill { display: flex; align-items: center; gap: 12px; }
+.user-pill { display: flex; align-items: center; gap: 12px; min-width: 0; }
+
+.user-name {
+  flex: 1 1 auto;
+  min-width: 140px;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .avatar {
   width: 32px;
   height: 32px;
@@ -91,7 +101,7 @@ p { margin: 8px 0; color: #cfd5e1; }
 button {
   width: 100%;
   padding: 12px 14px;
-  margin-top: 12px;
+  /* margin-top: 12px; */
   border-radius: 12px;
   border: 1px solid transparent;
   font-weight: 600;

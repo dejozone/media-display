@@ -182,6 +182,7 @@ export default function HomePage() {
         <header className="app-header">
           <div className="logo">Media Display</div>
           <div className="user-pill">
+            <span className="user-name">{displayName}</span>
             {user && (
               <div
                 className="avatar"
@@ -191,7 +192,6 @@ export default function HomePage() {
                 {!user.avatarUrl && <span>{avatarInitial}</span>}
               </div>
             )}
-            <span>{displayName}</span>
             <button onClick={logout} className="chip">Logout</button>
           </div>
         </header>
@@ -207,7 +207,6 @@ export default function HomePage() {
                   {!user.spotifyConnected && (
                     <button onClick={enableSpotify} className="primary">Enable Spotify</button>
                   )}
-                  <button onClick={logout} className="secondary">Logout</button>
                 </div>
               </>
             ) : (
