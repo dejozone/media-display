@@ -88,6 +88,7 @@ class Config:
     GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID')  # from .env (secure)
     GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET')  # from .env (secure)
     GOOGLE_REDIRECT_URI = CONFIG['google']['redirectUri']
+    GOOGLE_CONFIG = CONFIG.get('google', {})
     
     # =============================================================================
     # SPOTIFY OAUTH SETTINGS (combined from JSON config and .env)

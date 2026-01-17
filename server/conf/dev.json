@@ -13,7 +13,15 @@
     "poolMaxConn": 10
   },
   "google": {
-    "redirectUri": "https://media-display-new.projecttechcycle-dev.org:9081/auth/google/callback"
+    "redirectUri": "https://media-display-new.projecttechcycle-dev.org:9081/auth/google/callback",
+    "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth",
+    "tokenUrl": "https://oauth2.googleapis.com/token",
+    "userInfoUrl": "https://www.googleapis.com/oauth2/v2/userinfo",
+    "scopes": [
+      "openid",
+      "https://www.googleapis.com/auth/userinfo.email",
+      "https://www.googleapis.com/auth/userinfo.profile"
+    ]
   },
   "spotify": {
     "redirectUri": "https://media-display-new.projecttechcycle-dev.org:9081/spotify/callback",
