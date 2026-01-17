@@ -24,7 +24,7 @@
     ]
   },
   "spotify": {
-    "redirectUri": "https://media-display-new.projecttechcycle-dev.org:9081/spotify/callback",
+    "redirectUri": "https://media-display-new.projecttechcycle-dev.org:9081/auth/spotify/callback",
     "scope": "user-read-currently-playing user-read-playback-state user-read-email user-read-private"
   },
   "cors": {
