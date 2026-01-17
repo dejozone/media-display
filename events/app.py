@@ -28,6 +28,7 @@ API_BASE_URL = API_CFG.get("baseUrl", "http://localhost:5001")
 
 HTTP_CLIENT: Optional[httpx.AsyncClient] = None
 STOP_EVENT: Optional[asyncio.Event] = None
+ACTIVE_TASKS: "set[asyncio.Task]" = set()
 
 
 def _http_timeout() -> httpx.Timeout:
@@ -36,7 +37,7 @@ def _http_timeout() -> httpx.Timeout:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global HTTP_CLIENT, STOP_EVENT
+    global HTTP_CLIENT, STOP_EVENT, ACTIVE_TASKS
     STOP_EVENT = asyncio.Event()
     HTTP_CLIENT = httpx.AsyncClient(timeout=_http_timeout())
     try:
@@ -44,6 +45,13 @@ async def lifespan(app: FastAPI):
     finally:
         if STOP_EVENT:
             STOP_EVENT.set()
+        # cancel any active polling tasks
+        for task in list(ACTIVE_TASKS):
+            task.cancel()
+        # wait for tasks to finish quietly
+        if ACTIVE_TASKS:
+            await asyncio.gather(*ACTIVE_TASKS, return_exceptions=True)
+        ACTIVE_TASKS.clear()
         if HTTP_CLIENT:
             await HTTP_CLIENT.aclose()
             HTTP_CLIENT = None
@@ -174,7 +182,14 @@ async def spotify_events(ws: WebSocket) -> None:
 
     await ws.accept(subprotocol=None)
     await ws.send_json({"type": "ready", "user": user_info})
-    await stream_now_playing(ws, token)
+
+    # run stream as task so we can track/cancel on shutdown
+    stream_task = asyncio.create_task(stream_now_playing(ws, token))
+    ACTIVE_TASKS.add(stream_task)
+    try:
+        await stream_task
+    finally:
+        ACTIVE_TASKS.discard(stream_task)
 
 
 if __name__ == "__main__":

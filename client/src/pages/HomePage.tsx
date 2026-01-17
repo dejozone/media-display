@@ -105,8 +105,18 @@ export default function HomePage() {
       }
     };
 
+    const handleBeforeUnload = () => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.close(1001, 'Page unload');
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
     return () => {
-      ws.close();
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        ws.close(1001, 'Component unmount');
+      }
     };
   }, [user, navigate]);
 
