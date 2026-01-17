@@ -14,7 +14,6 @@ CREATE TABLE users (
     email VARCHAR(255) UNIQUE NOT NULL,
     username VARCHAR(50) UNIQUE NOT NULL,
     display_name VARCHAR(100),
-    avatar_url TEXT,
     
     -- Timestamps
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -32,6 +31,8 @@ CREATE TABLE identities (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     provider VARCHAR(50) NOT NULL,
     provider_id VARCHAR(255) NOT NULL,
+    avatar_url TEXT,
+    is_selected BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (provider, provider_id)
 );

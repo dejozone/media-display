@@ -125,6 +125,7 @@ class AuthManager:
                 logger.error("Google login failed: empty result or missing user_info")
                 return None
             user_info = result['user_info']
+            avatar_url = user_info.get('picture') or user_info.get('photo')
             google_id = user_info.get('id')
             user: Optional[Dict[str, Any]] = None
 
@@ -140,7 +141,9 @@ class AuthManager:
                 user = self._create_google_user(user_info)
 
             if google_id:
-                self._link_identity(user['id'], 'google', google_id)
+                self._link_identity(
+                    user['id'], 'google', google_id, avatar_url=avatar_url, select_if_none=True
+                )
             token = self.create_jwt(user, provider='google')
             return token
         except Exception as e:
@@ -159,15 +162,44 @@ class AuthManager:
             (provider, provider_id),
         )
 
-    def _link_identity(self, user_id: str, provider: str, provider_id: str) -> None:
+    def _link_identity(self, user_id: str, provider: str, provider_id: str, avatar_url: Optional[str] = None, select_if_none: bool = False) -> None:
+        is_selected = False
+        if select_if_none:
+            existing_selected = self._fetch_one(
+                "SELECT 1 FROM identities WHERE user_id = %s AND is_selected = TRUE LIMIT 1",
+                (str(user_id),),
+            )
+            is_selected = existing_selected is None
+
         self._execute(
             """
-            INSERT INTO identities (user_id, provider, provider_id)
-            VALUES (%s, %s, %s)
-            ON CONFLICT (provider, provider_id) DO UPDATE SET user_id = EXCLUDED.user_id
+            INSERT INTO identities (user_id, provider, provider_id, avatar_url, is_selected)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (provider, provider_id) DO UPDATE SET
+                user_id = EXCLUDED.user_id,
+                avatar_url = COALESCE(EXCLUDED.avatar_url, identities.avatar_url),
+                is_selected = identities.is_selected OR EXCLUDED.is_selected
             """,
-            (str(user_id), provider, provider_id),
+            (str(user_id), provider, provider_id, avatar_url, is_selected),
         )
+
+    def _get_selected_avatar_url(self, user_id: str) -> Optional[str]:
+        row = self._fetch_one(
+            """
+            SELECT avatar_url
+            FROM identities
+            WHERE user_id = %s AND is_selected = TRUE
+            ORDER BY created_at ASC
+            LIMIT 1
+            """,
+            (str(user_id),),
+        )
+        if row:
+            return row.get('avatar_url')
+        return None
+
+    def get_selected_avatar_url(self, user_id: str) -> Optional[str]:
+        return self._get_selected_avatar_url(user_id)
 
     def _create_spotify_user(self, profile: Dict[str, Any]) -> Dict[str, Any]:
         user_id = uuid.uuid4()
@@ -275,6 +307,10 @@ class AuthManager:
             if not spotify_id:
                 logger.error("Spotify login failed: missing spotify_id")
                 return None
+            images = profile.get('images') or []
+            avatar_url = None
+            if isinstance(images, list) and images:
+                avatar_url = images[0].get('url')
 
             user: Optional[Dict[str, Any]] = None
             identity = self._get_identity('spotify', spotify_id)
@@ -299,7 +335,9 @@ class AuthManager:
                 user = self._create_spotify_user(profile)
 
             tokens['expires_at'] = int(time.time()) + tokens.get('expires_in', 3600)
-            self._link_identity(user['id'], 'spotify', spotify_id)
+            self._link_identity(
+                user['id'], 'spotify', spotify_id, avatar_url=avatar_url, select_if_none=True
+            )
             self._save_spotify_tokens(user['id'], spotify_id, tokens)
             token = self.create_jwt(user, provider='spotify')
             return token

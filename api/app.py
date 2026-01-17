@@ -137,12 +137,14 @@ def user_me():
     provider = payload.get('provider')
     if spotify_connected:
         provider = 'spotify'
+    avatar_url = auth_manager.get_selected_avatar_url(payload['sub'])
     return jsonify({'user': {
         'id': payload['sub'],
         'email': payload.get('email'),
         'name': payload.get('name'),
         'provider': provider,
-        'spotifyConnected': spotify_connected
+        'spotifyConnected': spotify_connected,
+        'avatarUrl': avatar_url
     }})
 
 
