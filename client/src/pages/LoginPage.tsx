@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
+import { isAuthenticated } from '../utils/auth';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
@@ -8,6 +9,12 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isAuthenticated()) {
+      navigate('/home', { replace: true });
+    }
+  }, [navigate]);
 
   const startGoogleLogin = async () => {
     if (!API_BASE_URL) {
@@ -59,10 +66,10 @@ export default function LoginPage() {
           {loading ? 'Redirecting…' : 'Login with Google'}
         </button>
         <hr />
-        <p>Already logged in? Go to home.</p>
-        <button onClick={() => navigate('/home')} className="secondary">Go to Home</button>
+        {/* <p>Already logged in? Go to home.</p>
+        <button onClick={() => navigate('/home')} className="secondary">Go to Home</button> */}
         {error && <p className="error">{error}</p>}
-        <div className="hint">Spotify can be enabled from Home after login.</div>
+        <div className="hint">Spotify can be enabled after login.</div>
         <button onClick={startSpotifyLogin} disabled={loading} className="ghost">
           {loading ? 'Redirecting…' : 'Enable Spotify (login)'}
         </button>

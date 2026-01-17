@@ -78,7 +78,9 @@ export default function HomePage() {
                 <p>Welcome, {user.name || user.email || user.id}</p>
                 <p>Provider: {user.provider}</p>
                 <div className="actions">
-                  <button onClick={enableSpotify} className="primary">Enable Spotify</button>
+                  {user.provider !== 'spotify' && (
+                    <button onClick={enableSpotify} className="primary">Enable Spotify</button>
+                  )}
                   <button onClick={logout} className="secondary">Logout</button>
                 </div>
               </>
