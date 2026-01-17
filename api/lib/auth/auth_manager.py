@@ -144,6 +144,7 @@ class AuthManager:
                 self._link_identity(
                     user['id'], 'google', google_id, avatar_url=avatar_url, select_if_none=True
                 )
+                self._select_identity(user['id'], 'google', google_id)
             token = self.create_jwt(user, provider='google')
             return token
         except Exception as e:
@@ -181,6 +182,17 @@ class AuthManager:
                 is_selected = identities.is_selected OR EXCLUDED.is_selected
             """,
             (str(user_id), provider, provider_id, avatar_url, is_selected),
+        )
+
+    def _select_identity(self, user_id: str, provider: str, provider_id: str) -> None:
+        # Select the given identity for the user and deselect others
+        self._execute(
+            """
+            UPDATE identities
+            SET is_selected = (provider = %s AND provider_id = %s)
+            WHERE user_id = %s
+            """,
+            (provider, provider_id, str(user_id)),
         )
 
     def _get_selected_avatar_url(self, user_id: str) -> Optional[str]:
@@ -295,7 +307,7 @@ class AuthManager:
             logger.error(f"Error fetching now playing for user {user_id}: {e}")
             return None
 
-    def login_with_spotify(self, code: str, link_user_id: Optional[str] = None) -> Optional[str]:
+    def login_with_spotify(self, code: str, link_user_id: Optional[str] = None, allow_create_if_new: bool = True) -> Optional[str]:
         try:
             result = self.spotify_client.complete_oauth_flow(code)
             if not result or 'user_info' not in result or 'tokens' not in result:
@@ -332,12 +344,16 @@ class AuthManager:
                     user = self._get_user_by_spotify_id(spotify_id)
 
             if not user:
+                if not allow_create_if_new:
+                    logger.warning("Spotify login refused: no existing identity and creation not allowed")
+                    return None
                 user = self._create_spotify_user(profile)
 
             tokens['expires_at'] = int(time.time()) + tokens.get('expires_in', 3600)
             self._link_identity(
                 user['id'], 'spotify', spotify_id, avatar_url=avatar_url, select_if_none=True
             )
+            self._select_identity(user['id'], 'spotify', spotify_id)
             self._save_spotify_tokens(user['id'], spotify_id, tokens)
             token = self.create_jwt(user, provider='spotify')
             return token

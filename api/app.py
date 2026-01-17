@@ -42,14 +42,21 @@ def google_auth_url():
 def spotify_auth_url():
     auth_header = request.headers.get('Authorization', '')
     link_user_id = None
-    if not auth_header.startswith('Bearer '):
-        return jsonify({'error': 'Missing or invalid Authorization header'}), 401
-    token = auth_header.split(' ', 1)[1]
-    payload = auth_manager.validate_jwt(token)
-    if not payload or 'sub' not in payload:
-        return jsonify({'error': 'Invalid or expired JWT'}), 401
-    link_user_id = payload['sub']
-    state = auth_manager.create_state_token(user_id=link_user_id)
+    state = None
+
+    if auth_header.startswith('Bearer '):
+        token = auth_header.split(' ', 1)[1]
+        payload = auth_manager.validate_jwt(token)
+        if payload and 'sub' in payload:
+            link_user_id = payload['sub']
+            state = auth_manager.create_state_token(user_id=link_user_id)
+        else:
+            auth_logger.warning("Spotify auth URL: invalid bearer token; falling back to unauthenticated flow")
+
+    # If unauthenticated, allow identity-only login later; no link_user_id and optional state
+    if state is None:
+        state = auth_manager.create_state_token()
+
     url = auth_manager.spotify_client.get_authorization_url(state)
     return jsonify({'url': url, 'state': state})
 
@@ -69,12 +76,18 @@ def spotify_callback():
     if not code:
         return jsonify({'error': 'Missing code'}), 400
     state = request.args.get('state')
-    if not state:
-        return jsonify({'error': 'Missing state'}), 400
-    link_user_id = auth_manager.verify_state_token(state)
-    if not link_user_id:
-        return jsonify({'error': 'Invalid or expired state'}), 401
-    token = auth_manager.login_with_spotify(code, link_user_id=link_user_id)
+    link_user_id = None
+    allow_create = False
+    if state:
+        link_user_id = auth_manager.verify_state_token(state)
+        if link_user_id:
+            allow_create = True
+        else:
+            auth_logger.warning("Spotify callback received invalid state; proceeding without linking")
+    else:
+        auth_logger.warning("Spotify callback missing state; attempting identity-based login only")
+
+    token = auth_manager.login_with_spotify(code, link_user_id=link_user_id, allow_create_if_new=allow_create)
     if not token:
         return jsonify({'error': 'Spotify OAuth failed'}), 401
     return jsonify({'jwt': token})
@@ -90,12 +103,17 @@ def api_auth_callback(provider: str):
         token = auth_manager.login_with_google(code)
     elif provider == 'spotify':
         state_param = request.args.get('state')
-        if not state_param:
-            return jsonify({'error': 'Missing state'}), 400
-        link_user_id = auth_manager.verify_state_token(state_param)
-        if not link_user_id:
-            return jsonify({'error': 'Invalid or expired state'}), 401
-        token = auth_manager.login_with_spotify(code, link_user_id=link_user_id)
+        link_user_id = None
+        allow_create = False
+        if state_param:
+            link_user_id = auth_manager.verify_state_token(state_param)
+            if link_user_id:
+                allow_create = True
+            else:
+                auth_logger.warning("Spotify provider callback invalid state; proceeding without linking")
+        else:
+            auth_logger.warning("Spotify provider callback missing state; attempting identity-based login only")
+        token = auth_manager.login_with_spotify(code, link_user_id=link_user_id, allow_create_if_new=allow_create)
     else:
         return jsonify({'error': 'Unsupported provider'}), 400
 

@@ -38,6 +38,7 @@ CREATE TABLE identities (
 );
 
 CREATE INDEX idx_identities_user_id ON identities(user_id);
+CREATE INDEX idx_identities_provider_id ON identities(provider_id);
 
 -- =============================================================================
 -- SPOTIFY TOKENS TABLE (keyed by user_id; spotify_id unique)
