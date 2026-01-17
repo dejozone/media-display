@@ -68,7 +68,7 @@ class AuthManager:
     def validate_jwt(self, token: str) -> Optional[Dict[str, Any]]:
         try:
             payload = jwt.decode(token, self.jwt_secret, algorithms=[self.jwt_algorithm])
-            logger.info(f"Validated JWT for user {payload.get('email', payload['sub'])}")
+            logger.debug(f"Validated JWT for user {payload.get('email', payload['sub'])}")
             return payload
         except jwt.ExpiredSignatureError:
             logger.error("JWT token expired")
@@ -207,7 +207,7 @@ class AuthManager:
             return None
         try:
             now_playing = self.spotify_client.get_currently_playing(access_token)
-            logger.info(f"Fetched now playing for user {user_id}; empty={not bool(now_playing)}")
+            logger.debug(f"Fetched now playing for user {user_id}; empty={not bool(now_playing)}")
             return now_playing
         except Exception as e:
             logger.error(f"Error fetching now playing for user {user_id}: {e}")

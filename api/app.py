@@ -122,7 +122,7 @@ def user_me():
 @app.route('/api/spotify/now-playing', methods=['GET'])
 @require_auth
 def spotify_now_playing():
-    server_logger.info(f"/api/spotify/now-playing requested by user_id={g.user_id}")
+    server_logger.debug(f"/api/spotify/now-playing requested by user_id={g.user_id}")
     data = auth_manager.get_spotify_currently_playing(g.user_id)
     if data is None:
         server_logger.warning("Now-playing fetch failed: no tokens or refresh failure")
