@@ -6,7 +6,7 @@ Handles JWT creation, validation, refresh, and integrates with Google/Spotify OA
 import os
 import sys
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 import time
 import uuid
 import jwt
@@ -22,6 +22,8 @@ from config import Config
 from lib.auth.google_oauth import GoogleOAuthClient
 from lib.auth.spotify_oauth import SpotifyOAuthClient
 from lib.utils.logger import auth_logger as logger
+
+SqlParams = Optional[Tuple[Any, ...]]
 
 class AuthManager:
     """Authentication manager for JWT and OAuth integration"""
@@ -41,14 +43,14 @@ class AuthManager:
         )
         self.db_conn.autocommit = True
 
-    def _fetch_one(self, query: str, params: tuple) -> Optional[Dict[str, Any]]:
+    def _fetch_one(self, query: str, params: SqlParams = None) -> Optional[Dict[str, Any]]:
         with self.db_conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(query, params)
+            cur.execute(query, params or ())
             return cur.fetchone()
 
-    def _execute(self, query: str, params: tuple) -> None:
+    def _execute(self, query: str, params: SqlParams = None) -> None:
         with self.db_conn.cursor() as cur:
-            cur.execute(query, params)
+            cur.execute(query, params or ())
 
     def create_jwt(self, user: Dict[str, Any], provider: str) -> str:
         payload = {
@@ -93,11 +95,17 @@ class AuthManager:
             """,
             (str(user_id), email, username, display_name, user_info.get('id'))
         )
-        return self._fetch_one("SELECT * FROM users WHERE id = %s", (str(user_id),))
+        created = self._fetch_one("SELECT * FROM users WHERE id = %s", (str(user_id),))
+        if not created:
+            raise RuntimeError("Failed to fetch newly created Google user")
+        return created
 
     def login_with_google(self, code: str) -> Optional[str]:
         try:
             result = self.google_client.complete_oauth_flow(code)
+            if not result or 'user_info' not in result:
+                logger.error("Google login failed: empty result or missing user_info")
+                return None
             user_info = result['user_info']
             user = self._get_user_by_google_id(user_info.get('id')) or self._get_user_by_email(user_info.get('email'))
             if not user:
@@ -117,9 +125,10 @@ class AuthManager:
     def _create_spotify_user(self, profile: Dict[str, Any]) -> Dict[str, Any]:
         user_id = uuid.uuid4()
         spotify_id = profile.get('id')
-        email = profile.get('email') or f"{spotify_id}@spotify.local"
-        username = (profile.get('display_name') or spotify_id).replace(' ', '_')[:50]
-        display_name = profile.get('display_name') or spotify_id
+        name_source = profile.get('display_name') or spotify_id or "spotify_user"
+        email = profile.get('email') or f"{spotify_id or 'spotify_user'}@spotify.local"
+        username = name_source.replace(' ', '_')[:50]
+        display_name = name_source
         self._execute(
             """
             INSERT INTO users (id, email, username, display_name)
@@ -127,7 +136,10 @@ class AuthManager:
             """,
             (str(user_id), email, username, display_name)
         )
-        return self._fetch_one("SELECT * FROM users WHERE id = %s", (str(user_id),))
+        created = self._fetch_one("SELECT * FROM users WHERE id = %s", (str(user_id),))
+        if not created:
+            raise RuntimeError("Failed to fetch newly created Spotify user")
+        return created
 
     def _get_db_spotify_tokens(self, user_id: str) -> Optional[Dict[str, Any]]:
         return self._fetch_one(
@@ -164,6 +176,10 @@ class AuthManager:
         if not tokens:
             logger.warning(f"No Spotify tokens cached for user {user_id}")
             return None
+        spotify_id = tokens.get('spotify_id')
+        if not spotify_id:
+            logger.warning(f"Spotify tokens missing spotify_id for user {user_id}")
+            return None
         now = int(time.time())
         if tokens.get('token_expires_at', 0) > now + 30:
             logger.debug(f"Using cached Spotify access token for user {user_id}")
@@ -174,10 +190,13 @@ class AuthManager:
             return None
         logger.info(f"Refreshing Spotify token for user {user_id}")
         refreshed = self.spotify_client.refresh_access_token(refresh_token)
+        if not refreshed or 'access_token' not in refreshed:
+            logger.warning(f"Refresh failed for user {user_id}")
+            return None
         refreshed['expires_at'] = int(time.time()) + refreshed.get('expires_in', 3600)
         if 'refresh_token' not in refreshed and refresh_token:
             refreshed['refresh_token'] = refresh_token
-        self._save_spotify_tokens(user_id, tokens.get('spotify_id'), refreshed)
+        self._save_spotify_tokens(user_id, spotify_id, refreshed)
         logger.info(f"Refreshed Spotify token for user {user_id}; expires_at={refreshed['expires_at']}")
         return refreshed.get('access_token')
 
@@ -197,9 +216,15 @@ class AuthManager:
     def login_with_spotify(self, code: str) -> Optional[str]:
         try:
             result = self.spotify_client.complete_oauth_flow(code)
+            if not result or 'user_info' not in result or 'tokens' not in result:
+                logger.error("Spotify login failed: empty result or missing fields")
+                return None
             profile = result['user_info']
             tokens = result['tokens']
             spotify_id = profile.get('id')
+            if not spotify_id:
+                logger.error("Spotify login failed: missing spotify_id")
+                return None
             user = self._get_user_by_spotify_id(spotify_id)
             if not user:
                 user = self._create_spotify_user(profile)
