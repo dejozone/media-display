@@ -11,6 +11,7 @@ import time
 import uuid
 import jwt
 import psycopg2
+from psycopg2 import InterfaceError, OperationalError
 from psycopg2.extras import RealDictCursor
 
 # Add server directory to path for imports
@@ -43,14 +44,39 @@ class AuthManager:
         )
         self.db_conn.autocommit = True
 
+    def _ensure_conn(self) -> None:
+        if not self.db_conn or self.db_conn.closed:
+            logger.warning("DB connection closed; reconnecting")
+            self.db_conn = psycopg2.connect(
+                dbname=Config.POSTGRES_DB,
+                user=Config.POSTGRES_USER,
+                password=Config.POSTGRES_PASSWORD,
+                host=Config.POSTGRES_HOST,
+                port=Config.POSTGRES_PORT,
+            )
+            self.db_conn.autocommit = True
+
     def _fetch_one(self, query: str, params: SqlParams = None) -> Optional[Dict[str, Any]]:
-        with self.db_conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(query, params or ())
-            return cur.fetchone()
+        self._ensure_conn()
+        try:
+            with self.db_conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(query, params or ())
+                return cur.fetchone()
+        except (InterfaceError, OperationalError):
+            self._ensure_conn()
+            with self.db_conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(query, params or ())
+                return cur.fetchone()
 
     def _execute(self, query: str, params: SqlParams = None) -> None:
-        with self.db_conn.cursor() as cur:
-            cur.execute(query, params or ())
+        self._ensure_conn()
+        try:
+            with self.db_conn.cursor() as cur:
+                cur.execute(query, params or ())
+        except (InterfaceError, OperationalError):
+            self._ensure_conn()
+            with self.db_conn.cursor() as cur:
+                cur.execute(query, params or ())
 
     def create_jwt(self, user: Dict[str, Any], provider: str) -> str:
         payload = {

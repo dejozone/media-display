@@ -62,7 +62,13 @@ echo "✅ PostgreSQL is ready"
 
 if [ "$UPDATE_SCHEMA" = "true" ]; then
   echo "📋 Applying schema (./init-schema.sh)..."
-  ./init-schema.sh
+  # If schema already applied by entrypoint (.sql mounted into /docker-entrypoint-initdb.d), skip re-applying to avoid duplicate-object errors
+  SCHEMA_PRESENT=$(docker exec ${DB_CONTAINER} psql -U ${POSTGRES_USER} -d ${POSTGRES_DB} -tAc "SELECT 1 FROM information_schema.tables WHERE table_name = 'schema_version'" 2>/dev/null || true)
+  if [ "$SCHEMA_PRESENT" = "1" ]; then
+    echo "ℹ️  schema_version table found; skipping init-schema.sh (already applied)"
+  else
+    ./init-schema.sh
+  fi
 fi
 
 # Check if schema needs to be initialized manually when not updating
