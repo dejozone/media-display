@@ -3,6 +3,7 @@
 Flask API for OAuth authentication and JWT management
 """
 from flask import Flask, request, jsonify
+import secrets
 from flask_cors import CORS
 from lib.auth.auth_manager import AuthManager
 from config import Config
@@ -11,7 +12,19 @@ app = Flask(__name__)
 CORS(app, origins=Config.CORS_ORIGINS)
 auth_manager = AuthManager()
 
-@app.route('/auth/google/callback')
+@app.route('/api/auth/google/url')
+def google_auth_url():
+    state = secrets.token_urlsafe(16)
+    url = auth_manager.google_client.get_authorization_url(state)
+    return jsonify({'url': url, 'state': state})
+
+@app.route('/api/auth/spotify/url')
+def spotify_auth_url():
+    state = secrets.token_urlsafe(16)
+    url = auth_manager.spotify_client.get_authorization_url(state)
+    return jsonify({'url': url, 'state': state})
+
+@app.route('/api/auth/google/callback')
 def google_callback():
     code = request.args.get('code')
     if not code:
@@ -21,7 +34,7 @@ def google_callback():
         return jsonify({'error': 'Google OAuth failed'}), 401
     return jsonify({'jwt': token})
 
-@app.route('/auth/spotify/callback')
+@app.route('/api/auth/spotify/callback')
 def spotify_callback():
     code = request.args.get('code')
     if not code:
@@ -31,7 +44,25 @@ def spotify_callback():
         return jsonify({'error': 'Spotify OAuth failed'}), 401
     return jsonify({'jwt': token})
 
-@app.route('/auth/validate', methods=['POST'])
+
+@app.route('/api/auth/<provider>/callback')
+def api_auth_callback(provider: str):
+    code = request.args.get('code')
+    if not code:
+        return jsonify({'error': 'Missing code'}), 400
+
+    if provider == 'google':
+        token = auth_manager.login_with_google(code)
+    elif provider == 'spotify':
+        token = auth_manager.login_with_spotify(code)
+    else:
+        return jsonify({'error': 'Unsupported provider'}), 400
+
+    if not token:
+        return jsonify({'error': f'{provider.capitalize()} OAuth failed'}), 401
+    return jsonify({'jwt': token})
+
+@app.route('/api/auth/validate', methods=['POST'])
 def validate_jwt():
     data = request.get_json()
     token = data.get('jwt') if data else None
@@ -42,7 +73,7 @@ def validate_jwt():
         return jsonify({'error': 'Invalid or expired JWT'}), 401
     return jsonify({'valid': True, 'payload': payload})
 
-@app.route('/user/me')
+@app.route('/api/user/me')
 def user_me():
     token = request.headers.get('Authorization')
     if not token or not token.startswith('Bearer '):

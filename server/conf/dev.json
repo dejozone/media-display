@@ -1,7 +1,7 @@
 {
   "server": {
     "host": "0.0.0.0",
-    "port": 5000,
+    "port": 5001,
     "debug": true
   },
   "database": {
@@ -24,13 +24,15 @@
     ]
   },
   "spotify": {
-    "redirectUri": "https://media-display-new.projecttechcycle-dev.org:9081/auth/spotify/callback",
+      "redirectUri": "https://media-display-new.projecttechcycle-dev.org:9081/auth/spotify/callback",
     "scope": "user-read-currently-playing user-read-playback-state user-read-email user-read-private"
   },
   "cors": {
     "origins": [
       "http://localhost:3000",
-      "http://localhost:5000"
+      "http://localhost:5001",
+      "http://localhost:5173",
+      "https://media-display-new.projecttechcycle-dev.org:9081"
     ]
   },
   "jwt": {
@@ -50,7 +52,8 @@
   "websocket": {
     "path": "/ws/socket.io",
     "asyncMode": "eventlet",
-    "corsAllowedOrigins": "*"
+    "corsAllowedOrigins": "*",
+    "port": 5002
   },
   "ssl": {
     "verify": true
