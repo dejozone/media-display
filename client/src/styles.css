@@ -36,6 +36,24 @@ a { color: inherit; text-decoration: none; }
 .logo { font-weight: 700; letter-spacing: 0.4px; font-size: 20px; }
 
 .user-pill { display: flex; align-items: center; gap: 12px; }
+.avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  aspect-ratio: 1 / 1;
+  background-size: cover;
+  background-position: center;
+  background-color: #1f2a44;
+  border: 1px solid rgba(255,255,255,0.12);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #cfd5e1;
+  font-weight: 700;
+  font-size: 12px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
 
 .chip {
   padding: 8px 12px;

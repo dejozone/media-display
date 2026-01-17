@@ -12,6 +12,7 @@ type User = {
   name?: string;
   provider?: string;
   spotifyConnected?: boolean;
+  avatarUrl?: string;
 };
 
 export default function HomePage() {
@@ -162,13 +163,25 @@ export default function HomePage() {
 
   if (loading) return <div className="container"><p>Loading…</p></div>;
 
+  const displayName = user?.name || user?.email || 'User';
+  const avatarInitial = (displayName || 'U').trim().charAt(0).toUpperCase();
+
   return (
     <div className="container">
       <div className="shell">
         <header className="app-header">
           <div className="logo">Media Display</div>
           <div className="user-pill">
-            <span>{user?.name || user?.email || 'User'}</span>
+            {user && (
+              <div
+                className="avatar"
+                style={user.avatarUrl ? { backgroundImage: `url(${user.avatarUrl})` } : undefined}
+                aria-label="User avatar"
+              >
+                {!user.avatarUrl && <span>{avatarInitial}</span>}
+              </div>
+            )}
+            <span>{displayName}</span>
             <button onClick={logout} className="chip">Logout</button>
           </div>
         </header>
