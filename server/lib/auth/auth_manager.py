@@ -28,6 +28,8 @@ class AuthManager:
         self.jwt_expiration = Config.JWT_EXPIRATION_HOURS * 3600  # seconds
         self.google_client = GoogleOAuthClient()
         self.spotify_client = SpotifyOAuthClient()
+        # In-memory spotify tokens keyed by user_id (demo; replace with persistent storage in production)
+        self.spotify_tokens: Dict[str, Dict[str, Any]] = {}
 
     def create_jwt(self, user_info: Dict[str, Any], provider: str) -> str:
         payload = {
@@ -68,11 +70,42 @@ class AuthManager:
         try:
             result = self.spotify_client.complete_oauth_flow(code)
             user_info = result['user_info']
+            tokens = result['tokens']
+            # Track expiry
+            tokens['expires_at'] = int(time.time()) + tokens.get('expires_in', 3600)
+            self.spotify_tokens[user_info['id']] = tokens
             token = self.create_jwt(user_info, provider='spotify')
             return token
         except Exception as e:
             logger.error(f"Spotify login failed: {str(e)}")
             return None
+
+    # ------------------------------------------------------------------
+    # Spotify token management (in-memory demo)
+    # ------------------------------------------------------------------
+    def _ensure_valid_spotify_access_token(self, user_id: str) -> Optional[str]:
+        tokens = self.spotify_tokens.get(user_id)
+        if not tokens:
+            return None
+        now = int(time.time())
+        if tokens.get('expires_at', 0) > now + 30:
+            return tokens.get('access_token')
+        refresh_token = tokens.get('refresh_token')
+        if not refresh_token:
+            return None
+        refreshed = self.spotify_client.refresh_access_token(refresh_token)
+        refreshed['expires_at'] = int(time.time()) + refreshed.get('expires_in', 3600)
+        # If Spotify does not return refresh_token on refresh, keep old one
+        if 'refresh_token' not in refreshed and refresh_token:
+            refreshed['refresh_token'] = refresh_token
+        self.spotify_tokens[user_id] = refreshed
+        return refreshed.get('access_token')
+
+    def get_spotify_currently_playing(self, user_id: str) -> Optional[Dict[str, Any]]:
+        access_token = self._ensure_valid_spotify_access_token(user_id)
+        if not access_token:
+            return None
+        return self.spotify_client.get_currently_playing(access_token)
 
 # =============================================================================
 # STANDALONE TESTING

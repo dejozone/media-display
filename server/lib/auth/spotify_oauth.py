@@ -144,6 +144,29 @@ class SpotifyOAuthClient:
             logger.error(f"❌ Invalid user info response: {str(e)}")
             raise
 
+    def get_currently_playing(self, access_token: str) -> Dict[str, Any]:
+        """Fetch currently playing track for the user.
+
+        Returns empty dict if nothing is playing (204 from Spotify).
+        """
+        try:
+            logger.info("Fetching currently playing from Spotify")
+            response = requests.get(
+                "https://api.spotify.com/v1/me/player/currently-playing",
+                headers={'Authorization': f'Bearer {access_token}'},
+                timeout=10
+            )
+            if response.status_code == 204:
+                return {}
+            response.raise_for_status()
+            return response.json()
+        except requests.HTTPError as e:
+            logger.error(f"❌ Now playing fetch failed: {e.response.status_code} - {e.response.text}")
+            raise
+        except requests.RequestException as e:
+            logger.error(f"❌ Network error fetching now playing: {str(e)}")
+            raise
+
     def complete_oauth_flow(self, code: str) -> Dict[str, Any]:
         logger.info("Starting complete Spotify OAuth flow")
         tokens = self.exchange_code_for_tokens(code)

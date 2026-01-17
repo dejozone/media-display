@@ -2,7 +2,8 @@
 """
 Flask API for OAuth authentication and JWT management
 """
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, g
+from functools import wraps
 import secrets
 from flask_cors import CORS
 from lib.auth.auth_manager import AuthManager
@@ -11,6 +12,21 @@ from config import Config
 app = Flask(__name__)
 CORS(app, origins=Config.CORS_ORIGINS)
 auth_manager = AuthManager()
+
+
+def require_auth(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        auth_header = request.headers.get('Authorization', '')
+        if not auth_header.startswith('Bearer '):
+            return jsonify({'error': 'Unauthorized'}), 401
+        token = auth_header.split(' ', 1)[1]
+        payload = auth_manager.validate_jwt(token)
+        if not payload or 'sub' not in payload:
+            return jsonify({'error': 'Unauthorized'}), 401
+        g.user_id = payload['sub']
+        return f(*args, **kwargs)
+    return wrapper
 
 @app.route('/api/auth/google/url')
 def google_auth_url():
@@ -88,6 +104,15 @@ def user_me():
         'name': payload.get('name'),
         'provider': payload.get('provider')
     }})
+
+
+@app.route('/api/spotify/now-playing', methods=['GET'])
+@require_auth
+def spotify_now_playing():
+    data = auth_manager.get_spotify_currently_playing(g.user_id)
+    if data is None:
+        return jsonify({'error': 'spotify_not_connected_or_token_invalid'}), 400
+    return jsonify(data), 200
 
 if __name__ == '__main__':
     app.run(host=Config.HOST, port=Config.PORT, debug=Config.DEBUG)
