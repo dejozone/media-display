@@ -176,6 +176,31 @@ export default function HomePage() {
   const displayName = user?.name || user?.email || 'User';
   const avatarInitial = (displayName || 'U').trim().charAt(0).toUpperCase();
 
+  const statusLabel = (() => {
+    const deviceName = nowPlaying?.device?.name?.trim();
+    const isPlaying = nowPlaying?.is_playing;
+
+    if (isPlaying === true) {
+      return deviceName ? `Now Playing on ${deviceName}` : 'Now Playing';
+    }
+
+    if (isPlaying === false) {
+      return deviceName ? `Paused on ${deviceName}` : 'Paused';
+    }
+
+    // Fallback when status is unknown: prefer device context, otherwise default label
+    if (deviceName) {
+      return `Now Playing on ${deviceName}`;
+    }
+
+    // If we have a payload but no status, treat as stopped; else default
+    if (nowPlaying && Object.keys(nowPlaying).length > 0) {
+      return deviceName ? `Stopped on ${deviceName}` : 'Stopped';
+    }
+
+    return 'Now Playing';
+  })();
+
   return (
     <div className="container">
       <div className="shell">
@@ -217,7 +242,7 @@ export default function HomePage() {
 
           <div className="card now-playing">
             <div className="np-header">
-              <span className="eyebrow">Now Playing</span>
+              <span className="eyebrow">{statusLabel}</span>
               <span className="pill">Live</span>
             </div>
             <div className="np-body">

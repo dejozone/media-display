@@ -144,10 +144,23 @@ class SpotifyOAuthClient:
             logger.error(f"❌ Invalid user info response: {str(e)}")
             raise
 
+    def _get_player_state(self, access_token: str) -> Dict[str, Any]:
+        """Fetch overall player state (device + playback status), even if no track."""
+        response = requests.get(
+            "https://api.spotify.com/v1/me/player",
+            headers={'Authorization': f'Bearer {access_token}'},
+            timeout=10
+        )
+        if response.status_code == 204:
+            return {}
+        response.raise_for_status()
+        return response.json()
+
     def get_currently_playing(self, access_token: str) -> Dict[str, Any]:
         """Fetch currently playing track for the user.
 
-        Returns empty dict if nothing is playing (204 from Spotify).
+        Includes device and playback status, falling back to player state when the
+        currently-playing endpoint returns 204 or omits device info.
         """
         try:
             logger.info("Fetching currently playing from Spotify")
@@ -156,10 +169,30 @@ class SpotifyOAuthClient:
                 headers={'Authorization': f'Bearer {access_token}'},
                 timeout=10
             )
+
+            # If nothing is playing, try the broader player endpoint to capture device/status
             if response.status_code == 204:
-                return {}
+                logger.info("Currently playing returned 204; fetching player state for device/status")
+                return self._get_player_state(access_token)
+
             response.raise_for_status()
-            return response.json()
+            data = response.json()
+
+            # Backfill device/status if missing
+            needs_device = 'device' not in data or data.get('device') is None
+            needs_status = 'is_playing' not in data
+            if needs_device or needs_status:
+                try:
+                    player_state = self._get_player_state(access_token)
+                    if needs_device:
+                        data['device'] = player_state.get('device')
+                    if needs_status and 'is_playing' in player_state:
+                        data['is_playing'] = player_state.get('is_playing')
+                except Exception:
+                    # Best-effort; keep original data if fallback fails
+                    pass
+
+            return data
         except requests.HTTPError as e:
             logger.error(f"❌ Now playing fetch failed: {e.response.status_code} - {e.response.text}")
             raise
