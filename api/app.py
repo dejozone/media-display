@@ -77,12 +77,10 @@ def spotify_callback():
         return jsonify({'error': 'Missing code'}), 400
     state = request.args.get('state')
     link_user_id = None
-    allow_create = False
+    allow_create = True  # allow new user creation by default for Spotify-only signups
     if state:
         link_user_id = auth_manager.verify_state_token(state)
-        if link_user_id:
-            allow_create = True
-        else:
+        if not link_user_id:
             auth_logger.warning("Spotify callback received invalid state; proceeding without linking")
     else:
         auth_logger.warning("Spotify callback missing state; attempting identity-based login only")
@@ -104,12 +102,10 @@ def api_auth_callback(provider: str):
     elif provider == 'spotify':
         state_param = request.args.get('state')
         link_user_id = None
-        allow_create = False
+        allow_create = True  # permit creation when logging in directly with Spotify
         if state_param:
             link_user_id = auth_manager.verify_state_token(state_param)
-            if link_user_id:
-                allow_create = True
-            else:
+            if not link_user_id:
                 auth_logger.warning("Spotify provider callback invalid state; proceeding without linking")
         else:
             auth_logger.warning("Spotify provider callback missing state; attempting identity-based login only")
