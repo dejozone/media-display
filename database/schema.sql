@@ -32,11 +32,10 @@ CREATE INDEX idx_users_username ON users(username);
 CREATE INDEX idx_users_google_id ON users(google_id);
 
 -- =============================================================================
--- SPOTIFY TOKENS TABLE
--- =============================================================================
+-- SPOTIFY TOKENS TABLE (keyed by user_id; spotify_id unique)
 CREATE TABLE spotify_tokens (
     user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    spotify_id VARCHAR(255) UNIQUE,
+    spotify_id VARCHAR(255) UNIQUE NOT NULL,
     access_token TEXT NOT NULL,
     refresh_token TEXT NOT NULL,
     token_expires_at BIGINT NOT NULL,

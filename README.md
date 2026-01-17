@@ -63,10 +63,14 @@ media-display/
 │   └── psql.sh            # Quick PostgreSQL access
 ├── database/
 │   └── schema.sql         # Database schema
-├── server/                # Backend (coming next)
-│   ├── .env               # Server environment config
-│   ├── .env.example       # Server config template
+├── api/                   # Flask API backend
+│   ├── .env               # API environment config
+│   ├── .env.example       # API config template
 │   └── ...
+├── events/                # WebSocket push service (Spotify now playing)
+│   ├── .env               # Events environment config
+│   ├── .env.example       # Events config template
+│   └── conf/              # ENV-scoped settings
 ├── client/                # Frontend (coming next)
 └── README.md
 ```
@@ -165,12 +169,12 @@ PGADMIN_EMAIL=admin@nowplaying.local
 PGADMIN_PASSWORD=admin
 ```
 
-**2. Server Environment** (`server/.env`):
+**2. API Environment** (`api/.env`):
 ```bash
 # Copy from template
-cp server/.env.example server/.env
+cp api/.env.example api/.env
 
-# Edit server/.env with your values:
+# Edit api/.env with your values:
 # - OAuth credentials (Google, Spotify)
 # - Database connection (should match docker/.env)
 # - Server settings (host, port, debug)
@@ -179,7 +183,8 @@ cp server/.env.example server/.env
 
 **Note:** Each component has its own `.env` file for complete independence:
 - `docker/.env` - PostgreSQL and Docker services
-- `server/.env` - Python backend application
+- `api/.env` - Flask API application
+- `events/.env` - WebSocket push service
 
 ## 📚 Documentation
 

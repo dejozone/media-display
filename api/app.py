@@ -8,6 +8,7 @@ import secrets
 from flask_cors import CORS
 from lib.auth.auth_manager import AuthManager
 from config import Config
+from lib.utils.logger import auth_logger, server_logger
 
 app = Flask(__name__)
 CORS(app, origins=Config.CORS_ORIGINS)
@@ -19,12 +20,15 @@ def require_auth(f):
     def wrapper(*args, **kwargs):
         auth_header = request.headers.get('Authorization', '')
         if not auth_header.startswith('Bearer '):
+            auth_logger.warning("Missing or invalid Authorization header")
             return jsonify({'error': 'Unauthorized'}), 401
         token = auth_header.split(' ', 1)[1]
         payload = auth_manager.validate_jwt(token)
         if not payload or 'sub' not in payload:
+            auth_logger.warning("JWT validation failed or missing sub")
             return jsonify({'error': 'Unauthorized'}), 401
         g.user_id = payload['sub']
+        g.user_payload = payload
         return f(*args, **kwargs)
     return wrapper
 
@@ -78,14 +82,23 @@ def api_auth_callback(provider: str):
         return jsonify({'error': f'{provider.capitalize()} OAuth failed'}), 401
     return jsonify({'jwt': token})
 
-@app.route('/api/auth/validate', methods=['POST'])
+@app.route('/api/auth/validate', methods=['POST', 'GET'])
 def validate_jwt():
-    data = request.get_json()
-    token = data.get('jwt') if data else None
+    token = None
+    if request.method == 'POST':
+        data = request.get_json()
+        token = data.get('jwt') if data else None
+    else:
+        auth_header = request.headers.get('Authorization', '')
+        if auth_header.startswith('Bearer '):
+            token = auth_header.split(' ', 1)[1]
+
     if not token:
+        auth_logger.warning("Validation failed: missing JWT")
         return jsonify({'error': 'Missing JWT'}), 400
     payload = auth_manager.validate_jwt(token)
     if not payload:
+        auth_logger.warning("Validation failed: invalid or expired JWT")
         return jsonify({'error': 'Invalid or expired JWT'}), 401
     return jsonify({'valid': True, 'payload': payload})
 
@@ -109,9 +122,11 @@ def user_me():
 @app.route('/api/spotify/now-playing', methods=['GET'])
 @require_auth
 def spotify_now_playing():
+    server_logger.info(f"/api/spotify/now-playing requested by user_id={g.user_id}")
     data = auth_manager.get_spotify_currently_playing(g.user_id)
     if data is None:
-        return jsonify({'error': 'spotify_not_connected_or_token_invalid'}), 400
+        server_logger.warning("Now-playing fetch failed: no tokens or refresh failure")
+        return jsonify({'error': 'spotify_not_connected_or_token_invalid', 'code': 'ERR_SPOTIFY_4001', 'message': 'Spotify token is missing or expired. Please reconnect Spotify.'}), 400
     return jsonify(data), 200
 
 if __name__ == '__main__':

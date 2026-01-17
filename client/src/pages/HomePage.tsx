@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { getAuthToken, clearAuthToken } from '../utils/auth';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
+const EVENTS_WS_URL = import.meta.env.VITE_EVENTS_WS_URL || `${window.location.origin.replace(/^http/, 'ws')}/events/spotify`;
 
 type User = {
   id: string;
@@ -48,6 +49,51 @@ export default function HomePage() {
     fetchUser();
   }, [navigate]);
 
+  useEffect(() => {
+    if (!user || user.provider !== 'spotify') return;
+    const token = getAuthToken();
+    if (!token) return;
+
+    const ws = new WebSocket(`${EVENTS_WS_URL}?token=${token}`);
+    setNowLoading(true);
+
+    ws.onopen = () => setNowLoading(false);
+
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === 'now_playing') {
+          setNowError(null);
+          setNowPlaying(msg.data);
+          setNowLoading(false);
+        } else if (msg.type === 'error') {
+          setNowError(msg.error || 'Live updates unavailable');
+          setNowLoading(false);
+        }
+      } catch (err) {
+        setNowError('Live updates unavailable');
+        setNowLoading(false);
+      }
+    };
+
+    ws.onerror = () => {
+      setNowError('Live updates unavailable');
+      setNowLoading(false);
+    };
+
+    ws.onclose = (evt) => {
+      if (evt.code === 4401) {
+        setNowError('Session expired. Please sign in again.');
+        clearAuthToken();
+        navigate('/');
+      }
+    };
+
+    return () => {
+      ws.close();
+    };
+  }, [user, navigate]);
+
   const fetchNowPlaying = async (jwtToken: string) => {
     setNowLoading(true);
     setNowError(null);
@@ -62,7 +108,12 @@ export default function HomePage() {
         setNowPlaying(res.data);
       }
     } catch (e: any) {
-      setNowError(e?.response?.data?.error || 'Failed to load Now Playing');
+      const code = e?.response?.data?.code;
+      if (code === 'ERR_SPOTIFY_4001') {
+        setNowError('ERR_SPOTIFY_4001');
+      } else {
+        setNowError(e?.response?.data?.error || 'Failed to load Now Playing');
+      }
     } finally {
       setNowLoading(false);
     }
@@ -95,7 +146,7 @@ export default function HomePage() {
           <div className="logo">Media Display</div>
           <div className="user-pill">
             <span>{user?.name || user?.email || 'User'}</span>
-            {/* <button onClick={logout} className="chip">Logout</button> */}
+            <button onClick={logout} className="chip">Logout</button>
           </div>
         </header>
 
@@ -110,7 +161,7 @@ export default function HomePage() {
                   {user.provider !== 'spotify' && (
                     <button onClick={enableSpotify} className="primary">Enable Spotify</button>
                   )}
-                  {/* <button onClick={logout} className="secondary">Logout</button> */}
+                  <button onClick={logout} className="secondary">Logout</button>
                 </div>
               </>
             ) : (
@@ -137,7 +188,7 @@ export default function HomePage() {
                   </div>
                 </>
               ) : nowError ? (
-                <p className="error">{nowError === 'spotify_not_connected_or_token_invalid' ? 'Connect Spotify to see Now Playing.' : nowError}</p>
+                <p className="error">{nowError === 'spotify_not_connected_or_token_invalid' || nowError === 'ERR_SPOTIFY_4001' ? 'Connect Spotify to see Now Playing.' : nowError}</p>
               ) : nowPlaying && nowPlaying.item ? (
                 <>
                   <div className="artwork" style={{ backgroundImage: `url(${nowPlaying.item.album?.images?.[0]?.url || ''})` }} />

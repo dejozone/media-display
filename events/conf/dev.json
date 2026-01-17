@@ -1,0 +1,19 @@
+{
+  "api": {
+    "baseUrl": "http://localhost:5001"
+  },
+  "websocket": {
+    "host": "0.0.0.0",
+    "port": 5002,
+    "path": "/events/spotify",
+    "sslCertFile": "certs/localhost.crt",
+    "sslKeyFile": "certs/localhost.key"
+  },
+  "spotify": {
+    "pollIntervalSec": 5,
+    "requestTimeoutSec": 10,
+    "retryIntervalSec": 2,
+    "retryWindowSec": 20,
+    "cooldownSec": 1800
+  }
+}
