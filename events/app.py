@@ -27,6 +27,7 @@ API_CFG = CONFIG.get("api", {})
 API_BASE_URL = API_CFG.get("baseUrl", "http://localhost:5001")
 
 HTTP_CLIENT: Optional[httpx.AsyncClient] = None
+STOP_EVENT: Optional[asyncio.Event] = None
 
 
 def _http_timeout() -> httpx.Timeout:
@@ -35,14 +36,25 @@ def _http_timeout() -> httpx.Timeout:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global HTTP_CLIENT
+    global HTTP_CLIENT, STOP_EVENT
+    STOP_EVENT = asyncio.Event()
     HTTP_CLIENT = httpx.AsyncClient(timeout=_http_timeout())
     try:
         yield
     finally:
+        if STOP_EVENT:
+            STOP_EVENT.set()
         if HTTP_CLIENT:
             await HTTP_CLIENT.aclose()
             HTTP_CLIENT = None
+
+
+async def _safe_close_ws(ws: WebSocket, code: int, reason: str = "") -> None:
+    try:
+        if ws.application_state == WebSocketState.CONNECTED:
+            await ws.close(code=code, reason=reason)
+    except Exception:
+        pass
 
 
 app = FastAPI(title="Media Display Events Service", lifespan=lifespan)
@@ -73,6 +85,7 @@ async def validate_token(token: str) -> Optional[Dict[str, Any]]:
 
 async def stream_now_playing(ws: WebSocket, token: str) -> None:
     assert HTTP_CLIENT is not None
+    assert STOP_EVENT is not None
     poll_interval = SPOTIFY_CFG.get("pollIntervalSec", 5)
     retry_interval = SPOTIFY_CFG.get("retryIntervalSec", 2)
     retry_window = SPOTIFY_CFG.get("retryWindowSec", 20)
@@ -82,7 +95,7 @@ async def stream_now_playing(ws: WebSocket, token: str) -> None:
     last_payload: Optional[Dict[str, Any]] = None
     failure_start: Optional[float] = None
 
-    while ws.application_state == WebSocketState.CONNECTED:
+    while not STOP_EVENT.is_set() and ws.application_state == WebSocketState.CONNECTED:
         try:
             headers = {"Authorization": f"Bearer {token}"}
             if etag:
@@ -96,7 +109,7 @@ async def stream_now_playing(ws: WebSocket, token: str) -> None:
             if resp.status_code == 304:
                 failure_start = None
             elif resp.status_code == 401:
-                await ws.close(code=4401, reason="Unauthorized")
+                await _safe_close_ws(ws, code=4401, reason="Unauthorized")
                 break
             elif resp.status_code >= 500:
                 resp.raise_for_status()
@@ -111,18 +124,28 @@ async def stream_now_playing(ws: WebSocket, token: str) -> None:
                     last_payload = payload
                 failure_start = None
 
-            await asyncio.sleep(poll_interval)
+            await asyncio.wait_for(asyncio.sleep(poll_interval), timeout=poll_interval + 1)
             continue
 
+        except asyncio.CancelledError:
+            break
         except (httpx.TimeoutException, httpx.TransportError, httpx.HTTPStatusError):
+            if STOP_EVENT.is_set():
+                break
             now = time.monotonic()
             failure_start = failure_start or now
             elapsed = now - failure_start
             if elapsed >= retry_window:
-                await asyncio.sleep(cooldown)
+                try:
+                    await asyncio.wait_for(asyncio.sleep(cooldown), timeout=cooldown + 1)
+                except asyncio.CancelledError:
+                    break
                 failure_start = None
             else:
-                await asyncio.sleep(retry_interval)
+                try:
+                    await asyncio.wait_for(asyncio.sleep(retry_interval), timeout=retry_interval + 1)
+                except asyncio.CancelledError:
+                    break
             continue
         except WebSocketDisconnect:
             break
@@ -131,20 +154,22 @@ async def stream_now_playing(ws: WebSocket, token: str) -> None:
             try:
                 await ws.send_json({"type": "error", "error": "internal_error"})
             finally:
-                await ws.close(code=1011)
+                await _safe_close_ws(ws, code=1011)
             break
+
+    await _safe_close_ws(ws, code=1000)
 
 
 @app.websocket(WS_CFG.get("path", "/events/spotify"))
 async def spotify_events(ws: WebSocket) -> None:
     token = ws.query_params.get("token")
     if not token:
-        await ws.close(code=4401, reason="Missing token")
+        await _safe_close_ws(ws, code=4401, reason="Missing token")
         return
 
     user_info = await validate_token(token)
     if not user_info:
-        await ws.close(code=4401, reason="Invalid token")
+        await _safe_close_ws(ws, code=4401, reason="Invalid token")
         return
 
     await ws.accept(subprotocol=None)

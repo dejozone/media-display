@@ -19,6 +19,10 @@ export default function OAuthCallbackPage() {
       setError('Missing code or provider');
       return;
     }
+    if (provider === 'spotify' && !state) {
+      setError('Missing state for Spotify login');
+      return;
+    }
     // Optional: validate state
     const stored = localStorage.getItem(`oauth_state_${provider}`);
     if (stored && state && stored !== state) {
@@ -28,7 +32,7 @@ export default function OAuthCallbackPage() {
     const complete = async () => {
       try {
         const res = await axios.get(`${API_BASE_URL}/api/auth/${provider}/callback`, {
-          params: { code }
+          params: { code, state }
         });
         const token = res.data.jwt;
         if (!token) throw new Error('No token returned');

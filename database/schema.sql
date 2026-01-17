@@ -16,11 +16,6 @@ CREATE TABLE users (
     display_name VARCHAR(100),
     avatar_url TEXT,
     
-    -- Google OAuth
-    google_id VARCHAR(255) UNIQUE,
-    google_access_token TEXT,
-    google_refresh_token TEXT,
-    
     -- Timestamps
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -29,7 +24,19 @@ CREATE TABLE users (
 -- Indexes for users
 CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_users_username ON users(username);
-CREATE INDEX idx_users_google_id ON users(google_id);
+
+-- =============================================================================
+-- IDENTITIES TABLE (maps provider ids to a single user_id)
+-- =============================================================================
+CREATE TABLE identities (
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    provider VARCHAR(50) NOT NULL,
+    provider_id VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (provider, provider_id)
+);
+
+CREATE INDEX idx_identities_user_id ON identities(user_id);
 
 -- =============================================================================
 -- SPOTIFY TOKENS TABLE (keyed by user_id; spotify_id unique)
@@ -168,7 +175,7 @@ CREATE TABLE schema_version (
 );
 
 INSERT INTO schema_version (version, description)
-VALUES (1, 'Initial schema - users, spotify_tokens, dashboard_settings, active_sessions, track_history');
+VALUES (4, 'Identities primary key on (provider, provider_id); no surrogate id; enforce user_id mapping');
 
 -- =============================================================================
 -- END OF SCHEMA

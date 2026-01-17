@@ -40,7 +40,16 @@ def google_auth_url():
 
 @app.route('/api/auth/spotify/url')
 def spotify_auth_url():
-    state = secrets.token_urlsafe(16)
+    auth_header = request.headers.get('Authorization', '')
+    link_user_id = None
+    if not auth_header.startswith('Bearer '):
+        return jsonify({'error': 'Missing or invalid Authorization header'}), 401
+    token = auth_header.split(' ', 1)[1]
+    payload = auth_manager.validate_jwt(token)
+    if not payload or 'sub' not in payload:
+        return jsonify({'error': 'Invalid or expired JWT'}), 401
+    link_user_id = payload['sub']
+    state = auth_manager.create_state_token(user_id=link_user_id)
     url = auth_manager.spotify_client.get_authorization_url(state)
     return jsonify({'url': url, 'state': state})
 
@@ -59,7 +68,13 @@ def spotify_callback():
     code = request.args.get('code')
     if not code:
         return jsonify({'error': 'Missing code'}), 400
-    token = auth_manager.login_with_spotify(code)
+    state = request.args.get('state')
+    if not state:
+        return jsonify({'error': 'Missing state'}), 400
+    link_user_id = auth_manager.verify_state_token(state)
+    if not link_user_id:
+        return jsonify({'error': 'Invalid or expired state'}), 401
+    token = auth_manager.login_with_spotify(code, link_user_id=link_user_id)
     if not token:
         return jsonify({'error': 'Spotify OAuth failed'}), 401
     return jsonify({'jwt': token})
@@ -74,7 +89,13 @@ def api_auth_callback(provider: str):
     if provider == 'google':
         token = auth_manager.login_with_google(code)
     elif provider == 'spotify':
-        token = auth_manager.login_with_spotify(code)
+        state_param = request.args.get('state')
+        if not state_param:
+            return jsonify({'error': 'Missing state'}), 400
+        link_user_id = auth_manager.verify_state_token(state_param)
+        if not link_user_id:
+            return jsonify({'error': 'Invalid or expired state'}), 401
+        token = auth_manager.login_with_spotify(code, link_user_id=link_user_id)
     else:
         return jsonify({'error': 'Unsupported provider'}), 400
 
@@ -111,11 +132,17 @@ def user_me():
     payload = auth_manager.validate_jwt(jwt_token)
     if not payload:
         return jsonify({'error': 'Invalid or expired JWT'}), 401
+    spotify_connected = auth_manager.has_spotify_tokens(payload['sub'])
+    # If user has Spotify tokens, surface provider hint as spotify
+    provider = payload.get('provider')
+    if spotify_connected:
+        provider = 'spotify'
     return jsonify({'user': {
         'id': payload['sub'],
         'email': payload.get('email'),
         'name': payload.get('name'),
-        'provider': payload.get('provider')
+        'provider': provider,
+        'spotifyConnected': spotify_connected
     }})
 
 

@@ -65,6 +65,24 @@ class AuthManager:
         logger.info(f"Created JWT for user {user.get('email', user['id'])} via {provider}")
         return token
 
+    def create_state_token(self, user_id: Optional[str] = None, ttl_seconds: int = 600) -> str:
+        payload: Dict[str, Any] = {
+            'nonce': str(uuid.uuid4()),
+            'iat': int(time.time()),
+            'exp': int(time.time()) + ttl_seconds,
+        }
+        if user_id:
+            payload['sub'] = str(user_id)
+        return jwt.encode(payload, self.jwt_secret, algorithm=self.jwt_algorithm)
+
+    def verify_state_token(self, state_token: str) -> Optional[str]:
+        try:
+            payload = jwt.decode(state_token, self.jwt_secret, algorithms=[self.jwt_algorithm])
+            return payload.get('sub')
+        except jwt.InvalidTokenError:
+            logger.warning("Invalid or expired state token")
+            return None
+
     def validate_jwt(self, token: str) -> Optional[Dict[str, Any]]:
         try:
             payload = jwt.decode(token, self.jwt_secret, algorithms=[self.jwt_algorithm])
@@ -77,8 +95,8 @@ class AuthManager:
             logger.error("Invalid JWT token")
             return None
 
-    def _get_user_by_google_id(self, google_id: str) -> Optional[Dict[str, Any]]:
-        return self._fetch_one("SELECT * FROM users WHERE google_id = %s", (google_id,))
+    def _get_user_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
+        return self._fetch_one("SELECT * FROM users WHERE id = %s", (str(user_id),))
 
     def _get_user_by_email(self, email: str) -> Optional[Dict[str, Any]]:
         return self._fetch_one("SELECT * FROM users WHERE email = %s", (email,))
@@ -90,10 +108,10 @@ class AuthManager:
         display_name = user_info.get('name') or username
         self._execute(
             """
-            INSERT INTO users (id, email, username, display_name, google_id)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO users (id, email, username, display_name)
+            VALUES (%s, %s, %s, %s)
             """,
-            (str(user_id), email, username, display_name, user_info.get('id'))
+            (str(user_id), email, username, display_name)
         )
         created = self._fetch_one("SELECT * FROM users WHERE id = %s", (str(user_id),))
         if not created:
@@ -107,9 +125,22 @@ class AuthManager:
                 logger.error("Google login failed: empty result or missing user_info")
                 return None
             user_info = result['user_info']
-            user = self._get_user_by_google_id(user_info.get('id')) or self._get_user_by_email(user_info.get('email'))
+            google_id = user_info.get('id')
+            user: Optional[Dict[str, Any]] = None
+
+            if google_id:
+                identity = self._get_identity('google', google_id)
+                if identity:
+                    user = self._get_user_by_id(identity['user_id'])
+
+            if not user:
+                user = self._get_user_by_email(user_info.get('email'))
+
             if not user:
                 user = self._create_google_user(user_info)
+
+            if google_id:
+                self._link_identity(user['id'], 'google', google_id)
             token = self.create_jwt(user, provider='google')
             return token
         except Exception as e:
@@ -120,6 +151,22 @@ class AuthManager:
         return self._fetch_one(
             "SELECT u.* FROM users u JOIN spotify_tokens s ON u.id = s.user_id WHERE s.spotify_id = %s",
             (spotify_id,)
+        )
+
+    def _get_identity(self, provider: str, provider_id: str) -> Optional[Dict[str, Any]]:
+        return self._fetch_one(
+            "SELECT * FROM identities WHERE provider = %s AND provider_id = %s",
+            (provider, provider_id),
+        )
+
+    def _link_identity(self, user_id: str, provider: str, provider_id: str) -> None:
+        self._execute(
+            """
+            INSERT INTO identities (user_id, provider, provider_id)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (provider, provider_id) DO UPDATE SET user_id = EXCLUDED.user_id
+            """,
+            (str(user_id), provider, provider_id),
         )
 
     def _create_spotify_user(self, profile: Dict[str, Any]) -> Dict[str, Any]:
@@ -146,6 +193,9 @@ class AuthManager:
             "SELECT spotify_id, access_token, refresh_token, token_expires_at FROM spotify_tokens WHERE user_id = %s",
             (user_id,)
         )
+
+    def has_spotify_tokens(self, user_id: str) -> bool:
+        return self._get_db_spotify_tokens(user_id) is not None
 
     # ------------------------------------------------------------------
     # Spotify token management (DB-backed, keyed by user_id UUID)
@@ -213,7 +263,7 @@ class AuthManager:
             logger.error(f"Error fetching now playing for user {user_id}: {e}")
             return None
 
-    def login_with_spotify(self, code: str) -> Optional[str]:
+    def login_with_spotify(self, code: str, link_user_id: Optional[str] = None) -> Optional[str]:
         try:
             result = self.spotify_client.complete_oauth_flow(code)
             if not result or 'user_info' not in result or 'tokens' not in result:
@@ -225,10 +275,31 @@ class AuthManager:
             if not spotify_id:
                 logger.error("Spotify login failed: missing spotify_id")
                 return None
-            user = self._get_user_by_spotify_id(spotify_id)
+
+            user: Optional[Dict[str, Any]] = None
+            identity = self._get_identity('spotify', spotify_id)
+
+            if link_user_id:
+                user = self._get_user_by_id(link_user_id)
+                if not user:
+                    logger.error(f"Spotify login failed: link_user_id {link_user_id} not found")
+                    return None
+                if identity and identity['user_id'] != user['id']:
+                    logger.error(
+                        "Spotify login failed: spotify identity already linked to different user"
+                    )
+                    return None
+            else:
+                if identity:
+                    user = self._get_user_by_id(identity['user_id'])
+                if not user:
+                    user = self._get_user_by_spotify_id(spotify_id)
+
             if not user:
                 user = self._create_spotify_user(profile)
+
             tokens['expires_at'] = int(time.time()) + tokens.get('expires_in', 3600)
+            self._link_identity(user['id'], 'spotify', spotify_id)
             self._save_spotify_tokens(user['id'], spotify_id, tokens)
             token = self.create_jwt(user, provider='spotify')
             return token

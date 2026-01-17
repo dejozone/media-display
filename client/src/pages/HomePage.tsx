@@ -11,6 +11,7 @@ type User = {
   email?: string;
   name?: string;
   provider?: string;
+  spotifyConnected?: boolean;
 };
 
 export default function HomePage() {
@@ -21,6 +22,13 @@ export default function HomePage() {
   const [nowPlaying, setNowPlaying] = useState<any>(null);
   const [nowError, setNowError] = useState<string | null>(null);
   const [nowLoading, setNowLoading] = useState(true);
+
+  const forceLogout = (message?: string) => {
+    clearAuthToken();
+    setUser(null);
+    setError(message || 'Session expired. Please sign in again.');
+    navigate('/');
+  };
 
   useEffect(() => {
     const token = getAuthToken();
@@ -34,12 +42,17 @@ export default function HomePage() {
           headers: { Authorization: `Bearer ${token}` }
         });
         setUser(res.data.user);
-        if (res.data.user?.provider === 'spotify') {
+        if (res.data.user?.spotifyConnected) {
           await fetchNowPlaying(token);
         } else {
           setNowLoading(false);
         }
       } catch (e: any) {
+        const status = e?.response?.status;
+        if (status === 401 || status === 403) {
+          forceLogout('Session expired. Please sign in again.');
+          return;
+        }
         setError(e?.response?.data?.error || 'Failed to load user');
         setNowLoading(false);
       } finally {
@@ -50,7 +63,7 @@ export default function HomePage() {
   }, [navigate]);
 
   useEffect(() => {
-    if (!user || user.provider !== 'spotify') return;
+    if (!user || !user.spotifyConnected) return;
     const token = getAuthToken();
     if (!token) return;
 
@@ -67,6 +80,10 @@ export default function HomePage() {
           setNowPlaying(msg.data);
           setNowLoading(false);
         } else if (msg.type === 'error') {
+          if (msg.code === 401 || msg.code === 403 || msg.error === 'invalid_token') {
+            forceLogout('Session expired. Please sign in again.');
+            return;
+          }
           setNowError(msg.error || 'Live updates unavailable');
           setNowLoading(false);
         }
@@ -82,10 +99,8 @@ export default function HomePage() {
     };
 
     ws.onclose = (evt) => {
-      if (evt.code === 4401) {
-        setNowError('Session expired. Please sign in again.');
-        clearAuthToken();
-        navigate('/');
+      if (evt.code === 4401 || evt.code === 4403 || evt.code === 1008) {
+        forceLogout('Session expired. Please sign in again.');
       }
     };
 
@@ -108,6 +123,11 @@ export default function HomePage() {
         setNowPlaying(res.data);
       }
     } catch (e: any) {
+      const status = e?.response?.status;
+      if (status === 401 || status === 403) {
+        forceLogout('Session expired. Please sign in again.');
+        return;
+      }
       const code = e?.response?.data?.code;
       if (code === 'ERR_SPOTIFY_4001') {
         setNowError('ERR_SPOTIFY_4001');
@@ -126,7 +146,10 @@ export default function HomePage() {
 
   const enableSpotify = async () => {
     try {
-      const res = await axios.get(`${API_BASE_URL}/api/auth/spotify/url`);
+      const token = getAuthToken();
+      const res = await axios.get(`${API_BASE_URL}/api/auth/spotify/url`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
       const { url, state } = res.data;
       if (state) {
         localStorage.setItem('oauth_state_spotify', state);
@@ -158,7 +181,7 @@ export default function HomePage() {
                 <p>Welcome, {user.name || user.email || user.id}</p>
                 <p>Provider: {user.provider}</p>
                 <div className="actions">
-                  {user.provider !== 'spotify' && (
+                  {!user.spotifyConnected && (
                     <button onClick={enableSpotify} className="primary">Enable Spotify</button>
                   )}
                   <button onClick={logout} className="secondary">Logout</button>
@@ -176,7 +199,7 @@ export default function HomePage() {
               <span className="pill">Live</span>
             </div>
             <div className="np-body">
-              {user?.provider !== 'spotify' ? (
+              {!user?.spotifyConnected ? (
                 <p className="hint">Connect Spotify to see Now Playing.</p>
               ) : nowLoading ? (
                 <>
