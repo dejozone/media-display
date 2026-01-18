@@ -153,8 +153,8 @@ button.ghost {
   content: "";
   height: 18px;
   width: 18px;
-  left: 4px;
-  bottom: 3px;
+  left: 5px;
+  bottom: 2px;
   background-color: #0e1117;
   transition: 0.2s ease;
   border-radius: 50%;
@@ -191,6 +191,50 @@ button:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
 .now-playing .np-header { display: flex; justify-content: space-between; align-items: center; }
 .eyebrow { font-size: 12px; letter-spacing: 0.6px; text-transform: uppercase; color: #9fb1d0; }
 .pill { padding: 6px 10px; border-radius: 999px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); font-size: 12px; }
+.live-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-left: 8px;
+  border-radius: 50%;
+  background: #6b7280;
+  vertical-align: middle;
+  box-shadow: 0 0 0 0 rgba(0,0,0,0);
+}
+
+.live-dot.green {
+  background: #22c55e;
+  box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.12);
+}
+
+.live-dot.red {
+  background: #ef4444;
+  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.12);
+}
+
+.live-dot.pulse.green {
+  background: #22c55e;
+  box-shadow: 0 0 0 6px rgba(34, 197, 94, 0.18);
+  animation: live-pulse-green 1.6s ease-in-out infinite;
+}
+
+.live-dot.pulse.red {
+  background: #ef4444;
+  box-shadow: 0 0 0 6px rgba(239, 68, 68, 0.18);
+  animation: live-pulse-red 2s ease-in-out infinite;
+}
+
+@keyframes live-pulse-green {
+  0% { box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.18); opacity: 1; }
+  50% { box-shadow: 0 0 0 10px rgba(34, 197, 94, 0.06); opacity: 0.6; }
+  100% { box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.18); opacity: 1; }
+}
+
+@keyframes live-pulse-red {
+  0% { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.18); opacity: 1; }
+  50% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0.06); opacity: 0.6; }
+  100% { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.18); opacity: 1; }
+}
 .np-body { display: flex; gap: 14px; margin-top: 16px; align-items: center; }
 .artwork { width: 72px; height: 72px; border-radius: 12px; background-size: cover; background-position: center; background-color: #1a2338; }
 .artwork.placeholder { background: linear-gradient(135deg, #24324f, #1a2338); opacity: 0.7; }

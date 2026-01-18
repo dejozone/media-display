@@ -30,6 +30,9 @@ export default function HomePage() {
   const [wsVersion, setWsVersion] = useState(0);
   const wsRetryTimerRef = useRef<number | null>(null);
   const wsRetryStateRef = useRef<{ start: number; rapidAttempts: number } | null>(null);
+  const [liveColor, setLiveColor] = useState<'green' | 'red' | null>(null);
+  const [livePulse, setLivePulse] = useState<'green' | 'red' | null>(null);
+  const livePulseTimerRef = useRef<number | null>(null);
   const prevSettingsRef = useRef<typeof settings>(null);
 
   const forceLogout = (message?: string) => {
@@ -138,6 +141,19 @@ export default function HomePage() {
       wsRetryStateRef.current = { start: Date.now(), rapidAttempts: 0 };
     };
 
+    const triggerPulse = (color: 'green' | 'red') => {
+      setLiveColor(color);
+      if (livePulseTimerRef.current !== null) {
+        window.clearTimeout(livePulseTimerRef.current);
+        livePulseTimerRef.current = null;
+      }
+      setLivePulse(color);
+      livePulseTimerRef.current = window.setTimeout(() => {
+        setLivePulse(null);
+        livePulseTimerRef.current = null;
+      }, 5000);
+    };
+
     if (!wsRetryStateRef.current) {
       resetRetryState();
     }
@@ -149,6 +165,7 @@ export default function HomePage() {
     ws.onopen = () => {
       clearRetryTimer();
       resetRetryState();
+      triggerPulse('green');
       setNowLoading(false);
       try {
         const poll: Record<string, number> = {};
@@ -209,6 +226,7 @@ export default function HomePage() {
     ws.onerror = () => {
       setNowError('Live updates unavailable');
       setNowLoading(false);
+      triggerPulse('red');
       handleRetryableClose();
     };
 
@@ -217,6 +235,7 @@ export default function HomePage() {
         forceLogout('Session expired. Please sign in again.');
         return;
       }
+      triggerPulse('red');
       handleRetryableClose();
     };
 
@@ -236,6 +255,10 @@ export default function HomePage() {
         wsRef.current = null;
       }
       clearRetryTimer();
+      if (livePulseTimerRef.current !== null) {
+        window.clearTimeout(livePulseTimerRef.current);
+        livePulseTimerRef.current = null;
+      }
     };
   }, [user, wsVersion]);
 
@@ -469,7 +492,10 @@ export default function HomePage() {
                   <span className="tooltip">{sonosGroupDevices.join('\n')}</span>
                 ) : null}
               </span>
-              <span className="pill">Live</span>
+              <span
+                className={`live-dot ${liveColor || ''} ${livePulse ? `pulse` : ''}`.trim()}
+                aria-label="Live status"
+              />
             </div>
             <div className="np-body">
               {!spotifyEnabled && !sonosEnabled ? (
