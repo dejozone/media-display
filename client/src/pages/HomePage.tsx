@@ -274,6 +274,7 @@ export default function HomePage() {
         setNowPlaying(null);
       } else {
         setNowPlaying(res.data);
+        setNowProvider('spotify');
       }
     } catch (e: any) {
       const status = e?.response?.status;
@@ -368,20 +369,23 @@ export default function HomePage() {
       : [];
 
   const albumText = (() => {
-    const album = nowPlaying?.item?.album;
+    const album = nowPlaying?.item?.album ?? nowPlaying?.album;
     if (nowProvider === 'sonos') {
       if (typeof album === 'string') return album;
-      if (album && typeof album === 'object' && 'name' in album) {
-        // handle accidental object payloads
-        return (album as any).name || '';
+      if (album && typeof album === 'object') {
+        return (album as any).name || (album as any).title || '';
       }
       return '';
     }
     // spotify or unknown
-    if (album && typeof album === 'object' && 'name' in album) {
-      return (album as any).name || '';
+    if (album && typeof album === 'object') {
+      return (album as any).name || (album as any).title || '';
     }
     if (typeof album === 'string') return album;
+    const show = nowPlaying?.item?.show || nowPlaying?.show;
+    if (show && typeof show === 'object') {
+      return (show as any).name || (show as any).title || '';
+    }
     return '';
   })();
 
@@ -392,15 +396,33 @@ export default function HomePage() {
   })();
 
   const artworkUrl = (() => {
-    if (!nowPlaying?.item) return '';
-    if (nowProvider === 'sonos') {
-      return nowPlaying.item.album_art_url || '';
-    }
-    const images = nowPlaying.item.album?.images;
-    if (Array.isArray(images)) {
+    const pickImage = (images: any) => {
+      if (!Array.isArray(images)) return '';
       const firstWithUrl = images.find((img: any) => img?.url);
-      if (firstWithUrl?.url) return firstWithUrl.url;
+      return firstWithUrl?.url || '';
+    };
+
+    if (!nowPlaying) return '';
+
+    if (nowProvider === 'sonos') {
+      return (
+        nowPlaying?.item?.album_art_url ||
+        nowPlaying?.item?.albumArt ||
+        nowPlaying?.item?.album_art ||
+        ''
+      );
     }
+
+    const album = nowPlaying?.item?.album ?? nowPlaying?.album;
+    const fromAlbum = pickImage(album?.images);
+    if (fromAlbum) return fromAlbum;
+
+    const fromItem = pickImage(nowPlaying?.item?.images);
+    if (fromItem) return fromItem;
+
+    const fromTop = pickImage(nowPlaying?.images);
+    if (fromTop) return fromTop;
+
     return '';
   })();
 
