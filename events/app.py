@@ -39,6 +39,7 @@ logging.basicConfig(level=logging.INFO)
 HTTP_CLIENT: Optional[httpx.AsyncClient] = None
 STOP_EVENT: Optional[asyncio.Event] = None
 ACTIVE_TASKS: "set[asyncio.Task]" = set()
+CONNECTION_STOPS: "set[asyncio.Event]" = set()
 
 
 def _http_timeout() -> httpx.Timeout:
@@ -47,20 +48,22 @@ def _http_timeout() -> httpx.Timeout:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global HTTP_CLIENT, STOP_EVENT, ACTIVE_TASKS
+    global HTTP_CLIENT, STOP_EVENT, ACTIVE_TASKS, CONNECTION_STOPS
     STOP_EVENT = asyncio.Event()
     HTTP_CLIENT = httpx.AsyncClient(timeout=_http_timeout())
     try:
         yield
     finally:
+        logger.info("lifespan: shutdown initiated; signalling STOP_EVENT")
         if STOP_EVENT:
             STOP_EVENT.set()
-        # cancel any active polling tasks
+        logger.info("lifespan: signalling %d connection stop events", len(CONNECTION_STOPS))
+        for evt in list(CONNECTION_STOPS):
+            evt.set()
+        logger.info("lifespan: cancelling %d active tasks", len(ACTIVE_TASKS))
+        # cancel any active polling tasks, do not wait to avoid shutdown hangs
         for task in list(ACTIVE_TASKS):
             task.cancel()
-        # wait for tasks to finish quietly
-        if ACTIVE_TASKS:
-            await asyncio.gather(*ACTIVE_TASKS, return_exceptions=True)
         ACTIVE_TASKS.clear()
         if HTTP_CLIENT:
             await HTTP_CLIENT.aclose()
@@ -269,6 +272,7 @@ async def media_events(ws: WebSocket) -> None:
         pass
 
     connection_stop = asyncio.Event()
+    CONNECTION_STOPS.add(connection_stop)
     sonos_task: Optional[asyncio.Task] = None
     spotify_task: Optional[asyncio.Task] = None
 
@@ -276,6 +280,10 @@ async def media_events(ws: WebSocket) -> None:
         while not connection_stop.is_set():
             if ws.application_state != WebSocketState.CONNECTED:
                 logger.info("ws not connected; stopping media loop")
+                break
+            if STOP_EVENT and STOP_EVENT.is_set():
+                logger.info("server stopping; ending media loop (connection_stop=%s)", connection_stop.is_set())
+                connection_stop.set()
                 break
             # If Sonos is enabled, run it as primary until it stops/pauses, then fall back to Spotify.
             if sonos_enabled:
@@ -286,10 +294,21 @@ async def media_events(ws: WebSocket) -> None:
                         connection_stop,
                         stop_on_idle=spotify_enabled,
                         poll_interval_override=client_sonos_poll,
+                        global_stop=STOP_EVENT,
                     )
                 )
                 ACTIVE_TASKS.add(sonos_task)
-                await asyncio.wait({sonos_task}, return_when=asyncio.FIRST_COMPLETED)
+                try:
+                    await asyncio.wait({sonos_task}, return_when=asyncio.FIRST_COMPLETED)
+                except asyncio.CancelledError:
+                    connection_stop.set()
+                    sonos_task.cancel()
+                    try:
+                        await asyncio.wait_for(asyncio.gather(sonos_task, return_exceptions=True), timeout=1)
+                    except asyncio.TimeoutError:
+                        logger.info("shutdown: sonos task slow to cancel; skipping wait")
+                    ACTIVE_TASKS.discard(sonos_task)
+                    break
                 ACTIVE_TASKS.discard(sonos_task)
 
                 if ws.application_state != WebSocketState.CONNECTED:
@@ -315,11 +334,31 @@ async def media_events(ws: WebSocket) -> None:
 
                 sonos_resume_task: Optional[asyncio.Task] = None
                 if sonos_enabled:
-                    sonos_resume_task = asyncio.create_task(SONOS_MANAGER.wait_for_playback(connection_stop))
+                    sonos_resume_task = asyncio.create_task(
+                        SONOS_MANAGER.wait_for_playback(
+                            connection_stop,
+                            global_stop=STOP_EVENT,
+                        )
+                    )
                     ACTIVE_TASKS.add(sonos_resume_task)
 
                 if sonos_resume_task:
-                    done, pending = await asyncio.wait({spotify_task, sonos_resume_task}, return_when=asyncio.FIRST_COMPLETED)
+                    try:
+                        done, pending = await asyncio.wait({spotify_task, sonos_resume_task}, return_when=asyncio.FIRST_COMPLETED)
+                    except asyncio.CancelledError:
+                        connection_stop.set()
+                        for t in (spotify_task, sonos_resume_task):
+                            t.cancel()
+                        try:
+                            await asyncio.wait_for(
+                                asyncio.gather(spotify_task, sonos_resume_task, return_exceptions=True),
+                                timeout=1,
+                            )
+                        except asyncio.TimeoutError:
+                            logger.info("shutdown: sonos/spotify tasks slow to cancel; skipping wait")
+                        ACTIVE_TASKS.discard(sonos_resume_task)
+                        ACTIVE_TASKS.discard(spotify_task)
+                        break
                     resume_found = False
                     if sonos_resume_task in done:
                         try:
@@ -358,18 +397,30 @@ async def media_events(ws: WebSocket) -> None:
                 await ws.send_json({"type": "error", "error": "no_services_enabled"})
                 await _safe_close_ws(ws, code=1000, reason="No services enabled")
                 break
+    except asyncio.CancelledError:
+        logger.info("media loop cancelled; stopping (connection_stop=%s)" % connection_stop.is_set())
+        connection_stop.set()
     except WebSocketDisconnect:
         logger.info("ws disconnect; stopping media loop")
         connection_stop.set()
     finally:
+        CONNECTION_STOPS.discard(connection_stop)
+        logger.info(
+            "media loop finally: cancelling tasks sonos=%s spotify=%s stop_event=%s ws_state=%s",
+            bool(sonos_task),
+            bool(spotify_task),
+            connection_stop.is_set(),
+            ws.application_state,
+        )
         connection_stop.set()
         for task in (sonos_task, spotify_task):
             if task:
                 task.cancel()
-        await asyncio.gather(*[t for t in (sonos_task, spotify_task) if t], return_exceptions=True)
         for task in (sonos_task, spotify_task):
             if task:
                 ACTIVE_TASKS.discard(task)
+        # Ensure the websocket is closed so uvicorn shutdown does not hang waiting for open connections
+        await _safe_close_ws(ws, code=1012, reason="Server shutting down")
         logger.info("ws connection closed")
 
 
@@ -389,5 +440,6 @@ if __name__ == "__main__":
         port=WS_CFG.get("port", 5002),
         ssl_certfile=resolve_path(WS_CFG.get("sslCertFile")),
         ssl_keyfile=resolve_path(WS_CFG.get("sslKeyFile")),
+        timeout_graceful_shutdown=1,
         reload=False,
     )

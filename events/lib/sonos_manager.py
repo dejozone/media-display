@@ -164,7 +164,12 @@ class SonosManager:
             tuple(artists),
         )
 
-    async def wait_for_playback(self, stop_event: asyncio.Event, poll_interval: Optional[int] = None) -> bool:
+    async def wait_for_playback(
+        self,
+        stop_event: asyncio.Event,
+        poll_interval: Optional[int] = None,
+        global_stop: Optional[asyncio.Event] = None,
+    ) -> bool:
         """Block until any Sonos coordinator is playing or stop_event is set.
 
         Returns True if playback detected, False if stopped/timeout via stop_event.
@@ -174,7 +179,7 @@ class SonosManager:
         interval = poll_interval or self.poll_interval
         last_discovery_at = 0.0
 
-        while not stop_event.is_set():
+        while not stop_event.is_set() and not (global_stop and global_stop.is_set()):
             try:
                 now = time.monotonic()
                 if coordinator is None or (now - last_discovery_at) >= self.resume_discovery_interval:
@@ -209,6 +214,7 @@ class SonosManager:
         *,
         stop_on_idle: bool = False,
         poll_interval_override: Optional[int] = None,
+        global_stop: Optional[asyncio.Event] = None,
     ) -> None:
         coordinator: Optional[SoCo] = None
         last_payload: Optional[Dict[str, Any]] = None
@@ -227,8 +233,14 @@ class SonosManager:
 
         self.logger.info("sonos: stream started")
 
-        while not stop_event.is_set():
+        while not stop_event.is_set() and not (global_stop and global_stop.is_set()):
             try:
+                self.logger.debug(
+                    "sonos: loop tick stop_event=%s global_stop=%s ws_state=%s",
+                    stop_event.is_set(),
+                    bool(global_stop and global_stop.is_set()),
+                    ws.application_state,
+                )
                 if ws.application_state != WebSocketState.CONNECTED:
                     self.logger.info("sonos: websocket not connected (pre-loop), stopping stream")
                     stop_event.set()
@@ -248,7 +260,11 @@ class SonosManager:
                 payload = await loop.run_in_executor(None, self._build_payload, coordinator)
 
                 if stop_event.is_set() or ws.application_state != WebSocketState.CONNECTED:
-                    self.logger.info("sonos: websocket not connected before send, stopping stream")
+                    self.logger.info(
+                        "sonos: websocket not connected before send, stopping stream (stop_event=%s ws_state=%s)",
+                        stop_event.is_set(),
+                        ws.application_state,
+                    )
                     stop_event.set()
                     break
 
@@ -335,7 +351,12 @@ class SonosManager:
                         break
                 await asyncio.sleep(effective_poll)
             except asyncio.CancelledError:
-                self.logger.info("sonos: stream cancelled")
+                self.logger.info(
+                    "sonos: stream cancelled (stop_event=%s global_stop=%s ws_state=%s)",
+                    stop_event.is_set(),
+                    bool(global_stop and global_stop.is_set()),
+                    ws.application_state,
+                )
                 break
             except WebSocketDisconnect:
                 self.logger.info("sonos: websocket disconnect; stopping stream")
@@ -349,5 +370,10 @@ class SonosManager:
                 continue
 
         # On exit, nothing special; caller handles ws closure
-        self.logger.info("sonos: stream stopped")
+        self.logger.info(
+            "sonos: stream stopped (stop_event=%s global_stop=%s ws_state=%s)",
+            stop_event.is_set(),
+            bool(global_stop and global_stop.is_set()),
+            ws.application_state,
+        )
         return
