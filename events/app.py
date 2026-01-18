@@ -1,7 +1,6 @@
 import asyncio
 import json
 import os
-import time
 from typing import Any, Dict, Optional
 
 import logging
@@ -14,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.websockets import WebSocketState, WebSocketDisconnect
 
 from lib.sonos_manager import SonosManager
+from lib.spotify_manager import SpotifyManager
 
 load_dotenv()
 
@@ -32,6 +32,7 @@ API_BASE_URL = API_CFG.get("baseUrl", "http://localhost:5001")
 SONOS_CFG = CONFIG.get("sonos", {})
 
 SONOS_MANAGER = SonosManager(SONOS_CFG)
+SPOTIFY_MANAGER = SpotifyManager(SPOTIFY_CFG, API_BASE_URL)
 
 logger = logging.getLogger("events")
 logging.basicConfig(level=logging.INFO)
@@ -119,117 +120,6 @@ async def fetch_settings(token: str) -> Dict[str, Any]:
     except httpx.HTTPError:
         return {}
     return {}
-
-
-async def stream_now_playing(
-    ws: WebSocket,
-    token: str,
-    stop_event: asyncio.Event,
-    *,
-    close_on_stop: bool = True,
-    poll_interval_override: Optional[int] = None,
-) -> None:
-    assert HTTP_CLIENT is not None
-    assert stop_event is not None
-    poll_interval = poll_interval_override or SPOTIFY_CFG.get("pollIntervalSec", 5)
-    retry_interval = SPOTIFY_CFG.get("retryIntervalSec", 2)
-    retry_window = SPOTIFY_CFG.get("retryWindowSec", 20)
-    cooldown = SPOTIFY_CFG.get("cooldownSec", 1800)
-
-    etag: Optional[str] = None
-    last_payload: Optional[Dict[str, Any]] = None
-    failure_start: Optional[float] = None
-
-    while not stop_event.is_set() and ws.application_state == WebSocketState.CONNECTED:
-        try:
-            headers = {"Authorization": f"Bearer {token}"}
-            if etag:
-                headers["If-None-Match"] = etag
-
-            logger.debug("spotify: poll now-playing")
-            resp = await HTTP_CLIENT.get(
-                f"{API_BASE_URL}/api/spotify/now-playing",
-                headers=headers,
-            )
-
-            if resp.status_code == 429:
-                retry_after_header = resp.headers.get("Retry-After")
-                retry_after = 30
-                if retry_after_header:
-                    try:
-                        retry_after = int(retry_after_header)
-                    except ValueError:
-                        pass
-                logger.warning(f"spotify: rate limited, backing off {retry_after}s")
-                try:
-                    await ws.send_json({"type": "error", "error": "spotify_rate_limited"})
-                except Exception:
-                    pass
-                try:
-                    await asyncio.wait_for(asyncio.sleep(retry_after), timeout=retry_after + 1)
-                except asyncio.CancelledError:
-                    break
-                continue
-
-            if resp.status_code == 304:
-                failure_start = None
-            elif resp.status_code == 401:
-                await _safe_close_ws(ws, code=4401, reason="Unauthorized")
-                break
-            elif resp.status_code >= 500:
-                resp.raise_for_status()
-            else:
-                payload = resp.json()
-                etag = resp.headers.get("ETag", etag)
-                if payload != last_payload:
-                    logger.info("spotify: new now-playing payload")
-                    await ws.send_json({
-                        "type": "now_playing",
-                        "provider": "spotify",
-                        "data": payload,
-                    })
-                    last_payload = payload
-                failure_start = None
-
-            await asyncio.wait_for(asyncio.sleep(poll_interval), timeout=poll_interval + 1)
-            continue
-
-        except asyncio.CancelledError:
-            logger.info("spotify: stream cancelled")
-            break
-        except (httpx.TimeoutException, httpx.TransportError, httpx.HTTPStatusError):
-            if stop_event.is_set():
-                break
-            now = time.monotonic()
-            failure_start = failure_start or now
-            elapsed = now - failure_start
-            if elapsed >= retry_window:
-                try:
-                    await asyncio.wait_for(asyncio.sleep(cooldown), timeout=cooldown + 1)
-                except asyncio.CancelledError:
-                    break
-                failure_start = None
-            else:
-                try:
-                    await asyncio.wait_for(asyncio.sleep(retry_interval), timeout=retry_interval + 1)
-                except asyncio.CancelledError:
-                    break
-            continue
-        except WebSocketDisconnect:
-            logger.info("spotify: websocket disconnect")
-            stop_event.set()
-            break
-        except Exception:
-            # Unexpected failure: try to close gracefully
-            try:
-                await ws.send_json({"type": "error", "error": "internal_error"})
-            finally:
-                await _safe_close_ws(ws, code=1011)
-            break
-
-    if close_on_stop:
-        await _safe_close_ws(ws, code=1000)
-    logger.info("spotify: stream closed")
 
 
 @app.websocket(WS_CFG.get("path", "/events/media"))
@@ -321,13 +211,16 @@ async def media_events(ws: WebSocket) -> None:
                     logger.info("ws not connected before spotify fallback; stopping media loop")
                     break
                 logger.info("starting spotify stream (fallback loop)")
+                assert HTTP_CLIENT is not None
                 spotify_task = asyncio.create_task(
-                    stream_now_playing(
-                        ws,
-                        token,
-                        connection_stop,
+                    SPOTIFY_MANAGER.stream_now_playing(
+                        ws=ws,
+                        token=token,
+                        stop_event=connection_stop,
+                        http_client=HTTP_CLIENT,
                         close_on_stop=False,
                         poll_interval_override=client_spotify_poll,
+                        safe_close=_safe_close_ws,
                     )
                 )
                 ACTIVE_TASKS.add(spotify_task)
