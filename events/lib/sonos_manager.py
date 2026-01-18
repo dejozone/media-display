@@ -242,6 +242,7 @@ class SonosManager:
         last_signature: Optional[tuple] = None
         last_position_ms: Optional[int] = None
         last_progress_at: float = time.monotonic()
+        last_playing_group: list[str] = []
 
         self.logger.info("sonos: stream started")
 
@@ -256,6 +257,15 @@ class SonosManager:
                     last_signature = None
 
                 payload = await loop.run_in_executor(None, self._build_payload, coordinator)
+
+                # If paused/stopped, retain the last active group membership so the client knows prior members
+                group_devices = payload.get("group_devices") or []
+                if payload.get("is_playing"):
+                    if group_devices:
+                        last_playing_group = list(group_devices)
+                else:
+                    if not group_devices and last_playing_group:
+                        payload["group_devices"] = list(last_playing_group)
 
                 send_always = poll_interval_override is not None
                 signature = self._signature(payload)
