@@ -15,5 +15,9 @@
     "retryIntervalSec": 2,
     "retryWindowSec": 20,
     "cooldownSec": 1800
+  },
+  "sonos": {
+    "deviceDiscRetryIntervalSec": 2,
+    "idleStuckTimeoutSec": 10
   }
 }

@@ -117,7 +117,21 @@ export default function HomePage() {
     wsRef.current = ws;
     setNowLoading(true);
 
-    ws.onopen = () => setNowLoading(false);
+    ws.onopen = () => {
+      setNowLoading(false);
+      try {
+        const poll: Record<string, number> = {};
+        if (settings?.spotify_enabled) poll.spotify = 2;
+        if (settings?.sonos_enabled === true && false) {
+          // intentionally not sending interval for Sonos; change-only mode by design
+        }
+        if (Object.keys(poll).length > 0) {
+          ws.send(JSON.stringify({ type: 'config', poll }));
+        }
+      } catch (err) {
+        // noop
+      }
+    };
 
     ws.onmessage = (event) => {
       try {

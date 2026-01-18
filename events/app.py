@@ -118,10 +118,17 @@ async def fetch_settings(token: str) -> Dict[str, Any]:
     return {}
 
 
-async def stream_now_playing(ws: WebSocket, token: str, stop_event: asyncio.Event, *, close_on_stop: bool = True) -> None:
+async def stream_now_playing(
+    ws: WebSocket,
+    token: str,
+    stop_event: asyncio.Event,
+    *,
+    close_on_stop: bool = True,
+    poll_interval_override: Optional[int] = None,
+) -> None:
     assert HTTP_CLIENT is not None
     assert stop_event is not None
-    poll_interval = SPOTIFY_CFG.get("pollIntervalSec", 5)
+    poll_interval = poll_interval_override or SPOTIFY_CFG.get("pollIntervalSec", 5)
     retry_interval = SPOTIFY_CFG.get("retryIntervalSec", 2)
     retry_window = SPOTIFY_CFG.get("retryWindowSec", 20)
     cooldown = SPOTIFY_CFG.get("cooldownSec", 1800)
@@ -242,6 +249,24 @@ async def media_events(ws: WebSocket) -> None:
     await ws.accept(subprotocol=None)
     await ws.send_json({"type": "ready", "user": user_info, "settings": settings})
 
+    # Optional client config for poll intervals
+    client_spotify_poll: Optional[int] = None
+    client_sonos_poll: Optional[int] = None
+    try:
+        msg = await asyncio.wait_for(ws.receive_json(), timeout=2.0)
+        if isinstance(msg, dict) and msg.get("type") == "config":
+            poll_cfg = msg.get("poll") or {}
+            sp = poll_cfg.get("spotify")
+            so = poll_cfg.get("sonos")
+            if isinstance(sp, (int, float)) and sp > 0:
+                client_spotify_poll = int(sp)
+            if isinstance(so, (int, float)) and so > 0:
+                client_sonos_poll = int(so)
+    except asyncio.TimeoutError:
+        pass
+    except Exception:
+        pass
+
     connection_stop = asyncio.Event()
     sonos_task: Optional[asyncio.Task] = None
     spotify_task: Optional[asyncio.Task] = None
@@ -249,21 +274,53 @@ async def media_events(ws: WebSocket) -> None:
     # Prefer Sonos when enabled; if Sonos goes idle and Spotify is enabled, fall back automatically.
     if sonos_enabled:
         logger.info("starting sonos stream (primary)")
-        sonos_task = asyncio.create_task(SONOS_MANAGER.stream(ws, connection_stop, stop_on_idle=spotify_enabled))
+        sonos_task = asyncio.create_task(
+            SONOS_MANAGER.stream(
+                ws,
+                connection_stop,
+                stop_on_idle=spotify_enabled,
+                poll_interval_override=client_sonos_poll,
+            )
+        )
         ACTIVE_TASKS.add(sonos_task)
     elif spotify_enabled:
         logger.info("starting spotify stream")
-        spotify_task = asyncio.create_task(stream_now_playing(ws, token, connection_stop))
+        spotify_task = asyncio.create_task(
+            stream_now_playing(ws, token, connection_stop, poll_interval_override=client_spotify_poll)
+        )
         ACTIVE_TASKS.add(spotify_task)
 
     try:
-        if sonos_task:
-            await asyncio.wait({sonos_task}, return_when=asyncio.FIRST_COMPLETED)
-            if spotify_enabled and not connection_stop.is_set() and ws.application_state == WebSocketState.CONNECTED:
-                logger.info("starting spotify stream (fallback after sonos idle/stop)")
-                spotify_task = asyncio.create_task(stream_now_playing(ws, token, connection_stop, close_on_stop=False))
+        while not connection_stop.is_set():
+            # If Sonos is enabled, run it as primary until it stops/pauses, then fall back to Spotify.
+            if sonos_enabled:
+                logger.info("starting sonos stream (primary loop)")
+                sonos_task = asyncio.create_task(
+                    SONOS_MANAGER.stream(
+                        ws,
+                        connection_stop,
+                        stop_on_idle=spotify_enabled,
+                        poll_interval_override=client_sonos_poll,
+                    )
+                )
+                ACTIVE_TASKS.add(sonos_task)
+                await asyncio.wait({sonos_task}, return_when=asyncio.FIRST_COMPLETED)
+                ACTIVE_TASKS.discard(sonos_task)
+
+            # After Sonos stops/pauses, optionally fall back to Spotify
+            if spotify_enabled and not connection_stop.is_set():
+                logger.info("starting spotify stream (fallback loop)")
+                spotify_task = asyncio.create_task(
+                    stream_now_playing(
+                        ws,
+                        token,
+                        connection_stop,
+                        close_on_stop=False,
+                        poll_interval_override=client_spotify_poll,
+                    )
+                )
                 ACTIVE_TASKS.add(spotify_task)
-                # Watch for Sonos playback while Spotify is active; switch back when detected
+
                 sonos_resume_task: Optional[asyncio.Task] = None
                 if sonos_enabled:
                     sonos_resume_task = asyncio.create_task(SONOS_MANAGER.wait_for_playback(connection_stop))
@@ -278,29 +335,37 @@ async def media_events(ws: WebSocket) -> None:
                         except Exception:
                             resume_found = False
 
-                    if resume_found and not connection_stop.is_set() and ws.application_state == WebSocketState.CONNECTED:
+                    if resume_found and not connection_stop.is_set():
                         logger.info("sonos: playback detected; switching from spotify to sonos")
                         spotify_task.cancel()
                         await asyncio.gather(spotify_task, return_exceptions=True)
                         ACTIVE_TASKS.discard(spotify_task)
-                        sonos_task = asyncio.create_task(SONOS_MANAGER.stream(ws, connection_stop, stop_on_idle=spotify_enabled))
-                        ACTIVE_TASKS.add(sonos_task)
-                        await sonos_task
+                        for t in pending:
+                            t.cancel()
+                        await asyncio.gather(*pending, return_exceptions=True)
+                        ACTIVE_TASKS.discard(sonos_resume_task)
+                        # Loop back to start Sonos again
+                        continue
                     else:
                         for t in pending:
                             t.cancel()
                         await asyncio.gather(*pending, return_exceptions=True)
                         if spotify_task in done:
                             await spotify_task
-
-                    ACTIVE_TASKS.discard(sonos_resume_task)
+                        ACTIVE_TASKS.discard(sonos_resume_task)
                 else:
                     await spotify_task
-        elif spotify_task:
-            await spotify_task
-        else:
-            await ws.send_json({"type": "error", "error": "no_services_enabled"})
-            await _safe_close_ws(ws, code=1000, reason="No services enabled")
+
+                ACTIVE_TASKS.discard(spotify_task)
+            else:
+                # No Spotify fallback configured; break to close
+                break
+
+            # If neither service is enabled, bail
+            if not sonos_enabled and not spotify_enabled:
+                await ws.send_json({"type": "error", "error": "no_services_enabled"})
+                await _safe_close_ws(ws, code=1000, reason="No services enabled")
+                break
     finally:
         connection_stop.set()
         for task in (sonos_task, spotify_task):

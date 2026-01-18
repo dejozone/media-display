@@ -15,11 +15,12 @@ class SonosManager:
     """Lightweight Sonos polling manager for local network playback info."""
 
     def __init__(self, config: Dict[str, Any]):
-        self.discovery_interval = config.get("discoveryIntervalSec", 5)
+        self.discovery_retry_interval = config.get("deviceDiscRetryIntervalSec", 5)
         self.retry_window = config.get("discoveryRetryWindowSec", 3600)
         self.cooldown = config.get("discoveryCooldownSec", 1800)
         self.coordinator_retry = config.get("coordinatorRetrySec", 3)
         self.poll_interval = config.get("pollIntervalSec", 5)
+        self.stuck_timeout = config.get("idleStuckTimeoutSec", 10)
         self.discovery_cache_ttl = config.get("discoveryCacheTtlSec", 60)
         self._cached_coordinator: Optional[SoCo] = None
         self._cached_at: float = 0.0
@@ -119,6 +120,20 @@ class SonosManager:
             "state": state_str,
         }
 
+    @staticmethod
+    def _signature(payload: Dict[str, Any]) -> tuple:
+        item = payload.get("item", {}) or {}
+        artists = item.get("artists") or []
+        return (
+            payload.get("state"),
+            payload.get("is_playing"),
+            payload.get("device", {}).get("name"),
+            tuple(payload.get("group_devices") or []),
+            item.get("name"),
+            item.get("album"),
+            tuple(artists),
+        )
+
     async def wait_for_playback(self, stop_event: asyncio.Event, poll_interval: Optional[int] = None) -> bool:
         """Block until any Sonos coordinator is playing or stop_event is set.
 
@@ -133,7 +148,7 @@ class SonosManager:
                 if coordinator is None:
                     coordinator = await self.discover_coordinator()
                     if coordinator is None:
-                        await asyncio.sleep(self.discovery_interval)
+                        await asyncio.sleep(self.discovery_retry_interval)
                         continue
 
                 payload = await loop.run_in_executor(None, self._build_payload, coordinator)
@@ -151,39 +166,41 @@ class SonosManager:
 
         return False
 
-    async def stream(self, ws, stop_event: asyncio.Event, *, stop_on_idle: bool = False, idle_grace: int = 2) -> None:
+    async def stream(
+        self,
+        ws,
+        stop_event: asyncio.Event,
+        *,
+        stop_on_idle: bool = False,
+        poll_interval_override: Optional[int] = None,
+    ) -> None:
         coordinator: Optional[SoCo] = None
         last_payload: Optional[Dict[str, Any]] = None
-        failure_start: Optional[float] = None
-        cooldown_until: Optional[float] = None
         loop = asyncio.get_running_loop()
-        idle_strikes = 0
+        effective_poll = poll_interval_override or self.poll_interval
+        last_signature: Optional[tuple] = None
+        last_position_ms: Optional[int] = None
+        last_progress_at: float = time.monotonic()
 
         self.logger.info("sonos: stream started")
 
         while not stop_event.is_set():
-            now = time.monotonic()
-            if cooldown_until and now < cooldown_until:
-                await asyncio.sleep(min(5, cooldown_until - now))
-                continue
-
             try:
                 if coordinator is None:
                     coordinator = await self.discover_coordinator()
                     if coordinator is None:
-                        failure_start = failure_start or time.monotonic()
-                        elapsed = time.monotonic() - failure_start
-                        if elapsed >= self.retry_window:
-                            cooldown_until = time.monotonic() + self.cooldown
-                            self.logger.warning(f"sonos: discovery cooling down for {self.cooldown}s")
-                            failure_start = None
-                        else:
-                            await asyncio.sleep(self.discovery_interval)
+                        await asyncio.sleep(self.discovery_retry_interval)
                         continue
-                    failure_start = None
+                    # Emit immediately once a coordinator is found
+                    last_signature = None
 
                 payload = await loop.run_in_executor(None, self._build_payload, coordinator)
-                if payload != last_payload:
+
+                send_always = poll_interval_override is not None
+                signature = self._signature(payload)
+                signature_changed = signature != last_signature
+
+                if send_always or signature_changed:
                     if ws.application_state != WebSocketState.CONNECTED:
                         self.logger.info("sonos: websocket not connected, stopping stream")
                         break
@@ -191,20 +208,32 @@ class SonosManager:
                         self.logger.info("sonos: new payload emitted")
                         await ws.send_json({"type": "now_playing", "provider": "sonos", "data": payload})
                         last_payload = payload
+                        last_signature = signature
                     except Exception as exc:
                         self.logger.warning(f"sonos: failed to send payload; stopping stream: {exc}")
                         break
 
-                # If requested, stop streaming after repeated idle/paused states to allow fallback
+                # If requested, stop streaming once playback is no longer active to allow fallback
                 if stop_on_idle:
-                    if payload.get("is_playing") is True:
-                        idle_strikes = 0
-                    else:
-                        idle_strikes += 1
-                        if idle_strikes >= idle_grace:
-                            self.logger.info("sonos: idle detected, stopping stream for fallback")
-                            break
-                await asyncio.sleep(self.poll_interval)
+                    is_playing = payload.get("is_playing")
+                    position_ms = payload.get("position_ms")
+                    now = time.monotonic()
+
+                    if position_ms is not None:
+                        if last_position_ms is None or position_ms != last_position_ms:
+                            last_progress_at = now
+                        last_position_ms = position_ms
+
+                    idle_due_to_state = is_playing is False
+                    idle_due_to_stuck = False
+                    if is_playing:
+                        # Treat a stuck or unknown position while in PLAYING as idle to allow fallback
+                        idle_due_to_stuck = (now - last_progress_at) >= self.stuck_timeout
+
+                    if idle_due_to_state or idle_due_to_stuck:
+                        self.logger.info("sonos: idle detected, stopping stream for fallback")
+                        break
+                await asyncio.sleep(effective_poll)
             except asyncio.CancelledError:
                 self.logger.info("sonos: stream cancelled")
                 break
