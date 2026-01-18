@@ -142,6 +142,15 @@ class SonosManager:
         track_info = coordinator.get_current_track_info()
         transport_info = coordinator.get_current_transport_info()
 
+        # Sonos often returns a relative album art path; normalize to absolute
+        album_art = track_info.get("album_art")
+        if album_art and isinstance(album_art, str) and album_art.startswith("/"):
+            try:
+                ip = coordinator.ip_address
+                album_art = f"http://{ip}:1400{album_art}"
+            except Exception:
+                pass
+
         group_devices = []
         try:
             if coordinator.group and coordinator.group.members:
@@ -165,7 +174,7 @@ class SonosManager:
             "name": track_info.get("title"),
             "artists": [track_info.get("artist")] if track_info.get("artist") else [],
             "album": track_info.get("album"),
-            "album_art_url": track_info.get("album_art"),
+            "album_art_url": album_art,
             "duration_ms": self._parse_ms(track_info.get("duration")),
         }
 
@@ -215,7 +224,10 @@ class SonosManager:
 
                 payload = await loop.run_in_executor(None, self._build_payload, coordinator)
                 if payload.get("is_playing"):
-                    self.logger.info("sonos: playback detected during watch")
+                    try:
+                        self.logger.info("sonos: playback detected during watch (%s)", payload.get("device", {}).get("name"))
+                    except Exception:
+                        pass
                     return True
                 await asyncio.sleep(interval)
             except asyncio.CancelledError:
@@ -249,6 +261,7 @@ class SonosManager:
         stream_started_at = time.monotonic()
         idle_grace_sec = 12
         ever_active = False
+        idle_time_gate_sec = 10
 
         self.logger.info("sonos: stream started")
 
@@ -339,7 +352,7 @@ class SonosManager:
                     else:
                         idle_strikes = 0
 
-                    if idle_strikes >= 2 and ever_active:
+                    if idle_strikes >= 2 and (ever_active or (now - stream_started_at) >= idle_time_gate_sec):
                         self.logger.info("sonos: idle detected, stopping stream for fallback")
                         break
                 await asyncio.sleep(effective_poll)

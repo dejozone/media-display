@@ -391,6 +391,19 @@ export default function HomePage() {
     return artists.map((a: any) => (typeof a === 'string' ? a : a?.name)).filter(Boolean).join(', ');
   })();
 
+  const artworkUrl = (() => {
+    if (!nowPlaying?.item) return '';
+    if (nowProvider === 'sonos') {
+      return nowPlaying.item.album_art_url || '';
+    }
+    const images = nowPlaying.item.album?.images;
+    if (Array.isArray(images)) {
+      const firstWithUrl = images.find((img: any) => img?.url);
+      if (firstWithUrl?.url) return firstWithUrl.url;
+    }
+    return '';
+  })();
+
   const statusLabel = (() => {
     const deviceName = (() => {
       if (nowProvider === 'sonos') {
@@ -514,8 +527,8 @@ export default function HomePage() {
               ) : nowPlaying && nowPlaying.item ? (
                 <>
                   <div
-                    className="artwork"
-                    style={{ backgroundImage: `url(${nowProvider === 'sonos' ? (nowPlaying.item.album_art_url || '') : (nowPlaying.item.album?.images?.[0]?.url || '')})` }}
+                    className={`artwork${artworkUrl ? '' : ' placeholder'}`}
+                    style={artworkUrl ? { backgroundImage: `url(${artworkUrl})` } : undefined}
                   />
                   <div className="meta">
                     <div className="track-title">{nowPlaying.item.name}</div>
