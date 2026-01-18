@@ -5,6 +5,7 @@ import { getAuthToken, clearAuthToken } from '../utils/auth';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 const EVENTS_WS_URL = import.meta.env.VITE_EVENTS_WS_URL || `${window.location.origin.replace(/^http/, 'ws')}/events/media`;
+const DEFAULT_AVATAR = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none"><circle cx="32" cy="32" r="32" fill="%23e5e7eb"/><circle cx="32" cy="26" r="10" fill="%2394a3b8"/><path d="M16 54c4-8 12-12 16-12s12 4 16 12" stroke="%2394a3b8" stroke-width="4" stroke-linecap="round"/></svg>';
 
 type User = {
   id: string;
@@ -469,7 +470,7 @@ export default function HomePage() {
             {user && (
               <div
                 className="avatar"
-                style={user.avatarUrl ? { backgroundImage: `url(${user.avatarUrl})` } : undefined}
+                style={{ backgroundImage: `url(${user?.avatarUrl || DEFAULT_AVATAR})` }}
                 aria-label="User avatar"
               >
                 {!user.avatarUrl && <span>{avatarInitial}</span>}
