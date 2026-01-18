@@ -27,6 +27,7 @@ class SonosManager:
         self._cached_ip: Optional[str] = None
         self._cached_uid: Optional[str] = None
         self.logger = logging.getLogger("events.sonos")
+        self._active_states = {"PLAYING", "TRANSITIONING", "BUFFERING"}
         # Suppress noisy SoCo UPnP parse errors that are non-fatal
         soco_services = logging.getLogger("soco.services")
         soco_services.setLevel(logging.CRITICAL)
@@ -72,21 +73,61 @@ class SonosManager:
         loop = asyncio.get_running_loop()
         now = time.monotonic()
 
-        # Disable caching for now
-        self._cached_coordinator = None
-        self._cached_ip = None
-        self._cached_uid = None
+        # Try cached coordinator first if still fresh and active
+        cached_fallback: Optional[SoCo] = None
+        if (
+            self._cached_coordinator
+            and (now - self._cached_at) < self.discovery_cache_ttl
+            and self._cached_ip
+            and self._cached_uid
+        ):
+            coord = self._cached_coordinator
+            try:
+                if coord.ip_address == self._cached_ip and coord.uid == self._cached_uid:
+                    tinfo = coord.get_current_transport_info()
+                    state = (tinfo.get("current_transport_state") or "").upper()
+                    if state in self._active_states:
+                        try:
+                            self.logger.info("sonos: using cached active coordinator %s", coord.player_name)
+                        except Exception:
+                            self.logger.info("sonos: using cached active coordinator")
+                        return coord
+                    cached_fallback = coord
+            except Exception:
+                cached_fallback = None
+
+        # If we have a fresh cached coordinator that is still coordinator, prefer it before discovery
+        if cached_fallback:
+            try:
+                if bool(getattr(cached_fallback, "is_coordinator", False)):
+                    try:
+                        self.logger.info("sonos: reusing cached coordinator %s (not active)", cached_fallback.player_name)
+                    except Exception:
+                        self.logger.info("sonos: reusing cached coordinator (not active)")
+                    return cached_fallback
+            except Exception:
+                cached_fallback = None
 
         self.logger.info("sonos: discovering devices")
         devices = await loop.run_in_executor(None, discover)
         if not devices:
             self.logger.info("sonos: no devices discovered")
-            return None
+            return cached_fallback
+
+        def _sort_key(dev: SoCo) -> str:
+            try:
+                name = getattr(dev, "player_name", None)
+                ip = getattr(dev, "ip_address", None)
+                return str(name or ip or "")
+            except Exception:
+                return ""
+
+        sorted_devices = sorted(devices, key=_sort_key)
 
         active_coord = None
-        fallback_coord = None
+        fallback_coord = cached_fallback
 
-        for dev in devices:
+        for dev in sorted_devices:
             try:
                 grp = dev.group
                 coord = grp.coordinator if grp else dev
@@ -101,7 +142,7 @@ class SonosManager:
                 except Exception:
                     state = ""
 
-                if state in {"PLAYING", "TRANSITIONING", "BUFFERING"}:
+                if state in self._active_states:
                     active_coord = coord
                     break
             except Exception:
@@ -113,6 +154,7 @@ class SonosManager:
                 self.logger.info(f"sonos: found coordinator {chosen.player_name}")
             except Exception:
                 pass
+            self._cache_coordinator(chosen)
             return chosen
 
         return None
