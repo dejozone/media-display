@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.websockets import WebSocketState
+from starlette.websockets import WebSocketState, WebSocketDisconnect
 
 from lib.sonos_manager import SonosManager
 
@@ -214,6 +214,7 @@ async def stream_now_playing(
             continue
         except WebSocketDisconnect:
             logger.info("spotify: websocket disconnect")
+            stop_event.set()
             break
         except Exception:
             # Unexpected failure: try to close gracefully
@@ -357,6 +358,9 @@ async def media_events(ws: WebSocket) -> None:
                 await ws.send_json({"type": "error", "error": "no_services_enabled"})
                 await _safe_close_ws(ws, code=1000, reason="No services enabled")
                 break
+    except WebSocketDisconnect:
+        logger.info("ws disconnect; stopping media loop")
+        connection_stop.set()
     finally:
         connection_stop.set()
         for task in (sonos_task, spotify_task):

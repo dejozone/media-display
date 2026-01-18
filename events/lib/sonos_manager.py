@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 try:
     from soco import SoCo
     from soco.discovery import discover
-    from starlette.websockets import WebSocketState
+    from starlette.websockets import WebSocketState, WebSocketDisconnect
 except ImportError as exc:  # pragma: no cover
     raise ImportError("soco is required for Sonos support; please install soco") from exc
 
@@ -229,6 +229,11 @@ class SonosManager:
 
         while not stop_event.is_set():
             try:
+                if ws.application_state != WebSocketState.CONNECTED:
+                    self.logger.info("sonos: websocket not connected (pre-loop), stopping stream")
+                    stop_event.set()
+                    break
+
                 if coordinator is None:
                     coordinator = await self.discover_coordinator()
                     if coordinator is None:
@@ -241,6 +246,11 @@ class SonosManager:
                     stream_started_at = time.monotonic()
 
                 payload = await loop.run_in_executor(None, self._build_payload, coordinator)
+
+                if stop_event.is_set() or ws.application_state != WebSocketState.CONNECTED:
+                    self.logger.info("sonos: websocket not connected before send, stopping stream")
+                    stop_event.set()
+                    break
 
                 # If paused/stopped, retain the last active group membership so the client knows prior members
                 group_devices = payload.get("group_devices") or []
@@ -256,18 +266,24 @@ class SonosManager:
                 signature_changed = signature != last_signature
 
                 if send_always or first_emit or signature_changed:
-                    if ws.application_state != WebSocketState.CONNECTED:
+                    if stop_event.is_set() or ws.application_state != WebSocketState.CONNECTED:
                         self.logger.info("sonos: websocket not connected, stopping stream")
                         stop_event.set()
                         break
                     try:
-                        self.logger.info("sonos: new payload emitted")
                         await ws.send_json({"type": "now_playing", "provider": "sonos", "data": payload})
+                        self.logger.info("sonos: new payload emitted")
                         last_payload = payload
                         last_signature = signature
                         first_emit = False
-                    except Exception as exc:
-                        self.logger.warning(f"sonos: failed to send payload; stopping stream: {exc}")
+                    except WebSocketDisconnect:
+                        self.logger.info("sonos: websocket disconnect during send; stopping stream")
+                        stop_event.set()
+                        break
+                    except Exception:
+                        # If the socket dropped between check and send, exit quietly to avoid noisy warnings
+                        self.logger.info("sonos: websocket closed during send; stopping stream")
+                        stop_event.set()
                         break
 
                 # If requested, stop streaming once playback is no longer active to allow fallback
@@ -320,6 +336,10 @@ class SonosManager:
                 await asyncio.sleep(effective_poll)
             except asyncio.CancelledError:
                 self.logger.info("sonos: stream cancelled")
+                break
+            except WebSocketDisconnect:
+                self.logger.info("sonos: websocket disconnect; stopping stream")
+                stop_event.set()
                 break
             except Exception as exc:
                 # Reset coordinator on any failure and retry soon
