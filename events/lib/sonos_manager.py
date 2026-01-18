@@ -72,70 +72,49 @@ class SonosManager:
         loop = asyncio.get_running_loop()
         now = time.monotonic()
 
-        # First try a cached coordinator object if it's still fresh
-        if self._cached_coordinator and (now - self._cached_at) < self.discovery_cache_ttl:
-            try:
-                grp = self._cached_coordinator.group
-                coord = grp.coordinator if grp else None
-                coord_uid = getattr(coord, "uid", None) if coord else None
-                coord_ip = getattr(coord, "ip_address", None) if coord else None
-                is_coord = bool(getattr(coord, "is_coordinator", False)) if coord else False
-                if coord and is_coord and self._cached_ip and self._cached_uid and coord_ip == self._cached_ip and coord_uid == self._cached_uid:
-                    try:
-                        self.logger.info(f"sonos: using cached coordinator {coord.player_name}")
-                    except Exception:
-                        pass
-                    return self._cache_coordinator(coord)
-            except Exception:
-                self._cached_coordinator = None
-
-        # If we have a cached IP, try to reconnect even if the object cache expired
-        if self._cached_ip:
-            try:
-                candidate = SoCo(self._cached_ip)
-                grp = candidate.group
-                coord = grp.coordinator if grp else None
-                coord_uid = getattr(coord, "uid", None) if coord else None
-                coord_ip = getattr(coord, "ip_address", None) if coord else None
-                is_coord = bool(getattr(coord, "is_coordinator", False)) if coord else False
-                if coord and is_coord and coord_uid and coord_ip and self._cached_uid and coord_ip == self._cached_ip and coord_uid == self._cached_uid:
-                    cached = self._cache_coordinator(coord)
-                    if cached:
-                        self.logger.info(f"sonos: reused cached coordinator {coord.player_name} via IP {self._cached_ip}")
-                        return cached
-            except Exception:
-                self.logger.info("sonos: cached coordinator reuse failed; falling back to discovery")
-                self._cached_coordinator = None
-                self._cached_ip = None
-                self._cached_uid = None
+        # Disable caching for now
+        self._cached_coordinator = None
+        self._cached_ip = None
+        self._cached_uid = None
 
         self.logger.info("sonos: discovering devices")
         devices = await loop.run_in_executor(None, discover)
         if not devices:
             self.logger.info("sonos: no devices discovered")
             return None
+
+        active_coord = None
+        fallback_coord = None
+
         for dev in devices:
             try:
                 grp = dev.group
-                coord = grp.coordinator if grp else None
-                if coord:
-                    cached = self._cache_coordinator(coord)
-                    if cached:
-                        self.logger.info(f"sonos: found coordinator {coord.player_name}")
-                        return cached
+                coord = grp.coordinator if grp else dev
+                if not coord:
+                    continue
+                # remember first viable coordinator as fallback
+                fallback_coord = fallback_coord or coord
+
+                try:
+                    tinfo = coord.get_current_transport_info()
+                    state = (tinfo.get("current_transport_state") or "").upper()
+                except Exception:
+                    state = ""
+
+                if state in {"PLAYING", "TRANSITIONING", "BUFFERING"}:
+                    active_coord = coord
+                    break
             except Exception:
                 continue
-        chosen = next(iter(devices)) if devices else None
+
+        chosen = active_coord or fallback_coord
         if chosen:
             try:
-                # Ensure we store the actual group coordinator if available
-                grp = chosen.group
-                coord = grp.coordinator if grp else None
-                coord = coord or chosen
-                cached = self._cache_coordinator(coord)
-                return cached or coord
+                self.logger.info(f"sonos: found coordinator {chosen.player_name}")
             except Exception:
-                return chosen
+                pass
+            return chosen
+
         return None
 
     def _build_payload(self, coordinator: SoCo) -> Dict[str, Any]:
