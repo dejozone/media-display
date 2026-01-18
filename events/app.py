@@ -271,25 +271,6 @@ async def media_events(ws: WebSocket) -> None:
     sonos_task: Optional[asyncio.Task] = None
     spotify_task: Optional[asyncio.Task] = None
 
-    # Prefer Sonos when enabled; if Sonos goes idle and Spotify is enabled, fall back automatically.
-    if sonos_enabled:
-        logger.info("starting sonos stream (primary)")
-        sonos_task = asyncio.create_task(
-            SONOS_MANAGER.stream(
-                ws,
-                connection_stop,
-                stop_on_idle=spotify_enabled,
-                poll_interval_override=client_sonos_poll,
-            )
-        )
-        ACTIVE_TASKS.add(sonos_task)
-    elif spotify_enabled:
-        logger.info("starting spotify stream")
-        spotify_task = asyncio.create_task(
-            stream_now_playing(ws, token, connection_stop, poll_interval_override=client_spotify_poll)
-        )
-        ACTIVE_TASKS.add(spotify_task)
-
     try:
         while not connection_stop.is_set():
             if ws.application_state != WebSocketState.CONNECTED:

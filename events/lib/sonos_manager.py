@@ -158,7 +158,8 @@ class SonosManager:
             group_devices = []
 
         state_str = (transport_info.get("current_transport_state") or "").upper()
-        is_playing = state_str == "PLAYING"
+        # Treat buffering/transitioning as active to avoid premature fallback
+        is_playing = state_str in {"PLAYING", "TRANSITIONING", "BUFFERING"}
 
         item = {
             "name": track_info.get("title"),
@@ -243,6 +244,11 @@ class SonosManager:
         last_position_ms: Optional[int] = None
         last_progress_at: float = time.monotonic()
         last_playing_group: list[str] = []
+        first_emit = True
+        idle_strikes = 0
+        stream_started_at = time.monotonic()
+        idle_grace_sec = 12
+        ever_active = False
 
         self.logger.info("sonos: stream started")
 
@@ -255,6 +261,9 @@ class SonosManager:
                         continue
                     # Emit immediately once a coordinator is found
                     last_signature = None
+                    first_emit = True
+                    idle_strikes = 0
+                    stream_started_at = time.monotonic()
 
                 payload = await loop.run_in_executor(None, self._build_payload, coordinator)
 
@@ -271,7 +280,7 @@ class SonosManager:
                 signature = self._signature(payload)
                 signature_changed = signature != last_signature
 
-                if send_always or signature_changed:
+                if send_always or first_emit or signature_changed:
                     if ws.application_state != WebSocketState.CONNECTED:
                         self.logger.info("sonos: websocket not connected, stopping stream")
                         stop_event.set()
@@ -281,6 +290,7 @@ class SonosManager:
                         await ws.send_json({"type": "now_playing", "provider": "sonos", "data": payload})
                         last_payload = payload
                         last_signature = signature
+                        first_emit = False
                     except Exception as exc:
                         self.logger.warning(f"sonos: failed to send payload; stopping stream: {exc}")
                         break
@@ -289,20 +299,47 @@ class SonosManager:
                 if stop_on_idle:
                     is_playing = payload.get("is_playing")
                     position_ms = payload.get("position_ms")
+                    has_track = bool((payload.get("item") or {}).get("name"))
+                    state_str = (payload.get("state") or "").upper()
+                    active_state = state_str in {"PLAYING", "TRANSITIONING", "BUFFERING"}
+                    if active_state:
+                        ever_active = True
                     now = time.monotonic()
+
+                    # During initial grace, don't drop Sonos to allow state to settle
+                    if (now - stream_started_at) < idle_grace_sec:
+                        await asyncio.sleep(effective_poll)
+                        continue
 
                     if position_ms is not None:
                         if last_position_ms is None or position_ms != last_position_ms:
                             last_progress_at = now
                         last_position_ms = position_ms
 
-                    idle_due_to_state = is_playing is False
+                    idle_due_to_state = (not active_state) and not has_track
                     idle_due_to_stuck = False
                     if is_playing:
                         # Treat a stuck or unknown position while in PLAYING as idle to allow fallback
                         idle_due_to_stuck = (now - last_progress_at) >= self.stuck_timeout
 
                     if idle_due_to_state or idle_due_to_stuck:
+                        self.logger.info(
+                            "sonos: idle candidate state=%s active=%s ever_active=%s track=%s is_playing=%s pos=%s last_pos=%s last_prog_ago=%.2fs strikes=%d",
+                            state_str,
+                            active_state,
+                            ever_active,
+                            has_track,
+                            is_playing,
+                            position_ms,
+                            last_position_ms,
+                            now - last_progress_at,
+                            idle_strikes,
+                        )
+                        idle_strikes += 1
+                    else:
+                        idle_strikes = 0
+
+                    if idle_strikes >= 2 and ever_active:
                         self.logger.info("sonos: idle detected, stopping stream for fallback")
                         break
                 await asyncio.sleep(effective_poll)
