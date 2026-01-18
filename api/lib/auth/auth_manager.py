@@ -78,6 +78,55 @@ class AuthManager:
             with self.db_conn.cursor() as cur:
                 cur.execute(query, params or ())
 
+    # ---------------------------------------------------------------------
+    # Dashboard settings helpers
+    # ---------------------------------------------------------------------
+    def _ensure_dashboard_settings(self, user_id: str) -> None:
+        """Create dashboard_settings row if absent."""
+        self._execute(
+            """
+            INSERT INTO dashboard_settings (user_id)
+            VALUES (%s)
+            ON CONFLICT (user_id) DO NOTHING
+            """,
+            (user_id,),
+        )
+
+    def get_dashboard_settings(self, user_id: str) -> Optional[Dict[str, Any]]:
+        self._ensure_dashboard_settings(user_id)
+        return self._fetch_one(
+            "SELECT * FROM dashboard_settings WHERE user_id = %s",
+            (user_id,),
+        )
+
+    def update_dashboard_settings(
+        self,
+        user_id: str,
+        spotify_enabled: Optional[bool] = None,
+        sonos_enabled: Optional[bool] = None,
+    ) -> Optional[Dict[str, Any]]:
+        self._ensure_dashboard_settings(user_id)
+        set_clauses = []
+        params: Tuple[Any, ...] = tuple()
+
+        if spotify_enabled is not None:
+            set_clauses.append("spotify_enabled = %s")
+            params += (spotify_enabled,)
+        if sonos_enabled is not None:
+            set_clauses.append("sonos_enabled = %s")
+            params += (sonos_enabled,)
+
+        if not set_clauses:
+            return self.get_dashboard_settings(user_id)
+
+        set_clause = ", ".join(set_clauses) + ", updated_at = CURRENT_TIMESTAMP"
+        params += (user_id,)
+
+        return self._fetch_one(
+            f"UPDATE dashboard_settings SET {set_clause} WHERE user_id = %s RETURNING *",
+            params,
+        )
+
     def create_jwt(self, user: Dict[str, Any], provider: str) -> str:
         payload = {
             'sub': str(user['id']),
@@ -409,6 +458,11 @@ class AuthManager:
             )
             self._select_identity(user['id'], 'spotify', spotify_id)
             self._save_spotify_tokens(user['id'], spotify_id, tokens)
+            # Mark Spotify as enabled for the user once OAuth completes
+            try:
+                self.update_dashboard_settings(user['id'], spotify_enabled=True)
+            except Exception as e:
+                logger.warning(f"Failed to update dashboard settings for Spotify enablement: {e}")
             token = self.create_jwt(user, provider='spotify')
             return token
         except Exception as e:

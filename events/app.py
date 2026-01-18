@@ -127,6 +127,7 @@ async def stream_now_playing(ws: WebSocket, token: str) -> None:
                 if payload != last_payload:
                     await ws.send_json({
                         "type": "now_playing",
+                        "provider": "spotify",
                         "data": payload,
                     })
                     last_payload = payload
@@ -168,7 +169,7 @@ async def stream_now_playing(ws: WebSocket, token: str) -> None:
     await _safe_close_ws(ws, code=1000)
 
 
-@app.websocket(WS_CFG.get("path", "/events/spotify"))
+@app.websocket(WS_CFG.get("path", "/events/media"))
 async def spotify_events(ws: WebSocket) -> None:
     token = ws.query_params.get("token")
     if not token:

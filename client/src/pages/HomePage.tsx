@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { getAuthToken, clearAuthToken } from '../utils/auth';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
-const EVENTS_WS_URL = import.meta.env.VITE_EVENTS_WS_URL || `${window.location.origin.replace(/^http/, 'ws')}/events/spotify`;
+const EVENTS_WS_URL = import.meta.env.VITE_EVENTS_WS_URL || `${window.location.origin.replace(/^http/, 'ws')}/events/media`;
 
 type User = {
   id: string;
@@ -23,6 +23,8 @@ export default function HomePage() {
   const [nowPlaying, setNowPlaying] = useState<any>(null);
   const [nowError, setNowError] = useState<string | null>(null);
   const [nowLoading, setNowLoading] = useState(true);
+  const [settings, setSettings] = useState<{ spotify_enabled?: boolean; sonos_enabled?: boolean } | null>(null);
+  const [settingsSaving, setSettingsSaving] = useState(false);
 
   const forceLogout = (message?: string) => {
     clearAuthToken();
@@ -43,6 +45,7 @@ export default function HomePage() {
           headers: { Authorization: `Bearer ${token}` }
         });
         setUser(res.data.user);
+        await fetchSettings(token);
         if (res.data.user?.spotifyConnected) {
           await fetchNowPlaying(token);
         } else {
@@ -150,6 +153,17 @@ export default function HomePage() {
     }
   };
 
+  const fetchSettings = async (jwtToken: string) => {
+    try {
+      const res = await axios.get(`${API_BASE_URL}/api/settings`, {
+        headers: { Authorization: `Bearer ${jwtToken}` }
+      });
+      setSettings(res.data.settings);
+    } catch (e: any) {
+      setError((prev) => prev || e?.response?.data?.error || 'Failed to load settings');
+    }
+  };
+
   const logout = () => {
     clearAuthToken();
     navigate('/');
@@ -169,6 +183,38 @@ export default function HomePage() {
     } catch (e: any) {
       setError(e?.response?.data?.error || 'Failed to start Spotify login');
     }
+  };
+
+  const updateSettings = async (partial: { spotify_enabled?: boolean; sonos_enabled?: boolean }) => {
+    const token = getAuthToken();
+    if (!token) {
+      forceLogout('Session expired. Please sign in again.');
+      return;
+    }
+    setSettingsSaving(true);
+    try {
+      const res = await axios.put(`${API_BASE_URL}/api/settings`, partial, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setSettings(res.data.settings);
+    } catch (e: any) {
+      setError(e?.response?.data?.error || 'Failed to update settings');
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
+
+  const handleSpotifyToggle = async (next: boolean) => {
+    // If turning on and Spotify not connected yet, kick off OAuth flow
+    if (next && !user?.spotifyConnected) {
+      await enableSpotify();
+      return;
+    }
+    await updateSettings({ spotify_enabled: next });
+  };
+
+  const handleSonosToggle = async (next: boolean) => {
+    await updateSettings({ sonos_enabled: next });
   };
 
   if (loading) return <div className="container"><p>Loading…</p></div>;
@@ -228,10 +274,31 @@ export default function HomePage() {
               <>
                 <p>Welcome, {user.name || user.email || user.id}</p>
                 <p>Provider: {user.provider}</p>
-                <div className="actions">
-                  {!user.spotifyConnected && (
-                    <button onClick={enableSpotify} className="primary">Enable Spotify</button>
-                  )}
+                <div className="toggle-group">
+                  <div className="toggle-row">
+                    <span className="toggle-label">Spotify</span>
+                    <label className="switch">
+                      <input
+                        type="checkbox"
+                        checked={!!settings?.spotify_enabled}
+                        onChange={(e) => handleSpotifyToggle(e.target.checked)}
+                        disabled={settingsSaving}
+                      />
+                      <span className="slider" />
+                    </label>
+                  </div>
+                  <div className="toggle-row">
+                    <span className="toggle-label">Sonos</span>
+                    <label className="switch">
+                      <input
+                        type="checkbox"
+                        checked={!!settings?.sonos_enabled}
+                        onChange={(e) => handleSonosToggle(e.target.checked)}
+                        disabled={settingsSaving}
+                      />
+                      <span className="slider" />
+                    </label>
+                  </div>
                 </div>
               </>
             ) : (
@@ -272,7 +339,7 @@ export default function HomePage() {
                 <p className="hint">Nothing playing right now.</p>
               )}
             </div>
-            <p className="hint">We will display track info from Spotify and Sonos here.</p>
+            {/* <p className="hint">We will display track info from Spotify and Sonos here.</p> */}
           </div>
         </div>
       </div>

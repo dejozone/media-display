@@ -162,6 +162,35 @@ def user_me():
     }})
 
 
+@app.route('/api/settings', methods=['GET'])
+@require_auth
+def get_settings():
+    settings = auth_manager.get_dashboard_settings(g.user_id) or {}
+    return jsonify({'settings': settings})
+
+
+@app.route('/api/settings', methods=['PUT', 'PATCH'])
+@require_auth
+def update_settings():
+    data = request.get_json() or {}
+    if not isinstance(data, dict):
+        return jsonify({'error': 'Invalid payload'}), 400
+
+    spotify_enabled = data.get('spotify_enabled') if 'spotify_enabled' in data else None
+    sonos_enabled = data.get('sonos_enabled') if 'sonos_enabled' in data else None
+
+    if spotify_enabled is None and sonos_enabled is None:
+        return jsonify({'error': 'No settings provided'}), 400
+
+    updated = auth_manager.update_dashboard_settings(
+        g.user_id,
+        spotify_enabled=spotify_enabled,
+        sonos_enabled=sonos_enabled,
+    ) or {}
+
+    return jsonify({'settings': updated})
+
+
 @app.route('/api/spotify/now-playing', methods=['GET'])
 @require_auth
 def spotify_now_playing():
