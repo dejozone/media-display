@@ -264,6 +264,7 @@ class SonosManager:
                 if send_always or signature_changed:
                     if ws.application_state != WebSocketState.CONNECTED:
                         self.logger.info("sonos: websocket not connected, stopping stream")
+                        stop_event.set()
                         break
                     try:
                         self.logger.info("sonos: new payload emitted")

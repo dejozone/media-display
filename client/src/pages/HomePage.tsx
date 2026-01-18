@@ -28,6 +28,8 @@ export default function HomePage() {
   const [nowProvider, setNowProvider] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const [wsVersion, setWsVersion] = useState(0);
+  const wsRetryTimerRef = useRef<number | null>(null);
+  const wsRetryStateRef = useRef<{ start: number; rapidAttempts: number } | null>(null);
   const prevSettingsRef = useRef<typeof settings>(null);
 
   const forceLogout = (message?: string) => {
@@ -113,11 +115,40 @@ export default function HomePage() {
     const token = getAuthToken();
     if (!token) return;
 
+    const RAPID_INTERVAL_MS = 2000;
+    const RAPID_MAX = 15;
+    const COOLDOWN_MS = 5 * 60 * 1000;
+    const WINDOW_MS = 28000 * 1000;
+
+    const clearRetryTimer = () => {
+      if (wsRetryTimerRef.current !== null) {
+        window.clearTimeout(wsRetryTimerRef.current);
+        wsRetryTimerRef.current = null;
+      }
+    };
+
+    const scheduleRetry = (delayMs: number) => {
+      clearRetryTimer();
+      wsRetryTimerRef.current = window.setTimeout(() => {
+        setWsVersion((v) => v + 1);
+      }, delayMs);
+    };
+
+    const resetRetryState = () => {
+      wsRetryStateRef.current = { start: Date.now(), rapidAttempts: 0 };
+    };
+
+    if (!wsRetryStateRef.current) {
+      resetRetryState();
+    }
+
     const ws = new WebSocket(`${EVENTS_WS_URL}?token=${token}`);
     wsRef.current = ws;
     setNowLoading(true);
 
     ws.onopen = () => {
+      clearRetryTimer();
+      resetRetryState();
       setNowLoading(false);
       try {
         const poll: Record<string, number> = {};
@@ -155,15 +186,38 @@ export default function HomePage() {
       }
     };
 
+    const handleRetryableClose = () => {
+      const state = wsRetryStateRef.current;
+      if (!state) {
+        resetRetryState();
+        return scheduleRetry(RAPID_INTERVAL_MS);
+      }
+      const elapsed = Date.now() - state.start;
+      if (elapsed >= WINDOW_MS) {
+        setNowError('Live updates unavailable');
+        setNowLoading(false);
+        return;
+      }
+      if (state.rapidAttempts < RAPID_MAX) {
+        wsRetryStateRef.current = { ...state, rapidAttempts: state.rapidAttempts + 1 };
+        return scheduleRetry(RAPID_INTERVAL_MS);
+      }
+      // After rapid attempts, back off to 5 minutes and keep window accounting
+      return scheduleRetry(COOLDOWN_MS);
+    };
+
     ws.onerror = () => {
       setNowError('Live updates unavailable');
       setNowLoading(false);
+      handleRetryableClose();
     };
 
     ws.onclose = (evt) => {
       if (evt.code === 4401 || evt.code === 4403 || evt.code === 1008) {
         forceLogout('Session expired. Please sign in again.');
+        return;
       }
+      handleRetryableClose();
     };
 
     const handleBeforeUnload = () => {
@@ -181,6 +235,7 @@ export default function HomePage() {
       if (wsRef.current === ws) {
         wsRef.current = null;
       }
+      clearRetryTimer();
     };
   }, [user, wsVersion]);
 
