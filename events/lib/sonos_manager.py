@@ -23,10 +23,6 @@ class SonosManager:
         self.stuck_timeout = config.get("idleStuckTimeoutSec", 10)
         self.discovery_cache_ttl = config.get("discoveryCacheTtlSec", 60)
         self.resume_discovery_interval = config.get("resumeDiscoveryIntervalSec", 10)
-        self._cached_coordinator: Optional[SoCo] = None
-        self._cached_at: float = 0.0
-        self._cached_ip: Optional[str] = None
-        self._cached_uid: Optional[str] = None
         self.logger = logging.getLogger("events.sonos")
         self._active_states = {"PLAYING", "TRANSITIONING", "BUFFERING"}
         # Suppress noisy SoCo UPnP parse errors that are non-fatal
@@ -47,74 +43,15 @@ class SonosManager:
         except Exception:
             return None
 
-    def _cache_coordinator(self, coord: SoCo) -> Optional[SoCo]:
-        """Cache a verified group coordinator and return it."""
-        try:
-            ip_addr = coord.ip_address
-        except Exception:
-            ip_addr = None
-        try:
-            uid = coord.uid
-        except Exception:
-            uid = None
-        # Only cache if the device currently identifies as coordinator
-        try:
-            is_coord = bool(getattr(coord, "is_coordinator", False))
-        except Exception:
-            is_coord = False
-        if ip_addr is None or uid is None or not is_coord:
-            return None
-        self._cached_coordinator = coord
-        self._cached_ip = ip_addr
-        self._cached_uid = uid
-        self._cached_at = time.monotonic()
-        return coord
-
-    async def discover_coordinator(self, *, use_cache: bool = True) -> Optional[SoCo]:
+    async def discover_coordinator(self) -> Optional[SoCo]:
         loop = asyncio.get_running_loop()
         now = time.monotonic()
-
-        # Try cached coordinator first if still fresh and active
-        cached_fallback: Optional[SoCo] = None
-        if use_cache:
-            if (
-                self._cached_coordinator
-                and (now - self._cached_at) < self.discovery_cache_ttl
-                and self._cached_ip
-                and self._cached_uid
-            ):
-                coord = self._cached_coordinator
-                try:
-                    if coord.ip_address == self._cached_ip and coord.uid == self._cached_uid:
-                        tinfo = coord.get_current_transport_info()
-                        state = (tinfo.get("current_transport_state") or "").upper()
-                        if state in self._active_states:
-                            try:
-                                self.logger.info("sonos: using cached active coordinator %s", coord.player_name)
-                            except Exception:
-                                self.logger.info("sonos: using cached active coordinator")
-                            return coord
-                        cached_fallback = coord
-                except Exception:
-                    cached_fallback = None
-
-            # If we have a fresh cached coordinator that is still coordinator, prefer it before discovery
-            if cached_fallback:
-                try:
-                    if bool(getattr(cached_fallback, "is_coordinator", False)):
-                        try:
-                            self.logger.info("sonos: reusing cached coordinator %s (not active)", cached_fallback.player_name)
-                        except Exception:
-                            self.logger.info("sonos: reusing cached coordinator (not active)")
-                        return cached_fallback
-                except Exception:
-                    cached_fallback = None
 
         self.logger.info("sonos: discovering devices")
         devices = await loop.run_in_executor(None, discover)
         if not devices:
             self.logger.info("sonos: no devices discovered")
-            return cached_fallback
+            return None
 
         def _sort_key(dev: SoCo) -> str:
             try:
@@ -127,7 +64,7 @@ class SonosManager:
         sorted_devices = sorted(devices, key=_sort_key)
 
         active_coord = None
-        fallback_coord = cached_fallback
+        fallback_coord = None
 
         for dev in sorted_devices:
             try:
@@ -156,7 +93,6 @@ class SonosManager:
                 self.logger.info(f"sonos: found coordinator {chosen.player_name}")
             except Exception:
                 pass
-            self._cache_coordinator(chosen)
             return chosen
 
         return None
@@ -242,7 +178,7 @@ class SonosManager:
             try:
                 now = time.monotonic()
                 if coordinator is None or (now - last_discovery_at) >= self.resume_discovery_interval:
-                    coordinator = await self.discover_coordinator(use_cache=False)
+                    coordinator = await self.discover_coordinator()
                     last_discovery_at = time.monotonic()
                     if coordinator is None:
                         await asyncio.sleep(self.discovery_retry_interval)
