@@ -24,6 +24,8 @@ class SonosManager:
         self.discovery_cache_ttl = config.get("discoveryCacheTtlSec", 60)
         self._cached_coordinator: Optional[SoCo] = None
         self._cached_at: float = 0.0
+        self._cached_ip: Optional[str] = None
+        self._cached_uid: Optional[str] = None
         self.logger = logging.getLogger("events.sonos")
         # Suppress noisy SoCo UPnP parse errors that are non-fatal
         soco_services = logging.getLogger("soco.services")
@@ -43,18 +45,69 @@ class SonosManager:
         except Exception:
             return None
 
+    def _cache_coordinator(self, coord: SoCo) -> Optional[SoCo]:
+        """Cache a verified group coordinator and return it."""
+        try:
+            ip_addr = coord.ip_address
+        except Exception:
+            ip_addr = None
+        try:
+            uid = coord.uid
+        except Exception:
+            uid = None
+        # Only cache if the device currently identifies as coordinator
+        try:
+            is_coord = bool(getattr(coord, "is_coordinator", False))
+        except Exception:
+            is_coord = False
+        if ip_addr is None or uid is None or not is_coord:
+            return None
+        self._cached_coordinator = coord
+        self._cached_ip = ip_addr
+        self._cached_uid = uid
+        self._cached_at = time.monotonic()
+        return coord
+
     async def discover_coordinator(self) -> Optional[SoCo]:
         loop = asyncio.get_running_loop()
         now = time.monotonic()
 
-        # Reuse a recently discovered coordinator to avoid repeated network discovery storms
+        # First try a cached coordinator object if it's still fresh
         if self._cached_coordinator and (now - self._cached_at) < self.discovery_cache_ttl:
             try:
                 grp = self._cached_coordinator.group
-                if grp and grp.coordinator:
-                    return grp.coordinator
+                coord = grp.coordinator if grp else None
+                coord_uid = getattr(coord, "uid", None) if coord else None
+                coord_ip = getattr(coord, "ip_address", None) if coord else None
+                is_coord = bool(getattr(coord, "is_coordinator", False)) if coord else False
+                if coord and is_coord and self._cached_ip and self._cached_uid and coord_ip == self._cached_ip and coord_uid == self._cached_uid:
+                    try:
+                        self.logger.info(f"sonos: using cached coordinator {coord.player_name}")
+                    except Exception:
+                        pass
+                    return self._cache_coordinator(coord)
             except Exception:
                 self._cached_coordinator = None
+
+        # If we have a cached IP, try to reconnect even if the object cache expired
+        if self._cached_ip:
+            try:
+                candidate = SoCo(self._cached_ip)
+                grp = candidate.group
+                coord = grp.coordinator if grp else None
+                coord_uid = getattr(coord, "uid", None) if coord else None
+                coord_ip = getattr(coord, "ip_address", None) if coord else None
+                is_coord = bool(getattr(coord, "is_coordinator", False)) if coord else False
+                if coord and is_coord and coord_uid and coord_ip and self._cached_uid and coord_ip == self._cached_ip and coord_uid == self._cached_uid:
+                    cached = self._cache_coordinator(coord)
+                    if cached:
+                        self.logger.info(f"sonos: reused cached coordinator {coord.player_name} via IP {self._cached_ip}")
+                        return cached
+            except Exception:
+                self.logger.info("sonos: cached coordinator reuse failed; falling back to discovery")
+                self._cached_coordinator = None
+                self._cached_ip = None
+                self._cached_uid = None
 
         self.logger.info("sonos: discovering devices")
         devices = await loop.run_in_executor(None, discover)
@@ -64,18 +117,26 @@ class SonosManager:
         for dev in devices:
             try:
                 grp = dev.group
-                if grp and grp.coordinator:
-                    self._cached_coordinator = grp.coordinator
-                    self._cached_at = time.monotonic()
-                    self.logger.info(f"sonos: found coordinator {grp.coordinator.player_name}")
-                    return grp.coordinator
+                coord = grp.coordinator if grp else None
+                if coord:
+                    cached = self._cache_coordinator(coord)
+                    if cached:
+                        self.logger.info(f"sonos: found coordinator {coord.player_name}")
+                        return cached
             except Exception:
                 continue
         chosen = next(iter(devices)) if devices else None
         if chosen:
-            self._cached_coordinator = chosen
-            self._cached_at = time.monotonic()
-        return chosen
+            try:
+                # Ensure we store the actual group coordinator if available
+                grp = chosen.group
+                coord = grp.coordinator if grp else None
+                coord = coord or chosen
+                cached = self._cache_coordinator(coord)
+                return cached or coord
+            except Exception:
+                return chosen
+        return None
 
     def _build_payload(self, coordinator: SoCo) -> Dict[str, Any]:
         track_info = coordinator.get_current_track_info()
