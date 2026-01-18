@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { getAuthToken, clearAuthToken } from '../utils/auth';
@@ -25,6 +25,10 @@ export default function HomePage() {
   const [nowLoading, setNowLoading] = useState(true);
   const [settings, setSettings] = useState<{ spotify_enabled?: boolean; sonos_enabled?: boolean } | null>(null);
   const [settingsSaving, setSettingsSaving] = useState(false);
+  const [nowProvider, setNowProvider] = useState<string | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const [wsVersion, setWsVersion] = useState(0);
+  const prevSettingsRef = useRef<typeof settings>(null);
 
   const forceLogout = (message?: string) => {
     clearAuthToken();
@@ -66,12 +70,51 @@ export default function HomePage() {
     fetchUser();
   }, [navigate]);
 
+  // Decide when to (re)connect the WebSocket without disrupting the active provider
   useEffect(() => {
-    if (!user || !user.spotifyConnected) return;
+    if (!user || !settings) return;
+    const current = wsRef.current;
+    const isActive = current && (current.readyState === WebSocket.OPEN || current.readyState === WebSocket.CONNECTING);
+
+    const activeEnabled = (() => {
+      if (nowProvider === 'sonos') return settings?.sonos_enabled !== false;
+      if (nowProvider === 'spotify') return settings?.spotify_enabled !== false;
+      return true;
+    })();
+
+    // If no socket or it was closed, trigger a reconnect
+    if (!isActive) {
+      setWsVersion((v) => v + 1);
+      prevSettingsRef.current = settings;
+      return;
+    }
+
+    // If the currently active provider got disabled, reconnect to allow fallback
+    if (!activeEnabled) {
+      current.close(1000, 'Switching provider');
+      setWsVersion((v) => v + 1);
+      prevSettingsRef.current = settings;
+      return;
+    }
+
+    const prev = prevSettingsRef.current;
+    const sonosJustEnabled = prev && prev.sonos_enabled === false && settings.sonos_enabled === true;
+    if (nowProvider === 'spotify' && sonosJustEnabled) {
+      current.close(1000, 'Preferring sonos after enable');
+      setWsVersion((v) => v + 1);
+    }
+
+    prevSettingsRef.current = settings;
+  }, [user, settings, nowProvider]);
+
+  // Establish the WebSocket when requested by wsVersion
+  useEffect(() => {
+    if (!user || !settings) return;
     const token = getAuthToken();
     if (!token) return;
 
     const ws = new WebSocket(`${EVENTS_WS_URL}?token=${token}`);
+    wsRef.current = ws;
     setNowLoading(true);
 
     ws.onopen = () => setNowLoading(false);
@@ -82,6 +125,7 @@ export default function HomePage() {
         if (msg.type === 'now_playing') {
           setNowError(null);
           setNowPlaying(msg.data);
+          setNowProvider(msg.provider || null);
           setNowLoading(false);
         } else if (msg.type === 'error') {
           if (msg.code === 401 || msg.code === 403 || msg.error === 'invalid_token') {
@@ -110,7 +154,7 @@ export default function HomePage() {
 
     const handleBeforeUnload = () => {
       if (ws.readyState === WebSocket.OPEN) {
-        ws.close(1001, 'Page unload');
+        ws.close(1000, 'Page unload');
       }
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
@@ -118,10 +162,13 @@ export default function HomePage() {
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-        ws.close(1001, 'Component unmount');
+        ws.close(1000, 'Component unmount');
+      }
+      if (wsRef.current === ws) {
+        wsRef.current = null;
       }
     };
-  }, [user, navigate]);
+  }, [user, wsVersion]);
 
   const fetchNowPlaying = async (jwtToken: string) => {
     setNowLoading(true);
@@ -221,9 +268,47 @@ export default function HomePage() {
 
   const displayName = user?.name || user?.email || 'User';
   const avatarInitial = (displayName || 'U').trim().charAt(0).toUpperCase();
+  const spotifyEnabled = !!settings?.spotify_enabled;
+  const sonosEnabled = !!settings?.sonos_enabled;
+  const sonosGroupDevices =
+    nowProvider === 'sonos' && Array.isArray(nowPlaying?.group_devices)
+      ? (nowPlaying.group_devices as any[]).filter(Boolean)
+      : [];
+
+  const albumText = (() => {
+    const album = nowPlaying?.item?.album;
+    if (nowProvider === 'sonos') {
+      if (typeof album === 'string') return album;
+      if (album && typeof album === 'object' && 'name' in album) {
+        // handle accidental object payloads
+        return (album as any).name || '';
+      }
+      return '';
+    }
+    // spotify or unknown
+    if (album && typeof album === 'object' && 'name' in album) {
+      return (album as any).name || '';
+    }
+    if (typeof album === 'string') return album;
+    return '';
+  })();
+
+  const artistText = (() => {
+    const artists = nowPlaying?.item?.artists;
+    if (!artists || !Array.isArray(artists)) return '';
+    return artists.map((a: any) => (typeof a === 'string' ? a : a?.name)).filter(Boolean).join(', ');
+  })();
 
   const statusLabel = (() => {
-    const deviceName = nowPlaying?.device?.name?.trim();
+    const deviceName = (() => {
+      if (nowProvider === 'sonos') {
+        if (sonosGroupDevices.length > 1) {
+          return `${String(sonosGroupDevices[0]).trim()} +${sonosGroupDevices.length - 1} more`;
+        }
+        return (sonosGroupDevices[0] || nowPlaying?.device?.name || '').trim();
+      }
+      return nowPlaying?.device?.name?.trim();
+    })();
     const isPlaying = nowPlaying?.is_playing;
 
     if (isPlaying === true) {
@@ -309,12 +394,17 @@ export default function HomePage() {
 
           <div className="card now-playing">
             <div className="np-header">
-              <span className="eyebrow">{statusLabel}</span>
+              <span className="eyebrow tooltip-trigger">
+                {statusLabel}
+                {sonosGroupDevices.length > 0 ? (
+                  <span className="tooltip">{sonosGroupDevices.join('\n')}</span>
+                ) : null}
+              </span>
               <span className="pill">Live</span>
             </div>
             <div className="np-body">
-              {!user?.spotifyConnected ? (
-                <p className="hint">Connect Spotify to see Now Playing.</p>
+              {!spotifyEnabled && !sonosEnabled ? (
+                <p className="hint">Enable Spotify or Sonos to see Now Playing.</p>
               ) : nowLoading ? (
                 <>
                   <div className="artwork placeholder" />
@@ -328,11 +418,14 @@ export default function HomePage() {
                 <p className="error">{nowError === 'spotify_not_connected_or_token_invalid' || nowError === 'ERR_SPOTIFY_4001' ? 'Connect Spotify to see Now Playing.' : nowError}</p>
               ) : nowPlaying && nowPlaying.item ? (
                 <>
-                  <div className="artwork" style={{ backgroundImage: `url(${nowPlaying.item.album?.images?.[0]?.url || ''})` }} />
+                  <div
+                    className="artwork"
+                    style={{ backgroundImage: `url(${nowProvider === 'sonos' ? (nowPlaying.item.album_art_url || '') : (nowPlaying.item.album?.images?.[0]?.url || '')})` }}
+                  />
                   <div className="meta">
                     <div className="track-title">{nowPlaying.item.name}</div>
-                    <div className="track-artist">{nowPlaying.item.artists?.map((a: any) => a.name).join(', ')}</div>
-                    <div className="track-album">{nowPlaying.item.album?.name}</div>
+                    <div className="track-artist">{artistText}</div>
+                    <div className="track-album">{albumText}</div>
                   </div>
                 </>
               ) : (

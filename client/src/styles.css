@@ -202,6 +202,29 @@ button:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
 .track-artist { color: #cfd5e1; font-size: 14px; }
 .track-album { color: #9fb1d0; font-size: 13px; }
 
+.tooltip-trigger { position: relative; display: inline-flex; align-items: center; gap: 6px; }
+.tooltip {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  transform: translateY(8px);
+  padding: 10px 12px;
+  background: rgba(14, 17, 23, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  color: #e8ecf2;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+  white-space: pre-line;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s ease, visibility 0.15s ease;
+  z-index: 10;
+  pointer-events: none;
+  min-width: 220px;
+  max-width: 320px;
+}
+.tooltip-trigger:hover .tooltip { opacity: 1; visibility: visible; }
+
 hr {
   margin: 18px 0;
   border: none;
