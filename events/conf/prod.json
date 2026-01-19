@@ -1,13 +1,13 @@
 {
   "api": {
-    "baseUrl": "https://your-api-host"
+    "baseUrl": "http://localhost:5001"
   },
   "websocket": {
     "host": "0.0.0.0",
     "port": 5002,
     "path": "/events/media",
-    "sslCertFile": "/path/to/prod.crt",
-    "sslKeyFile": "/path/to/prod.key"
+    "sslCertFile": "certs/localhost.crt",
+    "sslKeyFile": "certs/localhost.key"
   },
   "spotify": {
     "pollIntervalSec": 5,
@@ -17,7 +17,7 @@
     "cooldownSec": 30
   },
   "sonos": {
-    "dviceDiscRetryIntervalSec": 2,
+    "deviceDiscRetryIntervalSec": 2,
     "idleStuckTimeoutSec": 10
   }
 }
