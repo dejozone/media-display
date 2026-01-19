@@ -6,6 +6,7 @@ import 'package:media_display/src/services/auth_state.dart';
 import 'package:media_display/src/services/events_ws_service.dart';
 import 'package:media_display/src/services/settings_service.dart';
 import 'package:media_display/src/services/user_service.dart';
+import 'package:media_display/src/widgets/app_header.dart';
 
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
@@ -93,8 +94,10 @@ class _HomePageState extends ConsumerState<HomePage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _Header(
+                AppHeader(
                   user: user,
+                  title: 'Media Display',
+                  subtitle: 'Now Playing • Spotify & Sonos',
                   onAccount: () => context.go('/account'),
                   onLogout: () => _logout(context),
                 ),
@@ -137,74 +140,6 @@ class _HomePageState extends ConsumerState<HomePage> {
       ),
     );
     return scaffold;
-  }
-}
-
-class _Header extends StatelessWidget {
-  const _Header({required this.user, required this.onAccount, required this.onLogout});
-  final Map<String, dynamic>? user;
-  final VoidCallback onAccount;
-  final VoidCallback onLogout;
-
-  @override
-  Widget build(BuildContext context) {
-    final displayName = _displayName(user);
-    final initials = displayName.isNotEmpty ? displayName.trim().characters.first.toUpperCase() : 'U';
-    return Row(
-      children: [
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: const [
-            Text('Media Display', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
-            SizedBox(height: 6),
-            Text('Now Playing • Spotify & Sonos', style: TextStyle(color: Color(0xFF9FB1D0))),
-          ],
-        ),
-        const Spacer(),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: const Color(0xFF1A2333),
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-          ),
-          child: Row(
-            children: [
-              Text(displayName, style: const TextStyle(fontWeight: FontWeight.w600)),
-              const SizedBox(width: 10),
-              CircleAvatar(
-                radius: 16,
-                backgroundColor: const Color(0xFF1F2A44),
-                child: Text(initials, style: const TextStyle(color: Color(0xFFC2CADC), fontWeight: FontWeight.w700)),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(width: 10),
-        OutlinedButton(
-          onPressed: onAccount,
-          style: OutlinedButton.styleFrom(
-            foregroundColor: Colors.white,
-            side: BorderSide(color: Colors.white.withValues(alpha: 0.2)),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          ),
-          child: const Text('Account'),
-        ),
-        const SizedBox(width: 8),
-        ElevatedButton(
-          onPressed: onLogout,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF5AC8FA),
-            foregroundColor: const Color(0xFF0D1021),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            elevation: 0,
-          ),
-          child: const Text('Logout'),
-        ),
-      ],
-    );
   }
 }
 

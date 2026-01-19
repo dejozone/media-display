@@ -4,6 +4,9 @@
     "port": 5000,
     "debug": false
   },
+  "frontend": {
+    "baseUrl": "https://media-display-new.projecttechcycle.org"
+  },
   "database": {
     "host": "localhost",
     "port": 5432,

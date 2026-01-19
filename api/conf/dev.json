@@ -5,7 +5,7 @@
     "debug": true
   },
   "frontend": {
-    "baseUrl": "http://localhost:5173"
+    "baseUrl": "https://media-display-new.projecttechcycle-dev.org:9081"
   },
   "assets": {
     "baseUrl": "https://media-display-new.projecttechcycle-dev.org:9081/assets",
@@ -20,7 +20,7 @@
     "poolMaxConn": 10
   },
   "google": {
-    "redirectUri": "http://localhost:5001/api/auth/google/callback",
+    "redirectUri": "https://media-display-new.projecttechcycle-dev.org:9081/api/auth/google/callback",
     "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth",
     "tokenUrl": "https://oauth2.googleapis.com/token",
     "userInfoUrl": "https://www.googleapis.com/oauth2/v2/userinfo",

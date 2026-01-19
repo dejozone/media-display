@@ -753,6 +753,7 @@ file:///Users/hthai00/Projects/media-display/app/lib/src/services/settings_servi
 file:///Users/hthai00/Projects/media-display/app/lib/src/services/token_storage.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/services/user_service.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/services/ws_ssl_override.dart
+file:///Users/hthai00/Projects/media-display/app/lib/src/widgets/app_header.dart
 file:///Users/hthai00/fvm/versions/3.38.7/bin/cache/dart-sdk/lib/libraries.json
 file:///Users/hthai00/fvm/versions/3.38.7/bin/cache/flutter_web_sdk/kernel/dart2js_platform.dill
 file:///Users/hthai00/fvm/versions/3.38.7/packages/flutter/lib/animation.dart
@@ -1460,6 +1461,7 @@ file:///Users/hthai00/fvm/versions/3.38.7/packages/flutter_web_plugins/lib/src/n
 file:///Users/hthai00/fvm/versions/3.38.7/packages/flutter_web_plugins/lib/src/navigation/utils.dart
 file:///Users/hthai00/fvm/versions/3.38.7/packages/flutter_web_plugins/lib/src/plugin_event_channel.dart
 file:///Users/hthai00/fvm/versions/3.38.7/packages/flutter_web_plugins/lib/src/plugin_registry.dart
+file:///Users/hthai00/fvm/versions/3.38.7/packages/flutter_web_plugins/lib/url_strategy.dart
 org-dartlang-sdk:///dart-sdk/lib/_http/crypto.dart
 org-dartlang-sdk:///dart-sdk/lib/_http/embedder_config.dart
 org-dartlang-sdk:///dart-sdk/lib/_http/http.dart
