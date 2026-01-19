@@ -122,6 +122,13 @@ class Config:
     LOG_FORMAT = CONFIG['logging']['format']
     
     # =============================================================================
+    # ASSETS (from JSON config)
+    # =============================================================================
+    ASSETS_BASE_URL = CONFIG['assets']['baseUrl'].rstrip('/')
+    ASSETS_LOCAL_PATH = CONFIG['assets']['localPath']
+    ASSETS_ROOT = (ROOT_DIR / ASSETS_LOCAL_PATH).resolve()
+
+    # =============================================================================
     # SSL/TLS (from JSON config)
     # =============================================================================
     SSL_VERIFY = CONFIG['ssl']['verify']

@@ -10,10 +10,14 @@ const DEFAULT_AVATAR = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/20
 type User = {
   id: string;
   email?: string;
+  username?: string;
+  display_name?: string;
   name?: string;
   provider?: string;
   spotifyConnected?: boolean;
   avatarUrl?: string;
+  avatar_url?: string;
+  provider_avatars?: Record<string, string | null>;
 };
 
 export default function HomePage() {
@@ -54,9 +58,14 @@ export default function HomePage() {
         const res = await axios.get(`${API_BASE_URL}/api/user/me`, {
           headers: { Authorization: `Bearer ${token}` }
         });
-        setUser(res.data.user);
+        const u = res.data.user;
+        setUser({
+          ...u,
+          name: u.name || u.display_name || u.username || u.email,
+          avatarUrl: u.avatar_url,
+        });
         await fetchSettings(token);
-        if (res.data.user?.spotifyConnected) {
+        if (u?.spotifyConnected) {
           await fetchNowPlaying(token);
         } else {
           setNowLoading(false);
@@ -310,6 +319,10 @@ export default function HomePage() {
     navigate('/');
   };
 
+  const goAccount = () => {
+    navigate('/account');
+  };
+
   const enableSpotify = async () => {
     try {
       const token = getAuthToken();
@@ -360,7 +373,7 @@ export default function HomePage() {
 
   if (loading) return <div className="container"><p>Loading…</p></div>;
 
-  const displayName = user?.name || user?.email || 'User';
+  const displayName = user?.name || user?.display_name || user?.email || user?.username || 'User';
   const avatarInitial = (displayName || 'U').trim().charAt(0).toUpperCase();
   const spotifyEnabled = !!settings?.spotify_enabled;
   const sonosEnabled = !!settings?.sonos_enabled;
@@ -466,16 +479,18 @@ export default function HomePage() {
         <header className="app-header">
           <div className="logo">Media Display</div>
           <div className="user-pill">
-            <span className="user-name">{displayName}</span>
-            {user && (
-              <div
-                className="avatar"
-                style={{ backgroundImage: `url(${user?.avatarUrl || DEFAULT_AVATAR})` }}
-                aria-label="User avatar"
-              >
-                {!user.avatarUrl && <span>{avatarInitial}</span>}
-              </div>
-            )}
+            <button className="user-link" onClick={goAccount} disabled={!user}>
+              <span className="user-name">{displayName}</span>
+              {user && (
+                <div
+                  className="avatar"
+                  style={{ backgroundImage: `url(${user?.avatarUrl || DEFAULT_AVATAR})` }}
+                  aria-label="User avatar"
+                >
+                  {!user.avatarUrl && <span>{avatarInitial}</span>}
+                </div>
+              )}
+            </button>
             <button onClick={logout} className="chip">Logout</button>
           </div>
         </header>

@@ -4,6 +4,10 @@
     "port": 5001,
     "debug": true
   },
+  "assets": {
+    "baseUrl": "https://media-display-new.projecttechcycle-dev.org:9081/assets",
+    "localPath": "api/assets"
+  },
   "database": {
     "host": "localhost",
     "port": 5432,

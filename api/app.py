@@ -2,10 +2,12 @@
 """
 Flask API for OAuth authentication and JWT management
 """
-from flask import Flask, request, jsonify, g
+from flask import Flask, request, jsonify, g, send_from_directory
 from functools import wraps
 import secrets
 from flask_cors import CORS
+import re
+from pathlib import Path
 from lib.auth.auth_manager import AuthManager
 from config import Config
 from lib.utils.logger import auth_logger, server_logger
@@ -13,6 +15,10 @@ from lib.utils.logger import auth_logger, server_logger
 app = Flask(__name__)
 CORS(app, origins=Config.CORS_ORIGINS)
 auth_manager = AuthManager()
+email_re = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+ASSETS_DIR = Config.ASSETS_ROOT
+ALLOWED_IMAGE_EXT = {'.jpg', '.jpeg', '.png', '.bmp', '.heic', '.heif'}
+MAX_AVATAR_UPLOAD = 8 * 1024 * 1024  # 8MB
 
 
 def require_auth(f):
@@ -31,6 +37,14 @@ def require_auth(f):
         g.user_payload = payload
         return f(*args, **kwargs)
     return wrapper
+
+
+@app.route('/assets/<path:filename>')
+def serve_assets(filename: str):
+    target = ASSETS_DIR / filename
+    if not target.exists():
+        return jsonify({'error': 'Not found'}), 404
+    return send_from_directory(ASSETS_DIR, filename)
 
 @app.route('/api/auth/google/url')
 def google_auth_url():
@@ -138,27 +152,42 @@ def validate_jwt():
     return jsonify({'valid': True, 'payload': payload})
 
 @app.route('/api/user/me')
+@require_auth
 def user_me():
-    token = request.headers.get('Authorization')
-    if not token or not token.startswith('Bearer '):
-        return jsonify({'error': 'Missing or invalid Authorization header'}), 401
-    jwt_token = token.split(' ', 1)[1]
-    payload = auth_manager.validate_jwt(jwt_token)
-    if not payload:
-        return jsonify({'error': 'Invalid or expired JWT'}), 401
-    spotify_connected = auth_manager.has_spotify_tokens(payload['sub'])
-    # If user has Spotify tokens, surface provider hint as spotify
-    provider = payload.get('provider')
-    if spotify_connected:
-        provider = 'spotify'
-    avatar_url = auth_manager.get_selected_avatar_url(payload['sub'])
+    user = auth_manager.get_user(g.user_id)
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+
+    identities = auth_manager.get_identities(g.user_id) or []
+    selected_identity = next((i for i in identities if i.get('is_selected')), identities[0] if identities else None)
+    provider = selected_identity.get('provider') if selected_identity else None
+    provider_avatars = {i.get('provider'): i.get('avatar_url') for i in identities if i.get('provider')}
+    provider_avatar_list = [
+        {
+            'provider': i.get('provider'),
+            'provider_id': i.get('provider_id'),
+            'avatar_url': i.get('avatar_url'),
+            'is_selected': i.get('is_selected'),
+        }
+        for i in identities if i.get('provider')
+    ]
+    avatar_url = next((i.get('avatar_url') for i in identities if i.get('is_selected') and i.get('avatar_url')), None)
+    if not avatar_url:
+        avatar_url = next((i.get('avatar_url') for i in identities if i.get('avatar_url')), None)
+    spotify_connected = auth_manager.has_spotify_tokens(g.user_id)
+
     return jsonify({'user': {
-        'id': payload['sub'],
-        'email': payload.get('email'),
-        'name': payload.get('name'),
+        'id': user.get('id'),
+        'email': user.get('email'),
+        'username': user.get('username'),
+        'display_name': user.get('display_name'),
+        'name': user.get('display_name') or user.get('username') or user.get('email'),
         'provider': provider,
+        'provider_selected': provider,
         'spotifyConnected': spotify_connected,
-        'avatarUrl': avatar_url
+        'avatar_url': avatar_url,
+        'provider_avatars': provider_avatars,
+        'provider_avatar_list': provider_avatar_list,
     }})
 
 
@@ -189,6 +218,162 @@ def update_settings():
     ) or {}
 
     return jsonify({'settings': updated})
+
+
+@app.route('/api/account', methods=['GET'])
+@require_auth
+def get_account():
+    user = auth_manager.get_user(g.user_id)
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    identities = auth_manager.get_identities(g.user_id) or []
+    provider_avatars = {i.get('provider'): i.get('avatar_url') for i in identities if i.get('provider')}
+    provider_avatar_list = [
+        {
+            'provider': i.get('provider'),
+            'provider_id': i.get('provider_id'),
+            'avatar_url': i.get('avatar_url'),
+            'is_selected': i.get('is_selected'),
+        }
+        for i in identities if i.get('provider')
+    ]
+    selected_identity = next((i for i in identities if i.get('is_selected')), identities[0] if identities else None)
+    avatar_url = selected_identity.get('avatar_url') if selected_identity else None
+    if not avatar_url:
+        avatar_url = next((i.get('avatar_url') for i in identities if i.get('avatar_url')), None)
+    provider = selected_identity.get('provider') if selected_identity else None
+    spotify_connected = auth_manager.has_spotify_tokens(g.user_id)
+    return jsonify({
+        'user': {
+            'id': user.get('id'),
+            'email': user.get('email'),
+            'username': user.get('username'),
+            'display_name': user.get('display_name'),
+            'avatar_url': avatar_url,
+            'provider_avatars': provider_avatars,
+            'provider_avatar_list': provider_avatar_list,
+            'provider': provider,
+            'provider_selected': provider,
+            'spotifyConnected': spotify_connected,
+            'name': user.get('display_name') or user.get('username') or user.get('email'),
+        }
+    })
+
+
+@app.route('/api/account', methods=['PUT', 'PATCH'])
+@require_auth
+def update_account():
+    data = request.get_json() or {}
+    if not isinstance(data, dict):
+        return jsonify({'error': 'Invalid payload'}), 400
+
+    email = data.get('email')
+    username = data.get('username')
+    display_name = data.get('display_name')
+    avatar_url = data.get('avatar_url')
+    avatar_provider = data.get('avatar_provider')
+
+    if email and not email_re.match(email):
+        return jsonify({'error': 'Invalid email format'}), 400
+
+    if username and auth_manager.username_exists(username, exclude_user_id=g.user_id):
+        return jsonify({'error': 'Username already taken'}), 409
+
+    updated = auth_manager.update_user(
+        g.user_id,
+        email=email,
+        username=username,
+        display_name=display_name,
+    )
+    if not updated:
+        return jsonify({'error': 'Update failed'}), 400
+
+    if avatar_provider:
+        auth_manager.select_identity_by_provider(g.user_id, avatar_provider)
+
+    if avatar_url is not None:
+        auth_manager.update_identity_avatar(g.user_id, avatar_url)
+
+    identities = auth_manager.get_identities(g.user_id) or []
+    provider_avatars = {i.get('provider'): i.get('avatar_url') for i in identities if i.get('provider')}
+    provider_avatar_list = [
+        {
+            'provider': i.get('provider'),
+            'provider_id': i.get('provider_id'),
+            'avatar_url': i.get('avatar_url'),
+            'is_selected': i.get('is_selected'),
+        }
+        for i in identities if i.get('provider')
+    ]
+    selected_identity = next((i for i in identities if i.get('is_selected')), identities[0] if identities else None)
+    chosen_avatar = avatar_url or (selected_identity.get('avatar_url') if selected_identity else None)
+    if not chosen_avatar:
+        chosen_avatar = next((i.get('avatar_url') for i in identities if i.get('avatar_url')), None)
+    selected_provider = selected_identity.get('provider') if selected_identity else None
+
+    return jsonify({
+        'user': {
+            **updated,
+            'avatar_url': chosen_avatar,
+            'provider_avatars': provider_avatars,
+            'provider_avatar_list': provider_avatar_list,
+            'provider': selected_provider,
+            'provider_selected': selected_provider,
+        }
+    }), 200
+
+
+@app.route('/api/account/avatar', methods=['POST'])
+@require_auth
+def upload_avatar():
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file provided'}), 400
+
+    file = request.files['file']
+    filename = (file.filename or '').strip()
+    if not file or not filename:
+        return jsonify({'error': 'No file provided'}), 400
+
+    ext = Path(filename).suffix.lower()
+    if ext not in ALLOWED_IMAGE_EXT:
+        return jsonify({'error': 'Unsupported file type. Use JPG, PNG, BMP, or HEIC/HEIF.'}), 400
+
+    content_length = request.content_length or 0
+    if content_length > MAX_AVATAR_UPLOAD:
+        return jsonify({'error': 'File too large. Max 8MB.'}), 413
+
+    try:
+        raw = file.read()
+        if not raw:
+            return jsonify({'error': 'Empty file'}), 400
+        if len(raw) > MAX_AVATAR_UPLOAD:
+            return jsonify({'error': 'File too large. Max 8MB.'}), 413
+    except Exception as e:
+        server_logger.warning(f"Avatar upload failed to read: {e}")
+        return jsonify({'error': 'Invalid image data'}), 400
+
+    user_dir = ASSETS_DIR / 'images' / 'users' / str(g.user_id)
+    try:
+        user_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        server_logger.error(f"Failed to create avatar directory {user_dir}: {e}")
+        return jsonify({'error': 'Could not create storage directory'}), 500
+
+    out_path = user_dir / 'avatar.jpg'
+    try:
+        out_path.write_bytes(raw)
+    except Exception as e:
+        server_logger.error(f"Failed to save avatar image: {e}")
+        return jsonify({'error': 'Could not save avatar'}), 500
+
+    public_url = f"{Config.ASSETS_BASE_URL}/images/users/{g.user_id}/avatar.jpg"
+
+    try:
+        auth_manager.update_identity_avatar(g.user_id, public_url)
+    except Exception as e:
+        server_logger.warning(f"Failed to update identity avatar for user {g.user_id}: {e}")
+
+    return jsonify({'avatar_url': public_url}), 200
 
 
 @app.route('/api/spotify/now-playing', methods=['GET'])

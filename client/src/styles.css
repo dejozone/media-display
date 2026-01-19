@@ -36,6 +36,8 @@ a { color: inherit; text-decoration: none; }
 .logo { font-weight: 700; letter-spacing: 0.4px; font-size: 20px; }
 
 .user-pill { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.user-link { display: flex; align-items: center; gap: 12px; background: none; border: none; color: inherit; cursor: pointer; padding: 0; }
+.user-link:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .user-name {
   flex: 1 1 auto;
@@ -274,3 +276,28 @@ hr {
   border: none;
   border-top: 1px solid rgba(255,255,255,0.08);
 }
+
+/* Settings */
+.settings-grid { align-items: start; }
+.field { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.label { font-weight: 600; color: #e8ecf2; font-size: 14px; }
+.input { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.04); color: #e8ecf2; }
+.input:focus { outline: 1px solid rgba(90,200,250,0.6); border-color: rgba(90,200,250,0.4); }
+.inline-input { display: flex; gap: 10px; }
+
+.avatar-preview { width: 120px; height: 120px; border-radius: 50%; background-size: cover; background-position: center; background-color: #1a2338; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 12px; }
+.avatar-options { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.avatar-chip { display: inline-flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.16); background: rgba(255,255,255,0.05); color: #e8ecf2; cursor: pointer; }
+.avatar-chip.active { border-color: #5ac8fa; background: rgba(90,200,250,0.12); }
+.avatar-thumb { width: 28px; height: 28px; border-radius: 50%; background-size: cover; background-position: center; background-color: #1f2a44; border: 1px solid rgba(255,255,255,0.12); }
+.avatar-upload { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.avatar-upload input[type="file"] { color: #e8ecf2; }
+.avatar-upload .hint { margin: 0; }
+
+.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 20px; }
+.modal { background: #111624; border: 1px solid rgba(255,255,255,0.14); border-radius: 14px; padding: 16px; width: min(720px, 96vw); max-height: 90vh; display: flex; flex-direction: column; gap: 12px; }
+.modal h2 { margin: 0; font-size: 18px; }
+.cropper-shell { position: relative; width: 100%; aspect-ratio: 1 / 1; background: #0b1020; border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; overflow: hidden; }
+.crop-controls { display: flex; align-items: center; gap: 10px; }
+.range { flex: 1; accent-color: #5ac8fa; }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; }

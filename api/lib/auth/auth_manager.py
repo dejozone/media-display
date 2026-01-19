@@ -6,7 +6,7 @@ Handles JWT creation, validation, refresh, and integrates with Google/Spotify OA
 import os
 import sys
 from pathlib import Path
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, List
 import time
 import uuid
 import jwt
@@ -67,6 +67,19 @@ class AuthManager:
             with self.db_conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(query, params or ())
                 return cur.fetchone()
+
+    def _fetch_all(self, query: str, params: SqlParams = None) -> List[Dict[str, Any]]:
+        """Return rows as plain dicts to satisfy type checkers."""
+        self._ensure_conn()
+        try:
+            with self.db_conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(query, params or ())
+                return [dict(row) for row in (cur.fetchall() or [])]
+        except (InterfaceError, OperationalError):
+            self._ensure_conn()
+            with self.db_conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(query, params or ())
+                return [dict(row) for row in (cur.fetchall() or [])]
 
     def _execute(self, query: str, params: SqlParams = None) -> None:
         self._ensure_conn()
@@ -237,6 +250,81 @@ class AuthManager:
             "SELECT * FROM identities WHERE provider = %s AND provider_id = %s",
             (provider, provider_id),
         )
+
+    def get_user(self, user_id: str) -> Optional[Dict[str, Any]]:
+        return self._get_user_by_id(user_id)
+
+    def get_identities(self, user_id: str) -> List[Dict[str, Any]]:
+        return self._fetch_all(
+            "SELECT * FROM identities WHERE user_id = %s",
+            (str(user_id),),
+        )
+
+    def username_exists(self, username: str, exclude_user_id: Optional[str] = None) -> bool:
+        if exclude_user_id:
+            row = self._fetch_one(
+                "SELECT 1 FROM users WHERE username = %s AND id <> %s",
+                (username, str(exclude_user_id)),
+            )
+        else:
+            row = self._fetch_one(
+                "SELECT 1 FROM users WHERE username = %s",
+                (username,),
+            )
+        return row is not None
+
+    def update_user(
+        self,
+        user_id: str,
+        *,
+        email: Optional[str] = None,
+        username: Optional[str] = None,
+        display_name: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        set_clauses = []
+        params: Tuple[Any, ...] = tuple()
+        if email is not None:
+            set_clauses.append("email = %s")
+            params += (email,)
+        if username is not None:
+            set_clauses.append("username = %s")
+            params += (username,)
+        if display_name is not None:
+            set_clauses.append("display_name = %s")
+            params += (display_name,)
+        if not set_clauses:
+            return self._get_user_by_id(user_id)
+
+        params += (str(user_id),)
+        set_clause = ", ".join(set_clauses)
+        return self._fetch_one(
+            f"UPDATE users SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE id = %s RETURNING *",
+            params,
+        )
+
+    def update_identity_avatar(self, user_id: str, avatar_url: Optional[str]) -> None:
+        # Update only the currently selected identity; never overwrite other providers unintentionally
+        identity = self._fetch_one(
+            "SELECT provider, provider_id FROM identities WHERE user_id = %s AND is_selected = TRUE ORDER BY created_at DESC LIMIT 1",
+            (str(user_id),),
+        )
+        if not identity:
+            return
+
+        self._execute(
+            "UPDATE identities SET avatar_url = %s WHERE user_id = %s AND provider = %s AND provider_id = %s",
+            (avatar_url, str(user_id), identity['provider'], identity['provider_id']),
+        )
+
+    def select_identity_by_provider(self, user_id: str, provider: str) -> None:
+        # Pick the newest identity for the provider and mark it selected, deselecting others
+        identity = self._fetch_one(
+            "SELECT provider, provider_id FROM identities WHERE user_id = %s AND provider = %s ORDER BY created_at DESC LIMIT 1",
+            (str(user_id), provider),
+        )
+        if not identity:
+            return
+        self._select_identity(str(user_id), identity['provider'], identity['provider_id'])
 
     def _link_identity(self, user_id: str, provider: str, provider_id: str, avatar_url: Optional[str] = None, select_if_none: bool = False) -> None:
         is_selected = False

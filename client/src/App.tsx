@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import LoginPage from './pages/LoginPage';
 import HomePage from './pages/HomePage';
 import OAuthCallbackPage from './pages/OAuthCallbackPage';
+import AccountSettingsPage from './pages/AccountSettingsPage';
 import PrivateRoute from './components/PrivateRoute';
 
 function App() {
@@ -13,6 +14,14 @@ function App() {
         element={
           <PrivateRoute>
             <HomePage />
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/account"
+        element={
+          <PrivateRoute>
+            <AccountSettingsPage />
           </PrivateRoute>
         }
       />
