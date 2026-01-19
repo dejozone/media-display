@@ -14,8 +14,25 @@ class MediaDisplayApp extends ConsumerWidget {
     return MaterialApp.router(
       title: 'Media Display',
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
         useMaterial3: true,
+        brightness: Brightness.dark,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF5AC8FA),
+          brightness: Brightness.dark,
+          background: const Color(0xFF0E1117),
+          surface: const Color(0xFF111624),
+          primary: const Color(0xFF5AC8FA),
+          secondary: const Color(0xFF4B7BEC),
+          tertiary: const Color(0xFF9FB1D0),
+        ),
+        scaffoldBackgroundColor: const Color(0xFF0E1117),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Colors.transparent,
+          foregroundColor: Colors.white,
+          elevation: 0,
+        ),
+        cardColor: const Color(0xFF111624),
+        textTheme: ThemeData.dark().textTheme,
       ),
       routerConfig: router,
       debugShowCheckedModeBanner: false,

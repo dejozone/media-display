@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -25,7 +26,11 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     try {
       final url = await loader();
       if (!mounted) return;
-      final ok = await launchUrl(url, mode: LaunchMode.externalApplication);
+      final ok = await launchUrl(
+        url,
+        mode: LaunchMode.platformDefault,
+        webOnlyWindowName: kIsWeb ? '_self' : null,
+      );
       if (!ok) {
         setState(() {
           _error = 'Failed to open browser for login';
