@@ -1,0 +1,32 @@
+name: media_display
+description: "Flutter client for Media Display (multi-platform: web, mobile, desktop)"
+version: 0.1.0
+publish_to: 'none'
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_riverpod: ^3.2.0
+  # state_notifier: ^1.0.0
+  go_router: ^17.0.1
+  dio: ^5.4.0
+  flutter_dotenv: ^6.0.0
+  shared_preferences: ^2.2.2
+  url_launcher: ^6.3.0
+  web_socket_channel: ^3.0.3
+  # Optional: logging utilities
+  logging: ^1.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/
+    - assets/env/

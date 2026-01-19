@@ -36,7 +36,8 @@
       "http://localhost:3000",
       "http://localhost:5001",
       "http://localhost:5173",
-      "https://media-display-new.projecttechcycle-dev.org:9081"
+      "https://media-display-new.projecttechcycle-dev.org:9081",
+      "*"
     ]
   },
   "jwt": {
