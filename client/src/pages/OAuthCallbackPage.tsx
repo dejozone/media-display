@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { setAuthToken } from '../utils/auth';
+import AlertModal from '../components/AlertModal';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
@@ -11,6 +12,7 @@ export default function OAuthCallbackPage() {
   const navigate = useNavigate();
   const [message, setMessage] = useState('Completing sign-in…');
   const [error, setError] = useState<string | null>(null);
+  const [showModal, setShowModal] = useState(false);
 
   useEffect(() => {
     const code = search.get('code');
@@ -41,7 +43,9 @@ export default function OAuthCallbackPage() {
         localStorage.removeItem(`oauth_state_${provider}`);
         navigate('/home', { replace: true });
       } catch (e: any) {
-        setError(e?.response?.data?.error || e.message || 'Login failed');
+        const serverError = e?.response?.data?.error || e.message || 'Login failed';
+        setError(serverError);
+        setShowModal(true);
       }
     };
     complete();
@@ -52,6 +56,13 @@ export default function OAuthCallbackPage() {
       <div className="card">
         {error ? <p className="error">{error}</p> : <p>{message}</p>}
       </div>
+      <AlertModal
+        open={showModal}
+        title={provider === 'spotify' ? "Can't connect Spotify" : 'Sign-in issue'}
+        message={error || 'Something went wrong completing sign-in.'}
+        primaryLabel="Back to Home"
+        onPrimary={() => navigate('/home', { replace: true })}
+      />
     </div>
   );
 }

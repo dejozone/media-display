@@ -493,18 +493,18 @@ class AuthManager:
             logger.error(f"Error fetching now playing for user {user_id}: {e}")
             return None
 
-    def login_with_spotify(self, code: str, link_user_id: Optional[str] = None, allow_create_if_new: bool = True) -> Optional[str]:
+    def login_with_spotify(self, code: str, link_user_id: Optional[str] = None, allow_create_if_new: bool = True) -> Tuple[Optional[str], Optional[str]]:
         try:
             result = self.spotify_client.complete_oauth_flow(code)
             if not result or 'user_info' not in result or 'tokens' not in result:
                 logger.error("Spotify login failed: empty result or missing fields")
-                return None
+                return None, 'spotify_login_failed'
             profile = result['user_info']
             tokens = result['tokens']
             spotify_id = profile.get('id')
             if not spotify_id:
                 logger.error("Spotify login failed: missing spotify_id")
-                return None
+                return None, 'spotify_login_failed'
             images = profile.get('images') or []
             avatar_url = None
             if isinstance(images, list) and images:
@@ -517,17 +517,15 @@ class AuthManager:
                 user = self._get_user_by_id(link_user_id)
                 if not user:
                     logger.error(f"Spotify login failed: link_user_id {link_user_id} not found")
-                    return None
+                    return None, 'spotify_login_failed'
                 if identity and identity['user_id'] != user['id']:
-                    old_user_id = identity['user_id']
                     logger.warning(
-                        "Reassigning spotify identity %s from user %s to user %s",
+                        "Spotify identity %s already linked to different user %s; rejecting for user %s",
                         spotify_id,
-                        old_user_id,
+                        identity['user_id'],
                         user['id'],
                     )
-                    self._reassign_spotify_identity(old_user_id, user['id'], spotify_id, avatar_url)
-                    identity = {'user_id': user['id'], 'provider': 'spotify', 'provider_id': spotify_id}
+                    return None, 'spotify_identity_in_use'
             else:
                 if identity:
                     user = self._get_user_by_id(identity['user_id'])
@@ -537,7 +535,7 @@ class AuthManager:
             if not user:
                 if not allow_create_if_new:
                     logger.warning("Spotify login refused: no existing identity and creation not allowed")
-                    return None
+                    return None, 'spotify_login_failed'
                 user = self._create_spotify_user(profile)
 
             tokens['expires_at'] = int(time.time()) + tokens.get('expires_in', 3600)
@@ -552,10 +550,10 @@ class AuthManager:
             except Exception as e:
                 logger.warning(f"Failed to update dashboard settings for Spotify enablement: {e}")
             token = self.create_jwt(user, provider='spotify')
-            return token
+            return token, None
         except Exception as e:
             logger.error(f"Spotify login failed: {str(e)}")
-            return None
+            return None, 'spotify_login_failed'
 
 # =============================================================================
 # STANDALONE TESTING

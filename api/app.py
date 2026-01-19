@@ -99,7 +99,9 @@ def spotify_callback():
     else:
         auth_logger.warning("Spotify callback missing state; attempting identity-based login only")
 
-    token = auth_manager.login_with_spotify(code, link_user_id=link_user_id, allow_create_if_new=allow_create)
+    token, err = auth_manager.login_with_spotify(code, link_user_id=link_user_id, allow_create_if_new=allow_create)
+    if err == 'spotify_identity_in_use':
+        return jsonify({'error': 'This Spotify account is already linked to another user.', 'code': err}), 409
     if not token:
         return jsonify({'error': 'Spotify OAuth failed'}), 401
     return jsonify({'jwt': token})
@@ -123,10 +125,12 @@ def api_auth_callback(provider: str):
                 auth_logger.warning("Spotify provider callback invalid state; proceeding without linking")
         else:
             auth_logger.warning("Spotify provider callback missing state; attempting identity-based login only")
-        token = auth_manager.login_with_spotify(code, link_user_id=link_user_id, allow_create_if_new=allow_create)
+        token, err = auth_manager.login_with_spotify(code, link_user_id=link_user_id, allow_create_if_new=allow_create)
     else:
         return jsonify({'error': 'Unsupported provider'}), 400
 
+    if err == 'spotify_identity_in_use':
+        return jsonify({'error': 'This Spotify account is already linked to another user.', 'code': err}), 409
     if not token:
         return jsonify({'error': f'{provider.capitalize()} OAuth failed'}), 401
     return jsonify({'jwt': token})
