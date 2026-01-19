@@ -224,6 +224,35 @@ def update_settings():
     return jsonify({'settings': updated})
 
 
+@app.route('/api/users/<user_id>/services/<service>', methods=['DELETE', 'POST'])
+@require_auth
+def manage_service(user_id: str, service: str):
+    # Enforce that the path user matches the JWT subject
+    if user_id != g.user_id:
+        return jsonify({'error': 'Forbidden'}), 403
+
+    service = service.lower()
+    if service not in {'spotify', 'sonos'}:
+        return jsonify({'error': 'Unsupported service'}), 400
+
+    if request.method == 'DELETE':
+        if service == 'spotify':
+            auth_manager.delete_identity_by_provider(g.user_id, 'spotify')
+            auth_manager.delete_spotify_tokens(g.user_id)
+            auth_manager.update_dashboard_settings(g.user_id, spotify_enabled=False)
+        elif service == 'sonos':
+            auth_manager.update_dashboard_settings(g.user_id, sonos_enabled=False)
+    else:  # POST
+        if service == 'spotify':
+            auth_manager.update_dashboard_settings(g.user_id, spotify_enabled=True)
+        elif service == 'sonos':
+            auth_manager.ensure_dashboard_settings(g.user_id, sonos_enabled=True)
+
+    settings = auth_manager.get_dashboard_settings(g.user_id) or {}
+    account = auth_manager.get_account_payload(g.user_id)
+    return jsonify({'settings': settings, 'user': account}), 200
+
+
 @app.route('/api/account', methods=['GET'])
 @require_auth
 def get_account():

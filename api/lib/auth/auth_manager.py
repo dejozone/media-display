@@ -105,6 +105,19 @@ class AuthManager:
             (user_id,),
         )
 
+    def ensure_dashboard_settings(self, user_id: str, *, spotify_enabled: Optional[bool] = None, sonos_enabled: Optional[bool] = None) -> None:
+        existing = self.get_dashboard_settings(user_id)
+        if existing:
+            self.update_dashboard_settings(user_id, spotify_enabled=spotify_enabled, sonos_enabled=sonos_enabled)
+            return
+        self._execute(
+            """
+            INSERT INTO dashboard_settings (user_id, spotify_enabled, sonos_enabled)
+            VALUES (%s, %s, %s)
+            """,
+            (user_id, spotify_enabled, sonos_enabled),
+        )
+
     def get_dashboard_settings(self, user_id: str) -> Optional[Dict[str, Any]]:
         self._ensure_dashboard_settings(user_id)
         return self._fetch_one(
@@ -249,6 +262,12 @@ class AuthManager:
         return self._fetch_one(
             "SELECT * FROM identities WHERE provider = %s AND provider_id = %s",
             (provider, provider_id),
+        )
+
+    def delete_identity_by_provider(self, user_id: str, provider: str) -> None:
+        self._execute(
+            "DELETE FROM identities WHERE user_id = %s AND provider = %s",
+            (str(user_id), provider),
         )
 
     def get_user(self, user_id: str) -> Optional[Dict[str, Any]]:
@@ -427,6 +446,12 @@ class AuthManager:
     def has_spotify_tokens(self, user_id: str) -> bool:
         return self._get_db_spotify_tokens(user_id) is not None
 
+    def delete_spotify_tokens(self, user_id: str) -> None:
+        self._execute(
+            "DELETE FROM spotify_tokens WHERE user_id = %s",
+            (str(user_id),),
+        )
+
     # ------------------------------------------------------------------
     # Spotify token management (DB-backed, keyed by user_id UUID)
     # ------------------------------------------------------------------
@@ -554,6 +579,41 @@ class AuthManager:
         except Exception as e:
             logger.error(f"Spotify login failed: {str(e)}")
             return None, 'spotify_login_failed'
+
+    def get_account_payload(self, user_id: str) -> Dict[str, Any]:
+        user = self.get_user(user_id)
+        if not user:
+            return {}
+        identities = self.get_identities(user_id) or []
+        provider_avatars = {i.get('provider'): i.get('avatar_url') for i in identities if i.get('provider')}
+        provider_avatar_list = [
+            {
+                'provider': i.get('provider'),
+                'provider_id': i.get('provider_id'),
+                'avatar_url': i.get('avatar_url'),
+                'is_selected': i.get('is_selected'),
+            }
+            for i in identities if i.get('provider')
+        ]
+        selected_identity = next((i for i in identities if i.get('is_selected')), identities[0] if identities else None)
+        avatar_url = selected_identity.get('avatar_url') if selected_identity else None
+        if not avatar_url:
+            avatar_url = next((i.get('avatar_url') for i in identities if i.get('avatar_url')), None)
+        provider = selected_identity.get('provider') if selected_identity else None
+        spotify_connected = self.has_spotify_tokens(user_id)
+        return {
+            'id': user.get('id'),
+            'email': user.get('email'),
+            'username': user.get('username'),
+            'display_name': user.get('display_name'),
+            'name': user.get('display_name') or user.get('username') or user.get('email'),
+            'provider': provider,
+            'provider_selected': provider,
+            'spotifyConnected': spotify_connected,
+            'avatar_url': avatar_url,
+            'provider_avatars': provider_avatars,
+            'provider_avatar_list': provider_avatar_list,
+        }
 
 # =============================================================================
 # STANDALONE TESTING

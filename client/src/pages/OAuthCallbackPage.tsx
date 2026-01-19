@@ -60,8 +60,11 @@ export default function OAuthCallbackPage() {
         open={showModal}
         title={provider === 'spotify' ? "Can't connect Spotify" : 'Sign-in issue'}
         message={error || 'Something went wrong completing sign-in.'}
-        primaryLabel="Back to Home"
-        onPrimary={() => navigate('/home', { replace: true })}
+        primaryLabel="Back"
+        onPrimary={() => setShowModal(false)}
+        onClose={() => setShowModal(false)}
+        autoNavigateBack
+        closeOnBackdrop
       />
     </div>
   );

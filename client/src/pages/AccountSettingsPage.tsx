@@ -5,6 +5,7 @@ import { clearAuthToken, getAuthToken } from '../utils/auth';
 import { validateEmail, validateUsername, validateDisplayName, validateImageFile } from '../utils/validation';
 import Cropper, { Area } from 'react-easy-crop';
 import heic2any from 'heic2any';
+import AlertModal from '../components/AlertModal';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 const FALLBACK_AVATAR = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none"><circle cx="32" cy="32" r="32" fill="%23e5e7eb"/><circle cx="32" cy="26" r="10" fill="%2394a3b8"/><path d="M16 54c4-8 12-12 16-12s12 4 16 12" stroke="%2394a3b8" stroke-width="4" stroke-linecap="round"/></svg>';
@@ -32,6 +33,11 @@ type ApiUser = {
   user: AccountUser;
 };
 
+type Settings = {
+  spotify_enabled?: boolean;
+  sonos_enabled?: boolean;
+};
+
 export default function AccountSettingsPage() {
   const navigate = useNavigate();
   const [user, setUser] = useState<AccountUser | null>(null);
@@ -55,6 +61,8 @@ export default function AccountSettingsPage() {
   const [targetExt, setTargetExt] = useState<'jpg' | 'png'>('jpg');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [settings, setSettings] = useState<Settings | null>(null);
+  const [confirm, setConfirm] = useState<{ open: boolean; service?: 'spotify' | 'sonos'; message?: string }>({ open: false });
 
   const currentSelectedProvider = () => {
     return selectedProvider
@@ -77,6 +85,11 @@ export default function AccountSettingsPage() {
   const resetMessages = () => {
     setError(null);
     setSuccess(null);
+  };
+
+  const logout = () => {
+    clearAuthToken();
+    navigate('/');
   };
 
   const loadImage = (src: string): Promise<HTMLImageElement> =>
@@ -246,6 +259,31 @@ export default function AccountSettingsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    const token = getAuthToken();
+    if (!token) {
+      forceLogout();
+      return;
+    }
+    const fetchSettings = async () => {
+      try {
+        const res = await axios.get<{ settings: Settings }>(`${API_BASE_URL}/api/settings`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setSettings(res.data.settings);
+      } catch (e: any) {
+        const status = e?.response?.status;
+        if (status === 401 || status === 403) {
+          forceLogout('Session expired. Please sign in again.');
+          return;
+        }
+        setError(e?.response?.data?.error || 'Failed to load settings');
+      }
+    };
+    fetchSettings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => () => {
     if (cropImage) {
       URL.revokeObjectURL(cropImage);
@@ -358,6 +396,103 @@ export default function AccountSettingsPage() {
     await saveAvatar(trimmed || '', providerForSave);
   };
 
+  const updateService = async (service: 'spotify' | 'sonos', action: 'enable' | 'disable') => {
+    const token = getAuthToken();
+    if (!token || !user) {
+      forceLogout('Session expired. Please sign in again.');
+      return;
+    }
+    try {
+      if (action === 'disable') {
+        const res = await axios.delete(`${API_BASE_URL}/api/users/${user.id}/services/${service}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setSettings(res.data.settings || {});
+        if (res.data.user) {
+          const updated = res.data.user as AccountUser;
+          setUser(updated);
+          setProviderAvatars(updated.provider_avatar_list || []);
+          setSelectedProvider(updated.provider_selected || updated.provider || null);
+          setSelectedAvatar(updated.avatar_url || null);
+          setCustomAvatar(updated.avatar_url || '');
+        }
+      } else {
+        const res = await axios.post(`${API_BASE_URL}/api/users/${user.id}/services/${service}`, {}, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setSettings(res.data.settings || {});
+        if (res.data.user) {
+          const updated = res.data.user as AccountUser;
+          setUser(updated);
+          setProviderAvatars(updated.provider_avatar_list || []);
+          setSelectedProvider(updated.provider_selected || updated.provider || null);
+          setSelectedAvatar(updated.avatar_url || null);
+          setCustomAvatar(updated.avatar_url || '');
+        }
+      }
+    } catch (e: any) {
+      const status = e?.response?.status;
+      if (status === 401 || status === 403) {
+        forceLogout('Session expired. Please sign in again.');
+        return;
+      }
+      setError(e?.response?.data?.error || 'Failed to update service');
+    }
+  };
+
+  const startSpotifyEnable = async () => {
+    try {
+      const token = getAuthToken();
+      const res = await axios.get(`${API_BASE_URL}/api/auth/spotify/url`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      const { url, state } = res.data;
+      if (state) {
+        localStorage.setItem('oauth_state_spotify', state);
+      }
+      window.location.href = url;
+    } catch (e: any) {
+      setError(e?.response?.data?.error || 'Failed to start Spotify login');
+    }
+  };
+
+  const handleServiceToggle = (service: 'spotify' | 'sonos', next: boolean) => {
+    if (!user) return;
+    if (service === 'spotify') {
+      if (next) {
+        startSpotifyEnable();
+        return;
+      }
+      setConfirm({
+        open: true,
+        service: 'spotify',
+        message: 'Disconnecting Spotify will disable its services for this account. Continue?'
+      });
+      return;
+    }
+
+    if (service === 'sonos') {
+      if (next) {
+        updateService('sonos', 'enable');
+        return;
+      }
+      setConfirm({
+        open: true,
+        service: 'sonos',
+        message: 'Disconnecting Sonos will disable its services for this account. Continue?'
+      });
+    }
+  };
+
+  const confirmAction = async () => {
+    if (!confirm.service) {
+      setConfirm({ open: false });
+      return;
+    }
+    await updateService(confirm.service, 'disable');
+    setConfirm({ open: false });
+  };
+
   if (loading) {
     return (
       <div className="container">
@@ -385,11 +520,39 @@ export default function AccountSettingsPage() {
         <header className="app-header">
           <div className="logo">Account Settings</div>
           <div className="user-pill">
-            <button className="chip" onClick={() => navigate('/home')}>Back to Home</button>
+            <button className="chip" onClick={() => navigate('/home')}>Home</button>
+            <button className="chip" onClick={logout}>Logout</button>
           </div>
         </header>
 
         <div className="grid settings-grid">
+          <div className="card">
+            <h1>Services</h1>
+            <div className="toggle-group">
+            <div className="toggle-row">
+              <span className="toggle-label">Spotify</span>
+              <label className="switch">
+                <input
+                  type="checkbox"
+                  checked={!!settings?.spotify_enabled}
+                  onChange={(e) => handleServiceToggle('spotify', e.target.checked)}
+                />
+                <span className="slider" />
+              </label>
+            </div>
+            <div className="toggle-row">
+              <span className="toggle-label">Sonos</span>
+              <label className="switch">
+                <input
+                  type="checkbox"
+                  checked={!!settings?.sonos_enabled}
+                  onChange={(e) => handleServiceToggle('sonos', e.target.checked)}
+                />
+                <span className="slider" />
+              </label>
+            </div>
+            </div>
+          </div>
           <div className="card">
             <h1>Profile</h1>
             <div className="field">
@@ -545,6 +708,15 @@ export default function AccountSettingsPage() {
           </div>
         </div>
       )}
+      <AlertModal
+        open={confirm.open}
+        title="Confirm disconnect"
+        message={confirm.message || ''}
+        primaryLabel="Disconnect"
+        secondaryLabel="Cancel"
+        onSecondary={() => setConfirm({ open: false })}
+        onPrimary={confirmAction}
+      />
     </div>
   );
 }
