@@ -29,7 +29,9 @@ SPOTIFY_CFG = CONFIG.get("spotify", {})
 WS_CFG = CONFIG.get("websocket", {})
 API_CFG = CONFIG.get("api", {})
 API_BASE_URL = API_CFG.get("baseUrl", "http://localhost:5001")
+API_SSL_VERIFY = API_CFG.get("sslVerify", True)
 SONOS_CFG = CONFIG.get("sonos", {})
+SERVER_CFG = CONFIG.get("server", {})
 
 SONOS_MANAGER = SonosManager(SONOS_CFG)
 SPOTIFY_MANAGER = SpotifyManager(SPOTIFY_CFG, API_BASE_URL)
@@ -51,7 +53,7 @@ def _http_timeout() -> httpx.Timeout:
 async def lifespan(app: FastAPI):
     global HTTP_CLIENT, STOP_EVENT, ACTIVE_TASKS, CONNECTION_STOPS
     STOP_EVENT = asyncio.Event()
-    HTTP_CLIENT = httpx.AsyncClient(timeout=_http_timeout())
+    HTTP_CLIENT = httpx.AsyncClient(timeout=_http_timeout(), verify=API_SSL_VERIFY)
     try:
         yield
     finally:
@@ -393,6 +395,6 @@ if __name__ == "__main__":
         port=WS_CFG.get("port", 5002),
         ssl_certfile=resolve_path(WS_CFG.get("sslCertFile")),
         ssl_keyfile=resolve_path(WS_CFG.get("sslKeyFile")),
-        timeout_graceful_shutdown=1,
+        timeout_graceful_shutdown=SERVER_CFG.get("timeoutGracefulShutdownSec", 1),
         reload=False,
     )

@@ -1,6 +1,7 @@
 {
   "api": {
-    "baseUrl": "http://localhost:5001"
+    "baseUrl": "http://localhost:5001",
+    "sslVerify": false
   },
   "websocket": {
     "host": "0.0.0.0",
@@ -18,6 +19,15 @@
   },
   "sonos": {
     "deviceDiscRetryIntervalSec": 2,
+    "discoveryRetryWindowSec": 120,
+    "discoveryCooldownSec": 30,
+    "coordinatorRetrySec": 3,
+    "pollIntervalSec": 5,
+    "discoveryCacheTtlSec": 60,
+    "resumeDiscoveryIntervalSec": 10,
     "idleStuckTimeoutSec": 10
+  },
+  "server": {
+    "timeoutGracefulShutdownSec": 1
   }
 }
