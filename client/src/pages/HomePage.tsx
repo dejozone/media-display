@@ -368,7 +368,21 @@ export default function HomePage() {
       const res = await axios.put(`${API_BASE_URL}/api/settings`, partial, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      setSettings(res.data.settings);
+      const nextSettings = res.data.settings;
+      const prev = settings;
+      const changed = !prev
+        || prev.spotify_enabled !== nextSettings?.spotify_enabled
+        || prev.sonos_enabled !== nextSettings?.sonos_enabled;
+
+      setSettings(nextSettings);
+
+      if (changed) {
+        const ws = wsRef.current;
+        if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+          ws.close(1000, 'Settings updated');
+        }
+        setWsVersion((v) => v + 1);
+      }
     } catch (e: any) {
       setError(e?.response?.data?.error || 'Failed to update settings');
     } finally {
@@ -519,7 +533,7 @@ export default function HomePage() {
             {user ? (
               <>
                 <p>Welcome, {user.name || user.email || user.id}</p>
-                <p>Provider: {user.provider}</p>
+                {/* <p>Provider: {user.provider}</p> */}
                 <div className="toggle-group">
                   <div className="toggle-row">
                     <span className="toggle-label">Spotify</span>
