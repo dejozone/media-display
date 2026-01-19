@@ -440,21 +440,31 @@ export default function AccountSettingsPage() {
             <h1>Avatar</h1>
             <div className="avatar-preview" style={{ backgroundImage: `url(${avatarPreview})` }} aria-label="Avatar preview" />
             <div className="avatar-options">
-              <label className="label" htmlFor="avatarFile">Choose from Spotify, Google Accounts</label>
+              <label className="label" htmlFor="avatarFile">Available Images</label>
               {providerAvatars.length === 0 && <p className="hint">Link a provider to pull an avatar.</p>}
-              {providerAvatars.map((p) => {
-                const isActive = p.provider === selectedProvider || p.is_selected;
-                return (
-                <button
-                  key={`${p.provider}-${p.provider_id || 'default'}`}
-                  type="button"
-                  className={`avatar-chip ${isActive ? 'active' : ''}`}
-                  onClick={() => applyProviderAvatar(p.provider, p.avatar_url || null)}
-                >
-                  <span className="avatar-thumb" style={{ backgroundImage: `url(${p.avatar_url || FALLBACK_AVATAR})` }} />
-                  <span>{p.provider}</span>
-                </button>
-              );})}
+              {providerAvatars.length > 0 && (
+                <div className="avatar-strip" role="list">
+                  {providerAvatars.map((p) => {
+                    const isActive = p.is_selected || p.provider === selectedProvider;
+                    return (
+                      <button
+                        key={`${p.provider}-${p.provider_id || 'default'}`}
+                        type="button"
+                        role="listitem"
+                        className={`avatar-dot ${isActive ? 'active' : ''}`}
+                        onClick={() => applyProviderAvatar(p.provider, p.avatar_url || null)}
+                        aria-label={`Add ${p.provider} avatar`}
+                      >
+                        <span
+                          className="avatar-thumb large"
+                          style={{ backgroundImage: `url(${p.avatar_url || FALLBACK_AVATAR})` }}
+                        />
+                        <span className="avatar-tooltip">{p.provider}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
             <div className="avatar-upload">
               <label className="label" htmlFor="avatarFile">Upload New Image</label>
@@ -468,7 +478,7 @@ export default function AccountSettingsPage() {
             </div>
             
             <div className="field">
-              <label className="label" htmlFor="customAvatar">Custom Avatar URL</label>
+              <label className="label" htmlFor="customAvatar">Custom Image URL</label>
               <div className="inline-input">
                 <input
                   id="customAvatar"
@@ -477,7 +487,7 @@ export default function AccountSettingsPage() {
                   onChange={(e) => setCustomAvatar(e.target.value)}
                   placeholder="https://example.com/avatar.png"
                 />
-                <button className="secondary" onClick={applyCustomAvatar}>Use</button>
+                <button className="secondary" onClick={applyCustomAvatar}>Add</button>
                 <button className="ghost" onClick={() => { setSelectedProvider(currentSelectedProvider()); setSelectedAvatar(''); setCustomAvatar(''); }}>
                 Clear
               </button>

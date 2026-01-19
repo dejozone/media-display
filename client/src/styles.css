@@ -286,10 +286,15 @@ hr {
 .inline-input { display: flex; gap: 10px; }
 
 .avatar-preview { width: 120px; height: 120px; border-radius: 50%; background-size: cover; background-position: center; background-color: #1a2338; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 12px; }
-.avatar-options { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
-.avatar-chip { display: inline-flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.16); background: rgba(255,255,255,0.05); color: #e8ecf2; cursor: pointer; }
-.avatar-chip.active { border-color: #5ac8fa; background: rgba(90,200,250,0.12); }
+.avatar-options { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
+.avatar-strip { display: flex; gap: 12px; align-items: center; overflow-x: auto; padding: 4px 2px; }
+.avatar-dot { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 60px; height: 60px; padding: 8px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.16); background: rgba(255,255,255,0.04); cursor: pointer; transition: all 0.15s ease; }
+.avatar-dot:hover { border-color: rgba(90,200,250,0.5); box-shadow: 0 6px 18px rgba(0,0,0,0.3); transform: translateY(-1px); }
+.avatar-dot.active { border-color: #5ac8fa; box-shadow: 0 0 0 4px rgba(90,200,250,0.12); background: rgba(90,200,250,0.1); }
 .avatar-thumb { width: 28px; height: 28px; border-radius: 50%; background-size: cover; background-position: center; background-color: #1f2a44; border: 1px solid rgba(255,255,255,0.12); }
+.avatar-thumb.large { width: 44px; height: 44px; }
+.avatar-tooltip { position: absolute; bottom: -34px; left: 50%; transform: translate(-50%, 6px); padding: 6px 10px; border-radius: 10px; background: rgba(14,17,23,0.95); border: 1px solid rgba(255,255,255,0.12); color: #e8ecf2; font-size: 12px; white-space: nowrap; opacity: 0; visibility: hidden; transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease; pointer-events: none; }
+.avatar-dot:hover .avatar-tooltip { opacity: 1; visibility: visible; transform: translate(-50%, 0); }
 .avatar-upload { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
 .avatar-upload input[type="file"] { color: #e8ecf2; }
 .avatar-upload .hint { margin: 0; }
