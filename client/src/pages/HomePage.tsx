@@ -88,8 +88,17 @@ export default function HomePage() {
   // Decide when to (re)connect the WebSocket without disrupting the active provider
   useEffect(() => {
     if (!user || !settings) return;
+    const servicesEnabled = !!settings.spotify_enabled || !!settings.sonos_enabled;
     const current = wsRef.current;
     const isActive = current && (current.readyState === WebSocket.OPEN || current.readyState === WebSocket.CONNECTING);
+
+    // If no services are enabled, ensure socket is closed and do nothing
+    if (!servicesEnabled) {
+      if (isActive) {
+        current.close(1000, 'All services disabled');
+      }
+      return;
+    }
 
     const activeEnabled = (() => {
       if (nowProvider === 'sonos') return settings?.sonos_enabled !== false;
@@ -125,6 +134,15 @@ export default function HomePage() {
   // Establish the WebSocket when requested by wsVersion
   useEffect(() => {
     if (!user || !settings) return;
+    const servicesEnabled = !!settings.spotify_enabled || !!settings.sonos_enabled;
+    if (!servicesEnabled) {
+      // If we somehow have a socket, close it and avoid connecting when nothing is enabled
+      const existing = wsRef.current;
+      if (existing && (existing.readyState === WebSocket.OPEN || existing.readyState === WebSocket.CONNECTING)) {
+        existing.close(1000, 'All services disabled');
+      }
+      return;
+    }
     const token = getAuthToken();
     if (!token) return;
 
