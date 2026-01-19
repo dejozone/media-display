@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:media_display/src/config/env.dart';
 import 'package:media_display/src/services/auth_state.dart';
+import 'package:media_display/src/services/ws_ssl_override.dart'
+  if (dart.library.io) 'package:media_display/src/services/ws_ssl_override_io.dart';
 
 class NowPlayingState {
   const NowPlayingState({this.provider, this.payload, this.error, this.connected = false});
@@ -44,13 +46,15 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     return const NowPlayingState();
   }
 
-  void _connect(AuthState auth) {
+  Future<void> _connect(AuthState auth) async {
     if (!auth.isAuthenticated) return;
     final env = ref.read(envConfigProvider);
     _retryTimer?.cancel();
     _windowStart ??= DateTime.now();
     final uri = Uri.parse('${env.eventsWsUrl}?token=${auth.token}');
-    _channel = WebSocketChannel.connect(uri);
+    await withInsecureWs(() async {
+      _channel = WebSocketChannel.connect(uri);
+    }, allowInsecure: !env.eventsWsSslVerify);
     state = const NowPlayingState(connected: true);
 
     _channel?.stream.listen(

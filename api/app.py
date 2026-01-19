@@ -2,7 +2,7 @@
 """
 Flask API for OAuth authentication and JWT management
 """
-from flask import Flask, request, jsonify, g, send_from_directory
+from flask import Flask, request, jsonify, g, send_from_directory, redirect
 from functools import wraps
 import secrets
 from flask_cors import CORS
@@ -82,7 +82,9 @@ def google_callback():
     token = auth_manager.login_with_google(code)
     if not token:
         return jsonify({'error': 'Google OAuth failed'}), 401
-    return jsonify({'jwt': token})
+    frontend = Config.FRONTEND_BASE_URL
+    # Redirect back to frontend with JWT; frontend should store token and continue.
+    return redirect(f"{frontend}/oauth/google/callback?jwt={token}")
 
 @app.route('/api/auth/spotify/callback')
 def spotify_callback():
@@ -104,7 +106,9 @@ def spotify_callback():
         return jsonify({'error': 'This Spotify account is already linked to another user.', 'code': err}), 409
     if not token:
         return jsonify({'error': 'Spotify OAuth failed'}), 401
-    return jsonify({'jwt': token})
+    frontend = Config.FRONTEND_BASE_URL
+    state_param = request.args.get('state')
+    return redirect(f"{frontend}/oauth/spotify/callback?jwt={token}" + (f"&state={state_param}" if state_param else ""))
 
 
 @app.route('/api/auth/<provider>/callback')
@@ -133,7 +137,9 @@ def api_auth_callback(provider: str):
         return jsonify({'error': 'This Spotify account is already linked to another user.', 'code': err}), 409
     if not token:
         return jsonify({'error': f'{provider.capitalize()} OAuth failed'}), 401
-    return jsonify({'jwt': token})
+    frontend = Config.FRONTEND_BASE_URL
+    state_param = request.args.get('state')
+    return redirect(f"{frontend}/oauth/{provider}/callback?jwt={token}" + (f"&state={state_param}" if state_param else ""))
 
 @app.route('/api/auth/validate', methods=['POST', 'GET'])
 def validate_jwt():

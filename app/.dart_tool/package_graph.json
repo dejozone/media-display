@@ -11,6 +11,7 @@
         "flutter",
         "flutter_dotenv",
         "flutter_riverpod",
+        "flutter_web_plugins",
         "go_router",
         "logging",
         "shared_preferences",
@@ -131,6 +132,13 @@
         "meta",
         "riverpod",
         "state_notifier"
+      ]
+    },
+    {
+      "name": "flutter_web_plugins",
+      "version": "0.0.0",
+      "dependencies": [
+        "flutter"
       ]
     },
     {
@@ -400,13 +408,6 @@
         "source_span",
         "string_scanner",
         "typed_data"
-      ]
-    },
-    {
-      "name": "flutter_web_plugins",
-      "version": "0.0.0",
-      "dependencies": [
-        "flutter"
       ]
     },
     {

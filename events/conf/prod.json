@@ -8,7 +8,8 @@
     "port": 5002,
     "path": "/events/media",
     "sslCertFile": "certs/localhost.crt",
-    "sslKeyFile": "certs/localhost.key"
+    "sslKeyFile": "certs/localhost.key",
+    "sslEnabled": true
   },
   "spotify": {
     "pollIntervalSec": 5,

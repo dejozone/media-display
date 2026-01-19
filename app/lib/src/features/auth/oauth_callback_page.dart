@@ -9,11 +9,13 @@ class OAuthCallbackPage extends ConsumerStatefulWidget {
     super.key,
     required this.provider,
     required this.code,
+    this.jwt,
     this.stateParam,
   });
 
   final String provider;
   final String? code;
+  final String? jwt;
   final String? stateParam;
 
   @override
@@ -31,14 +33,21 @@ class _OAuthCallbackPageState extends ConsumerState<OAuthCallbackPage> {
   }
 
   Future<void> _complete() async {
-    if (widget.code == null || widget.code!.isEmpty) {
-      setState(() => _error = 'Missing code');
-      return;
-    }
+    // Prefer jwt shortcut (backend redirect with token); otherwise fall back to code exchange.
     try {
-      final auth = ref.read(authServiceProvider);
-      await auth.completeOAuth(provider: widget.provider, code: widget.code!, state: widget.stateParam);
-      await ref.read(authStateProvider.notifier).load();
+      final authNotifier = ref.read(authStateProvider.notifier);
+
+      if (widget.jwt != null && widget.jwt!.isNotEmpty) {
+        await authNotifier.setToken(widget.jwt!);
+      } else {
+        if (widget.code == null || widget.code!.isEmpty) {
+          setState(() => _error = 'Missing code');
+          return;
+        }
+        final auth = ref.read(authServiceProvider);
+        await auth.completeOAuth(provider: widget.provider, code: widget.code!, state: widget.stateParam);
+        await authNotifier.load();
+      }
       if (!mounted) return;
       setState(() => _done = true);
       context.go('/home');

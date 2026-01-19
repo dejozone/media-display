@@ -1,6 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'api_client.dart';
+import 'package:media_display/src/services/api_client.dart';
 
 final settingsServiceProvider = Provider<SettingsService>((ref) {
   final dio = ref.watch(dioProvider);

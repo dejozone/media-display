@@ -389,12 +389,16 @@ if __name__ == "__main__":
             return path
         return os.path.join(PROJECT_ROOT, path)
 
+    ssl_enabled = WS_CFG.get("sslEnabled", False)
+    ssl_cert = resolve_path(WS_CFG.get("sslCertFile")) if ssl_enabled else None
+    ssl_key = resolve_path(WS_CFG.get("sslKeyFile")) if ssl_enabled else None
+
     uvicorn.run(
         "app:app",
         host=WS_CFG.get("host", "0.0.0.0"),
         port=WS_CFG.get("port", 5002),
-        ssl_certfile=resolve_path(WS_CFG.get("sslCertFile")),
-        ssl_keyfile=resolve_path(WS_CFG.get("sslKeyFile")),
+        ssl_certfile=ssl_cert,
+        ssl_keyfile=ssl_key,
         timeout_graceful_shutdown=SERVER_CFG.get("timeoutGracefulShutdownSec", 1),
         reload=False,
     )

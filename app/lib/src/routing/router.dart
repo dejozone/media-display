@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:media_display/src/features/auth/login_page.dart';
@@ -7,11 +8,14 @@ import 'package:media_display/src/features/account/account_settings_page.dart';
 import 'package:media_display/src/services/auth_state.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
-  final auth = ref.watch(authStateProvider);
+  final refresh = ValueNotifier(0);
+  ref.onDispose(refresh.dispose);
+  ref.listen<AuthState>(authStateProvider, (_, __) => refresh.value++);
   return GoRouter(
     initialLocation: '/login',
+    refreshListenable: refresh,
     redirect: (context, state) {
-      final loggedIn = auth.isAuthenticated;
+      final loggedIn = ref.read(authStateProvider).isAuthenticated;
       final loggingIn = state.uri.path == '/login';
       final oauthFlow = state.uri.path.startsWith('/oauth/');
 
@@ -33,10 +37,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) {
           final provider = state.pathParameters['provider'] ?? '';
           final code = state.uri.queryParameters['code'];
+          final jwt = state.uri.queryParameters['jwt'];
           final oauthState = state.uri.queryParameters['state'];
           return OAuthCallbackPage(
             provider: provider,
             code: code,
+            jwt: jwt,
             stateParam: oauthState,
           );
         },

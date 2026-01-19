@@ -132,6 +132,11 @@ class Config:
     # SSL/TLS (from JSON config)
     # =============================================================================
     SSL_VERIFY = CONFIG['ssl']['verify']
+
+    # =============================================================================
+    # FRONTEND (optional; defaults for local dev)
+    # =============================================================================
+    FRONTEND_BASE_URL = os.getenv('FRONTEND_BASE_URL', CONFIG.get('frontend', {}).get('baseUrl', 'http://localhost:5173')).rstrip('/')
     
     # =============================================================================
     # PATHS

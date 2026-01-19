@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'config/env.dart';
-import 'routing/router.dart';
+import 'package:media_display/src/config/env.dart';
+import 'package:media_display/src/routing/router.dart';
 
 class MediaDisplayApp extends ConsumerWidget {
   const MediaDisplayApp({super.key});
