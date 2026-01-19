@@ -616,7 +616,7 @@ export default function AccountSettingsPage() {
                         role="listitem"
                         className={`avatar-dot ${isActive ? 'active' : ''}`}
                         onClick={() => applyProviderAvatar(p.provider, p.avatar_url || null)}
-                        aria-label={`Add ${p.provider} avatar`}
+                        aria-label={`Set ${p.provider} avatar`}
                       >
                         <span
                           className="avatar-thumb large"
@@ -650,7 +650,7 @@ export default function AccountSettingsPage() {
                   onChange={(e) => setCustomAvatar(e.target.value)}
                   placeholder="https://example.com/avatar.png"
                 />
-                <button className="secondary" onClick={applyCustomAvatar}>Add</button>
+                <button className="secondary" onClick={applyCustomAvatar}>Set</button>
                 <button className="ghost" onClick={() => { setSelectedProvider(currentSelectedProvider()); setSelectedAvatar(''); setCustomAvatar(''); }}>
                 Clear
               </button>

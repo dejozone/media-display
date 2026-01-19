@@ -28,9 +28,10 @@ class SpotifyManager:
         assert http_client is not None
 
         poll_interval = poll_interval_override or self.config.get("pollIntervalSec", 5)
-        retry_interval = self.config.get("retryIntervalSec", 2)
-        retry_window = self.config.get("retryWindowSec", 20)
-        cooldown = self.config.get("cooldownSec", 1800)
+        retry_interval = max(1, self.config.get("retryIntervalSec", 2))
+        retry_window = max(5, self.config.get("retryWindowSec", 20))
+        # Avoid very long cooldowns so we can recover quickly once the API is back
+        cooldown = min(max(5, self.config.get("cooldownSec", 30)), 120)
 
         async def _safe_close(target_ws: WebSocket, code: int, reason: str = "") -> None:
             try:
@@ -77,6 +78,9 @@ class SpotifyManager:
                     continue
 
                 if resp.status_code == 304:
+                    if failure_start is not None:
+                        recovered_for = time.monotonic() - failure_start
+                        self.logger.info("spotify: recovered after %.1fs of errors", recovered_for)
                     failure_start = None
                 elif resp.status_code == 401:
                     await closer(ws, 4401, "Unauthorized")
@@ -94,6 +98,9 @@ class SpotifyManager:
                             "data": payload,
                         })
                         last_payload = payload
+                    if failure_start is not None:
+                        recovered_for = time.monotonic() - failure_start
+                        self.logger.info("spotify: recovered after %.1fs of errors", recovered_for)
                     failure_start = None
 
                 await asyncio.wait_for(asyncio.sleep(poll_interval), timeout=poll_interval + 1)
@@ -102,19 +109,29 @@ class SpotifyManager:
             except asyncio.CancelledError:
                 self.logger.info("spotify: stream cancelled")
                 break
-            except (httpx.TimeoutException, httpx.TransportError, httpx.HTTPStatusError):
+            except (httpx.TimeoutException, httpx.TransportError, httpx.HTTPStatusError) as exc:
                 if stop_event.is_set():
                     break
                 now = time.monotonic()
-                failure_start = failure_start or now
+                if failure_start is None:
+                    self.logger.warning("spotify: poll error starting failure window: %s", exc)
+                    failure_start = now
+                else:
+                    self.logger.warning(
+                        "spotify: poll error during failure window (elapsed=%.1fs): %s",
+                        now - failure_start,
+                        exc,
+                    )
                 elapsed = now - failure_start
                 if elapsed >= retry_window:
+                    self.logger.warning("spotify: cooldown %.1fs after failure window", cooldown)
                     try:
                         await asyncio.wait_for(asyncio.sleep(cooldown), timeout=cooldown + 1)
                     except asyncio.CancelledError:
                         break
                     failure_start = None
                 else:
+                    self.logger.info("spotify: retrying after %.1fs (within failure window)", retry_interval)
                     try:
                         await asyncio.wait_for(asyncio.sleep(retry_interval), timeout=retry_interval + 1)
                     except asyncio.CancelledError:
