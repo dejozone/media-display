@@ -5,10 +5,10 @@
     "debug": true
   },
   "frontend": {
-    "baseUrl": "https://media-display-new.projecttechcycle-dev.org:9081"
+    "baseUrl": "https://media-display-app.projecttechcycle.org:9082"
   },
   "assets": {
-    "baseUrl": "https://media-display-new.projecttechcycle-dev.org:9081/assets",
+    "baseUrl": "https://media-display-app.projecttechcycle.org:9082/assets",
     "localPath": "api/assets"
   },
   "database": {
@@ -20,7 +20,7 @@
     "poolMaxConn": 10
   },
   "google": {
-    "redirectUri": "https://media-display-new.projecttechcycle-dev.org:9081/api/auth/google/callback",
+    "redirectUri": "https://media-display-app.projecttechcycle.org:9082/api/auth/google/callback",
     "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth",
     "tokenUrl": "https://oauth2.googleapis.com/token",
     "userInfoUrl": "https://www.googleapis.com/oauth2/v2/userinfo",
@@ -31,7 +31,7 @@
     ]
   },
   "spotify": {
-    "redirectUri": "https://media-display-new.projecttechcycle-dev.org:9081/api/auth/spotify/callback",
+    "redirectUri": "https://media-display-app.projecttechcycle.org:9082/api/auth/spotify/callback",
     "scope": "user-read-currently-playing user-read-playback-state user-read-email user-read-private"
   },
   "cors": {
@@ -39,7 +39,7 @@
       "http://localhost:3000",
       "http://localhost:5001",
       "http://localhost:5173",
-      "https://media-display-new.projecttechcycle-dev.org:9081",
+      "https://media-display-app.projecttechcycle.org:9082",
       "*"
     ]
   },

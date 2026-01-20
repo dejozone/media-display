@@ -5,7 +5,7 @@
     "debug": false
   },
   "frontend": {
-    "baseUrl": "https://media-display-new.projecttechcycle.org"
+    "baseUrl": "https://media-display-app.projecttechcycle.org"
   },
   "database": {
     "host": "localhost",
@@ -16,7 +16,7 @@
     "poolMaxConn": 20
   },
   "google": {
-    "redirectUri": "https://media-display-new.projecttechcycle-dev.org:9081/auth/google/callback",
+    "redirectUri": "https://media-display-app.projecttechcycle.org/api/auth/google/callback",
     "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth",
     "tokenUrl": "https://oauth2.googleapis.com/token",
     "userInfoUrl": "https://www.googleapis.com/oauth2/v2/userinfo",
@@ -27,12 +27,12 @@
     ]
   },
   "spotify": {
-    "redirectUri": "https://yourdomain.com/api/auth/spotify/callback",
+    "redirectUri": "https://media-display-app.projecttechcycle.org/api/auth/spotify/callback",
     "scope": "user-read-currently-playing user-read-playback-state user-read-email user-read-private"
   },
   "cors": {
     "origins": [
-      "https://yourdomain.com"
+      "https://media-display-app.projecttechcycle.org"
     ]
   },
   "jwt": {
@@ -52,7 +52,7 @@
   "websocket": {
     "path": "/ws/socket.io",
     "asyncMode": "eventlet",
-    "corsAllowedOrigins": "https://yourdomain.com"
+    "corsAllowedOrigins": "https://media-display-app.projecttechcycle.org"
   },
   "ssl": {
     "verify": true
