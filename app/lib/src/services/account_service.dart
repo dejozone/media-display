@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_display/src/services/api_client.dart';
@@ -46,5 +48,17 @@ class AccountService {
       },
     );
     return res.data?['user'] as Map<String, dynamic>? ?? {};
+  }
+
+  Future<String> uploadAvatarBytes({required Uint8List bytes, required String filename}) async {
+    final formData = FormData.fromMap({
+      'file': MultipartFile.fromBytes(bytes, filename: filename),
+    });
+    final res = await _dio.post<Map<String, dynamic>>(
+      '/api/account/avatar',
+      data: formData,
+      options: Options(contentType: 'multipart/form-data'),
+    );
+    return res.data?['avatar_url']?.toString() ?? '';
   }
 }
