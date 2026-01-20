@@ -28,7 +28,8 @@
   },
   "spotify": {
     "redirectUri": "https://media-display-app.projecttechcycle.org/api/auth/spotify/callback",
-    "scope": "user-read-currently-playing user-read-playback-state user-read-email user-read-private"
+    "scope": "user-read-currently-playing user-read-playback-state user-read-email user-read-private",
+    "sslVerify": true
   },
   "cors": {
     "origins": [

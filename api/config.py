@@ -95,8 +95,27 @@ class Config:
     # =============================================================================
     SPOTIFY_CLIENT_ID = os.getenv('SPOTIFY_CLIENT_ID')  # from .env (secure)
     SPOTIFY_CLIENT_SECRET = os.getenv('SPOTIFY_CLIENT_SECRET')  # from .env (secure)
-    SPOTIFY_REDIRECT_URI = CONFIG['spotify']['redirectUri']
-    SPOTIFY_SCOPE = CONFIG['spotify']['scope']
+    _spotify_cfg = CONFIG.get('spotify', {})
+    _spotify_api_cfg = _spotify_cfg.get('api', {}) if isinstance(_spotify_cfg, dict) else {}
+    _spotify_main_cfg = _spotify_api_cfg.get('main', {}) if isinstance(_spotify_api_cfg, dict) else {}
+    _spotify_account_cfg = _spotify_api_cfg.get('account', {}) if isinstance(_spotify_api_cfg, dict) else {}
+
+    SPOTIFY_API_MAIN_BASE_URL = _spotify_main_cfg.get('baseUrl', 'https://api.spotify.com/v1').rstrip('/')
+    _main_ssl_raw = _spotify_main_cfg.get('sslVerify', True)
+    SPOTIFY_API_MAIN_SSL_VERIFY = _main_ssl_raw if isinstance(_main_ssl_raw, bool) else str(_main_ssl_raw).lower() == 'true'
+
+    SPOTIFY_API_ACCOUNT_BASE_URL = _spotify_account_cfg.get('baseUrl', 'https://accounts.spotify.com').rstrip('/')
+    _acct_ssl_raw = _spotify_account_cfg.get('sslVerify', True)
+    SPOTIFY_API_ACCOUNT_SSL_VERIFY = _acct_ssl_raw if isinstance(_acct_ssl_raw, bool) else str(_acct_ssl_raw).lower() == 'true'
+
+    SPOTIFY_REDIRECT_URI = os.getenv('SPOTIFY_REDIRECT_URI', _spotify_api_cfg.get('redirectUri', _spotify_cfg.get('redirectUri', '')))
+    _spotify_scope_raw = os.getenv('SPOTIFY_SCOPE', _spotify_api_cfg.get('scope', _spotify_cfg.get('scope', '')))
+    SPOTIFY_SCOPE = _spotify_scope_raw
+    SPOTIFY_SCOPE_LIST = [s for s in _spotify_scope_raw.split(' ') if s] if isinstance(_spotify_scope_raw, str) else []
+
+    SPOTIFY_AUTH_URL = f"{SPOTIFY_API_ACCOUNT_BASE_URL}/authorize"
+    SPOTIFY_TOKEN_URL = f"{SPOTIFY_API_ACCOUNT_BASE_URL}/api/token"
+    SPOTIFY_USER_INFO_URL = f"{SPOTIFY_API_MAIN_BASE_URL}/me"
     
     # =============================================================================
     # JWT SETTINGS (combined from JSON config and .env)

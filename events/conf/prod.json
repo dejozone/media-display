@@ -26,7 +26,8 @@
     "pollIntervalSec": 5,
     "discoveryCacheTtlSec": 60,
     "resumeDiscoveryIntervalSec": 10,
-    "idleStuckTimeoutSec": 10
+    "idleStuckTimeoutSec": 10,
+    "noDeviceRetryIntervalSec": 15
   },
   "server": {
     "timeoutGracefulShutdownSec": 1

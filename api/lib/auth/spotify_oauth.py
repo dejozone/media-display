@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Dict, Any
 from urllib.parse import urlencode
 import requests
+import urllib3
+from urllib3.exceptions import InsecureRequestWarning
 
 # Add server directory to path for imports
 SERVER_DIR = Path(__file__).parent.parent.parent
@@ -26,21 +28,20 @@ class SpotifyOAuthClient:
         self.client_id = Config.SPOTIFY_CLIENT_ID
         self.client_secret = Config.SPOTIFY_CLIENT_SECRET
         self.redirect_uri = Config.SPOTIFY_REDIRECT_URI
-        spotify_cfg = getattr(Config, 'SPOTIFY_CONFIG', None)
-        if spotify_cfg is None:
-            import json
-            conf_path = Path(__file__).parent.parent.parent / 'conf' / 'dev.json'
-            with open(conf_path) as f:
-                spotify_cfg = json.load(f).get('spotify', {})
-        self.authorization_url = spotify_cfg.get('authorizationUrl', "https://accounts.spotify.com/authorize")
-        self.token_url = spotify_cfg.get('tokenUrl', "https://accounts.spotify.com/api/token")
-        self.user_info_url = spotify_cfg.get('userInfoUrl', "https://api.spotify.com/v1/me")
-        self.scopes = spotify_cfg.get('scopes', [
+        self.authorization_url = Config.SPOTIFY_AUTH_URL
+        self.token_url = Config.SPOTIFY_TOKEN_URL
+        self.user_info_url = Config.SPOTIFY_USER_INFO_URL
+        self.verify_main = Config.SPOTIFY_API_MAIN_SSL_VERIFY
+        self.verify_account = Config.SPOTIFY_API_ACCOUNT_SSL_VERIFY
+        self.scopes = Config.SPOTIFY_SCOPE_LIST or [
             "user-read-currently-playing",
             "user-read-playback-state",
             "user-read-email",
             "user-read-private"
-        ])
+        ]
+        if not self.verify_main or not self.verify_account:
+            # Suppress urllib3 warnings when SSL verification is intentionally disabled via config.
+            urllib3.disable_warnings(InsecureRequestWarning)
         if not self.client_id or not self.client_secret:
             raise ValueError("Spotify OAuth credentials not configured. Set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET in .env")
 
@@ -71,7 +72,8 @@ class SpotifyOAuthClient:
                 self.token_url,
                 data=data,
                 headers={'Content-Type': 'application/x-www-form-urlencoded'},
-                timeout=10
+                timeout=10,
+                verify=self.verify_account,
             )
             response.raise_for_status()
             tokens = response.json()
@@ -102,7 +104,8 @@ class SpotifyOAuthClient:
                 self.token_url,
                 data=data,
                 headers={'Content-Type': 'application/x-www-form-urlencoded'},
-                timeout=10
+                timeout=10,
+                verify=self.verify_account,
             )
             response.raise_for_status()
             tokens = response.json()
@@ -126,7 +129,8 @@ class SpotifyOAuthClient:
             response = requests.get(
                 self.user_info_url,
                 headers={'Authorization': f'Bearer {access_token}'},
-                timeout=10
+                timeout=10,
+                verify=self.verify_main,
             )
             response.raise_for_status()
             user_info = response.json()
@@ -149,7 +153,8 @@ class SpotifyOAuthClient:
         response = requests.get(
             "https://api.spotify.com/v1/me/player",
             headers={'Authorization': f'Bearer {access_token}'},
-            timeout=10
+            timeout=10,
+            verify=self.verify_main,
         )
         if response.status_code == 204:
             return {}
@@ -167,7 +172,8 @@ class SpotifyOAuthClient:
             response = requests.get(
                 "https://api.spotify.com/v1/me/player/currently-playing",
                 headers={'Authorization': f'Bearer {access_token}'},
-                timeout=10
+                timeout=10,
+                verify=self.verify_main,
             )
 
             # If nothing is playing, try the broader player endpoint to capture device/status

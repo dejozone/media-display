@@ -23,6 +23,7 @@ class SonosManager:
         self.stuck_timeout = config.get("idleStuckTimeoutSec", 10)
         self.discovery_cache_ttl = config.get("discoveryCacheTtlSec", 60)
         self.resume_discovery_interval = config.get("resumeDiscoveryIntervalSec", 10)
+        self.no_device_retry_interval = config.get("noDeviceRetryIntervalSec", 15)
         self.logger = logging.getLogger("events.sonos")
         self._active_states = {"PLAYING", "TRANSITIONING", "BUFFERING"}
         # Suppress noisy SoCo UPnP parse errors that are non-fatal
@@ -215,6 +216,7 @@ class SonosManager:
         stop_on_idle: bool = False,
         poll_interval_override: Optional[int] = None,
         global_stop: Optional[asyncio.Event] = None,
+        no_device_timeout: Optional[float] = None,
     ) -> None:
         coordinator: Optional[SoCo] = None
         last_payload: Optional[Dict[str, Any]] = None
@@ -230,6 +232,7 @@ class SonosManager:
         idle_grace_sec = 12
         ever_active = False
         idle_time_gate_sec = 10
+        no_device_deadline = None if no_device_timeout is None else time.monotonic() + no_device_timeout
 
         self.logger.info("sonos: stream started")
 
@@ -249,6 +252,12 @@ class SonosManager:
                 if coordinator is None:
                     coordinator = await self.discover_coordinator()
                     if coordinator is None:
+                        if no_device_deadline is not None and time.monotonic() >= no_device_deadline:
+                            self.logger.info(
+                                "sonos: no devices found within %.1fs; yielding to fallback",
+                                no_device_timeout,
+                            )
+                            break
                         await asyncio.sleep(self.discovery_retry_interval)
                         continue
                     # Emit immediately once a coordinator is found
@@ -256,6 +265,9 @@ class SonosManager:
                     first_emit = True
                     idle_strikes = 0
                     stream_started_at = time.monotonic()
+                    if no_device_deadline is not None:
+                        # Reset deadline after first discovery so later losses don't auto-break
+                        no_device_deadline = None
 
                 payload = await loop.run_in_executor(None, self._build_payload, coordinator)
 

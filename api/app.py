@@ -72,7 +72,7 @@ def spotify_auth_url():
         state = auth_manager.create_state_token()
 
     url = auth_manager.spotify_client.get_authorization_url(state)
-    return jsonify({'url': url, 'state': state})
+    return jsonify({'url': url, 'state': state, 'scope': auth_manager.spotify_client.scopes})
 
 @app.route('/api/auth/google/callback')
 def google_callback():

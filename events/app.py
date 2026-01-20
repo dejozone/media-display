@@ -287,6 +287,7 @@ async def media_events(ws: WebSocket) -> None:
                         stop_on_idle=spotify_enabled,
                         poll_interval_override=client_sonos_poll,
                         global_stop=STOP_EVENT,
+                        no_device_timeout=SONOS_MANAGER.no_device_retry_interval if spotify_enabled else None,
                     )
                 )
                 ACTIVE_TASKS.add(sonos_task)

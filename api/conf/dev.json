@@ -31,8 +31,18 @@
     ]
   },
   "spotify": {
-    "redirectUri": "https://media-display-app.projecttechcycle.org:9082/api/auth/spotify/callback",
-    "scope": "user-read-currently-playing user-read-playback-state user-read-email user-read-private"
+    "api": {
+      "main": {
+        "baseUrl": "https://api.spotify.com/v1",
+        "sslVerify": false
+      },
+      "account": {
+        "baseUrl": "https://accounts.spotify.com",
+        "sslVerify": false
+      },
+      "redirectUri": "https://media-display-app.projecttechcycle.org:9082/api/auth/spotify/callback",
+      "scope": "user-read-currently-playing user-read-playback-state user-read-email user-read-private"
+    }
   },
   "cors": {
     "origins": [
@@ -64,6 +74,6 @@
     "port": 5002
   },
   "ssl": {
-    "verify": true
+    "verify": false
   }
 }
