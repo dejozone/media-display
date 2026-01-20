@@ -27,7 +27,7 @@
     ]
   },
   "spotify": {
-    "redirectUri": "https://yourdomain.com/auth/spotify/callback",
+    "redirectUri": "https://yourdomain.com/api/auth/spotify/callback",
     "scope": "user-read-currently-playing user-read-playback-state user-read-email user-read-private"
   },
   "cors": {

@@ -33,21 +33,32 @@ class _OAuthCallbackPageState extends ConsumerState<OAuthCallbackPage> {
   }
 
   Future<void> _complete() async {
-    // Prefer jwt shortcut (backend redirect with token); otherwise fall back to code exchange.
     try {
       final authNotifier = ref.read(authStateProvider.notifier);
+      // Mirror web flow: always exchange code via API so identities/tokens are persisted.
+      final code = widget.code;
+      final state = widget.stateParam;
 
-      if (widget.jwt != null && widget.jwt!.isNotEmpty) {
-        await authNotifier.setToken(widget.jwt!);
-      } else {
-        if (widget.code == null || widget.code!.isEmpty) {
-          setState(() => _error = 'Missing code');
+      if (code == null || code.isEmpty) {
+        if (widget.jwt != null && widget.jwt!.isNotEmpty) {
+          await authNotifier.setToken(widget.jwt!);
+          if (!mounted) return;
+          setState(() => _done = true);
+          context.go('/home');
           return;
         }
-        final auth = ref.read(authServiceProvider);
-        await auth.completeOAuth(provider: widget.provider, code: widget.code!, state: widget.stateParam);
-        await authNotifier.load();
+        setState(() => _error = 'Missing code');
+        return;
       }
+
+      if (widget.provider == 'spotify' && (state == null || state.isEmpty)) {
+        setState(() => _error = 'Missing state for Spotify login');
+        return;
+      }
+
+      final auth = ref.read(authServiceProvider);
+      await auth.completeOAuth(provider: widget.provider, code: code, state: state);
+      await authNotifier.load();
       if (!mounted) return;
       setState(() => _done = true);
       context.go('/home');

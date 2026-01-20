@@ -8,6 +8,10 @@ class EnvConfig {
     required this.flavor,
     required this.sslVerify,
     required this.eventsWsSslVerify,
+    required this.wsRetryIntervalMs,
+    required this.wsRetryActiveSeconds,
+    required this.wsRetryCooldownSeconds,
+    required this.wsRetryMaxTotalSeconds,
   });
 
   final String apiBaseUrl;
@@ -15,6 +19,10 @@ class EnvConfig {
   final String flavor;
   final bool sslVerify;
   final bool eventsWsSslVerify;
+  final int wsRetryIntervalMs;
+  final int wsRetryActiveSeconds;
+  final int wsRetryCooldownSeconds;
+  final int wsRetryMaxTotalSeconds;
 }
 
 final envConfigProvider = Provider<EnvConfig>((ref) {
@@ -23,12 +31,20 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
   final flavor = dotenv.env['FLAVOR'] ?? 'dev';
   final sslVerify = (dotenv.env['SSL_VERIFY'] ?? 'true').toLowerCase() == 'true';
   final wsSslVerify = (dotenv.env['EVENTS_WS_SSL_VERIFY'] ?? 'true').toLowerCase() == 'true';
+  final wsRetryIntervalMs = int.tryParse(dotenv.env['WS_RETRY_INTERVAL_MS'] ?? '') ?? 2000;
+  final wsRetryActiveSeconds = int.tryParse(dotenv.env['WS_RETRY_ACTIVE_SECONDS'] ?? '') ?? 60;
+  final wsRetryCooldownSeconds = int.tryParse(dotenv.env['WS_RETRY_COOLDOWN_SECONDS'] ?? '') ?? 180;
+  final wsRetryMaxTotalSeconds = int.tryParse(dotenv.env['WS_RETRY_MAX_TOTAL_SECONDS'] ?? '') ?? 1800;
   return EnvConfig(
     apiBaseUrl: api,
     eventsWsUrl: ws,
     flavor: flavor,
     sslVerify: sslVerify,
     eventsWsSslVerify: wsSslVerify,
+    wsRetryIntervalMs: wsRetryIntervalMs,
+    wsRetryActiveSeconds: wsRetryActiveSeconds,
+    wsRetryCooldownSeconds: wsRetryCooldownSeconds,
+    wsRetryMaxTotalSeconds: wsRetryMaxTotalSeconds,
   );
 });
 

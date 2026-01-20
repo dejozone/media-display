@@ -744,6 +744,7 @@ file:///Users/hthai00/Projects/media-display/app/lib/src/features/auth/login_pag
 file:///Users/hthai00/Projects/media-display/app/lib/src/features/auth/oauth_callback_page.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/features/home/home_page.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/routing/router.dart
+file:///Users/hthai00/Projects/media-display/app/lib/src/services/account_service.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/services/api_client.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/services/api_client_web.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/services/auth_service.dart
@@ -752,6 +753,7 @@ file:///Users/hthai00/Projects/media-display/app/lib/src/services/events_ws_serv
 file:///Users/hthai00/Projects/media-display/app/lib/src/services/settings_service.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/services/token_storage.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/services/user_service.dart
+file:///Users/hthai00/Projects/media-display/app/lib/src/services/ws_retry_policy.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/services/ws_ssl_override.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/widgets/app_header.dart
 file:///Users/hthai00/fvm/versions/3.38.7/bin/cache/flutter_web_sdk/kernel/dart2js_platform.dill

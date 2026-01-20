@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:media_display/src/config/env.dart';
 import 'package:media_display/src/services/auth_state.dart';
+import 'package:media_display/src/services/ws_retry_policy.dart';
 import 'package:media_display/src/services/ws_ssl_override.dart'
   if (dart.library.io) 'package:media_display/src/services/ws_ssl_override_io.dart';
 
@@ -18,11 +19,18 @@ class NowPlayingState {
 class EventsWsNotifier extends Notifier<NowPlayingState> {
   WebSocketChannel? _channel;
   Timer? _retryTimer;
-  int _rapidAttempts = 0;
-  DateTime? _windowStart;
+  late final WsRetryPolicy _retryPolicy;
 
   @override
   NowPlayingState build() {
+    final env = ref.read(envConfigProvider);
+    _retryPolicy = WsRetryPolicy(
+      interval: Duration(milliseconds: env.wsRetryIntervalMs),
+      activeWindow: Duration(seconds: env.wsRetryActiveSeconds),
+      cooldown: Duration(seconds: env.wsRetryCooldownSeconds),
+      maxTotal: Duration(seconds: env.wsRetryMaxTotalSeconds),
+    );
+
     ref.onDispose(() {
       _retryTimer?.cancel();
       _channel?.sink.close();
@@ -50,11 +58,11 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     if (!auth.isAuthenticated) return;
     final env = ref.read(envConfigProvider);
     _retryTimer?.cancel();
-    _windowStart ??= DateTime.now();
     final uri = Uri.parse('${env.eventsWsUrl}?token=${auth.token}');
     await withInsecureWs(() async {
       _channel = WebSocketChannel.connect(uri);
     }, allowInsecure: !env.eventsWsSslVerify);
+    _retryPolicy.reset();
     state = const NowPlayingState(connected: true);
 
     _channel?.stream.listen(
@@ -88,36 +96,11 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   void _scheduleRetry() {
     _channel = null;
     _retryTimer?.cancel();
-    final now = DateTime.now();
-    _windowStart ??= now;
-    final elapsedMs = now.difference(_windowStart!).inMilliseconds;
-
-    const rapidIntervalMs = 2000;
-    const rapidMax = 15;
-    const cooldownMs = 5 * 60 * 1000;
-    const windowMs = 28 * 1000;
-
-    if (elapsedMs > windowMs) {
-      // Reset window and attempts after the window passes
-      _windowStart = now;
-      _rapidAttempts = 0;
+    final delay = _retryPolicy.nextDelay();
+    if (delay == null) {
+      return; // Exhausted retry window
     }
-
-    if (_rapidAttempts < rapidMax) {
-      _rapidAttempts += 1;
-      _retryTimer = Timer(const Duration(milliseconds: rapidIntervalMs), () {
-        final auth = ref.read(authStateProvider);
-        if (auth.isAuthenticated) {
-          _connect(auth);
-        }
-      });
-      return;
-    }
-
-    // Back off for a cooldown period after rapid retries are exhausted
-    _retryTimer = Timer(const Duration(milliseconds: cooldownMs), () {
-      _windowStart = DateTime.now();
-      _rapidAttempts = 0;
+    _retryTimer = Timer(delay, () {
       final auth = ref.read(authStateProvider);
       if (auth.isAuthenticated) {
         _connect(auth);
