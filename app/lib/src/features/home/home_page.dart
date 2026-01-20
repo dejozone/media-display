@@ -98,6 +98,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                   user: user,
                   title: 'Media Display',
                   subtitle: 'Now Playing • Spotify & Sonos',
+                  onHome: () => context.go('/home'),
                   onAccount: () => context.go('/account'),
                   onLogout: () => _logout(context),
                 ),

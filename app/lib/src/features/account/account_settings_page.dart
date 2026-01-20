@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:media_display/src/services/account_service.dart';
+import 'package:media_display/src/services/auth_state.dart';
 import 'package:media_display/src/services/auth_service.dart';
 import 'package:media_display/src/widgets/app_header.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -225,8 +226,13 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
                   user: user,
                   title: 'Account',
                   subtitle: 'Profile, avatar, and preferences',
+                  onHome: () => context.go('/home'),
                   onAccount: () => context.go('/account'),
-                  onLogout: null,
+                  onLogout: () async {
+                    await ref.read(authServiceProvider).logout();
+                    await ref.read(authStateProvider.notifier).clear();
+                    if (mounted) context.go('/login');
+                  },
                 ),
                 const SizedBox(height: 18),
                 if (loading)

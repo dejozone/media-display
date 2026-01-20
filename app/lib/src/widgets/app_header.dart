@@ -1,4 +1,3 @@
-import 'package:characters/characters.dart';
 import 'package:flutter/material.dart';
 
 class AppHeader extends StatelessWidget {
@@ -6,6 +5,7 @@ class AppHeader extends StatelessWidget {
     super.key,
     required this.user,
     required this.onAccount,
+    this.onHome,
     this.onLogout,
     this.title = 'Media Display',
     this.subtitle,
@@ -13,6 +13,7 @@ class AppHeader extends StatelessWidget {
 
   final Map<String, dynamic>? user;
   final VoidCallback onAccount;
+  final VoidCallback? onHome;
   final VoidCallback? onLogout;
   final String title;
   final String? subtitle;
@@ -37,14 +38,27 @@ class AppHeader extends StatelessWidget {
           ],
         ),
         const Spacer(),
+        const SizedBox(width: 8),
+        if (onHome != null)
+          IconButton(
+            tooltip: 'Home',
+            onPressed: onHome,
+            icon: const Icon(Icons.home_outlined),
+          ),
+        if (onLogout != null)
+          IconButton(
+            tooltip: 'Logout',
+            onPressed: onLogout,
+            icon: const Icon(Icons.logout),
+          ),
         InkWell(
-          borderRadius: BorderRadius.circular(999),
+          borderRadius: BorderRadius.circular(12),
           onTap: onAccount,
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
               color: const Color(0xFF1A2333),
-              borderRadius: BorderRadius.circular(999),
+              borderRadius: BorderRadius.circular(12),
               border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
             ),
             child: Row(
@@ -63,20 +77,7 @@ class AppHeader extends StatelessWidget {
             ),
           ),
         ),
-        if (onLogout != null) ...[
-          const SizedBox(width: 8),
-          ElevatedButton(
-            onPressed: onLogout,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF5AC8FA),
-              foregroundColor: const Color(0xFF0D1021),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              elevation: 0,
-            ),
-            child: const Text('Logout'),
-          ),
-        ],
+        
       ],
     );
   }

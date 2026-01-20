@@ -15,7 +15,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     initialLocation: '/login',
     refreshListenable: refresh,
     redirect: (context, state) {
-      final loggedIn = ref.read(authStateProvider).isAuthenticated;
+      final auth = ref.read(authStateProvider);
+      if (auth.loading) return null; // avoid redirects until token load finishes
+      final loggedIn = auth.isAuthenticated;
       final loggingIn = state.uri.path == '/login';
       final oauthFlow = state.uri.path.startsWith('/oauth/');
 
