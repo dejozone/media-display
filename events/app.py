@@ -108,19 +108,7 @@ async def validate_token(token: str) -> Optional[Dict[str, Any]]:
 
 
 async def fetch_settings(token: str) -> Dict[str, Any]:
-    """Fetch dashboard settings for the authenticated user."""
-    assert HTTP_CLIENT is not None
-    try:
-        resp = await HTTP_CLIENT.get(
-            f"{API_BASE_URL}/api/settings",
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            if isinstance(data, dict) and "settings" in data:
-                return data["settings"] or {}
-    except httpx.HTTPError:
-        return {}
+    """Deprecated: Settings are expected from the client via websocket config."""
     return {}
 
 
@@ -228,20 +216,20 @@ async def media_events(ws: WebSocket) -> None:
         await _safe_close_ws(ws, code=4401, reason="Invalid token")
         return
 
-    settings = await fetch_settings(token)
-    spotify_enabled = settings.get("spotify_enabled", True)
-    sonos_enabled = settings.get("sonos_enabled", False)
+    spotify_enabled = False
+    sonos_enabled = False
+    settings: Dict[str, Any] = {}
 
-    logger.info(f"ws connect user={user_info.get('payload',{}).get('sub')} spotify_enabled={spotify_enabled} sonos_enabled={sonos_enabled}")
+    logger.info(f"ws connect user={user_info.get('payload',{}).get('sub')} awaiting client config")
 
     await ws.accept(subprotocol=None)
     await ws.send_json({"type": "ready", "user": user_info, "settings": settings})
 
-    # Optional client config for poll intervals
+    # Client must send config with service enablement and optional poll hints.
     client_spotify_poll: Optional[int] = None
     client_sonos_poll: Optional[int] = None
     try:
-        msg = await asyncio.wait_for(ws.receive_json(), timeout=2.0)
+        msg = await asyncio.wait_for(ws.receive_json(), timeout=3.0)
         if isinstance(msg, dict) and msg.get("type") == "config":
             poll_cfg = msg.get("poll") or {}
             sp = poll_cfg.get("spotify")
@@ -250,10 +238,21 @@ async def media_events(ws: WebSocket) -> None:
                 client_spotify_poll = int(sp)
             if isinstance(so, (int, float)) and so > 0:
                 client_sonos_poll = int(so)
+
+            enabled_cfg = msg.get("enabled") or {}
+            spotify_enabled = enabled_cfg.get("spotify", False) is True
+            sonos_enabled = enabled_cfg.get("sonos", False) is True
+            logger.info(
+                "client config received enabled_spotify=%s enabled_sonos=%s poll_spotify=%s poll_sonos=%s",
+                spotify_enabled,
+                sonos_enabled,
+                client_spotify_poll,
+                client_sonos_poll,
+            )
     except asyncio.TimeoutError:
-        pass
+        logger.warning("no client config received within timeout; defaulting services disabled")
     except Exception:
-        pass
+        logger.exception("failed to parse initial client config")
 
     connection_stop = asyncio.Event()
     CONNECTION_STOPS.add(connection_stop)

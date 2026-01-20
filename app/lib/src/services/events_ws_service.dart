@@ -76,6 +76,9 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       error: null,
     );
 
+    // Send current service enablement to the server.
+    await sendConfig();
+
     _channel?.stream.listen(
       (message) {
         try {
@@ -136,6 +139,23 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     final auth = ref.read(authStateProvider);
     if (auth.isAuthenticated) {
       _connect(auth);
+    }
+  }
+
+  Future<void> sendConfig() async {
+    if (_channel == null) return;
+    try {
+      final settings = await ref.read(settingsServiceProvider).fetchSettings();
+      final payload = jsonEncode({
+        'type': 'config',
+        'enabled': {
+          'spotify': settings['spotify_enabled'] == true,
+          'sonos': settings['sonos_enabled'] == true,
+        },
+      });
+      _channel?.sink.add(payload);
+    } catch (_) {
+      // best-effort
     }
   }
 
