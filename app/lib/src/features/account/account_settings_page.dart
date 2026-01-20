@@ -27,6 +27,7 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
   bool uploadingAvatar = false;
   bool showCropper = false;
   bool cropping = false;
+  bool launchingSpotify = false;
   String? error;
   String? success;
 
@@ -259,11 +260,13 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
   Future<void> _startSpotifyEnable() async {
     setState(() {
       saving = true;
+      launchingSpotify = true;
       error = null;
       success = null;
     });
     try {
       final auth = ref.read(authServiceProvider);
+      await auth.setPendingOauthRedirect(GoRouterState.of(context).uri.toString());
       final url = await auth.getSpotifyAuthUrl();
       if (!mounted) return;
       final ok = await launchUrl(
@@ -278,16 +281,20 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
       if (!mounted) return;
       setState(() => error = e.toString());
     } finally {
-      if (mounted) setState(() => saving = false);
+      if (mounted) setState(() {
+        saving = false;
+        launchingSpotify = false;
+      });
     }
   }
 
   Future<void> _handleSpotifyToggle(bool enable) async {
-    if (enable) {
+    final hasIdentity = _providerAvatarList(user).any((e) => (e['provider']?.toString().toLowerCase() == 'spotify'));
+    if (enable && !hasIdentity) {
       await _startSpotifyEnable();
       return;
     }
-    await _toggleService('spotify', false);
+    await _toggleService('spotify', enable);
   }
 
   Future<void> _saveAvatar() async {
@@ -480,7 +487,7 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
   @override
   Widget build(BuildContext context) {
     final avatarList = _avatarListWithCurrent();
-    final spotifyEnabled = settings?['spotify_enabled'] == true;
+    final spotifyLinked = _providerAvatarList(user).any((e) => (e['provider']?.toString().toLowerCase() == 'spotify'));
     final sonosEnabled = settings?['sonos_enabled'] == true;
 
     return Scaffold(
@@ -574,8 +581,8 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
                             const SizedBox(height: 10),
                             _serviceToggle(
                               label: 'Spotify',
-                              value: spotifyEnabled,
-                              onChanged: saving ? null : _handleSpotifyToggle,
+                              value: spotifyLinked,
+                              onChanged: (saving || launchingSpotify) ? null : _handleSpotifyToggle,
                             ),
                             const SizedBox(height: 10),
                             _serviceToggle(

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -7,6 +8,7 @@ import 'package:media_display/src/services/events_ws_service.dart';
 import 'package:media_display/src/services/settings_service.dart';
 import 'package:media_display/src/services/user_service.dart';
 import 'package:media_display/src/widgets/app_header.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
@@ -21,6 +23,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   String? error;
   bool loading = true;
   bool savingSettings = false;
+  bool launchingSpotify = false;
 
   @override
   void initState() {
@@ -73,6 +76,52 @@ class _HomePageState extends ConsumerState<HomePage> {
     if (mounted) context.go('/login');
   }
 
+  bool _hasSpotifyIdentity() {
+    final identitiesRaw = user?['provider_avatar_list'];
+    if (identitiesRaw is List) {
+      for (final entry in identitiesRaw) {
+        if (entry is Map && (entry['provider']?.toString().toLowerCase() == 'spotify')) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  Future<void> _handleSpotifyToggle(bool enable) async {
+    if (enable && !_hasSpotifyIdentity()) {
+      // Require OAuth linking first.
+      setState(() {
+        error = null;
+        launchingSpotify = true;
+      });
+      try {
+        await ref.read(authServiceProvider).setPendingOauthRedirect(GoRouterState.of(context).uri.toString());
+        final url = await ref.read(authServiceProvider).getSpotifyAuthUrl();
+        if (!mounted) return;
+        final ok = await launchUrl(
+          url,
+          mode: LaunchMode.platformDefault,
+          webOnlyWindowName: kIsWeb ? '_self' : null,
+        );
+        if (!ok && mounted) {
+          setState(() => error = 'Failed to open Spotify login');
+        }
+      } catch (e) {
+        if (mounted) setState(() => error = e.toString());
+      } finally {
+        if (mounted) setState(() => launchingSpotify = false);
+      }
+      return;
+    }
+
+    await _updateSettings({'spotify_enabled': enable});
+  }
+
+  Future<void> _handleSonosToggle(bool enable) async {
+    await _updateSettings({'sonos_enabled': enable});
+  }
+
   @override
   Widget build(BuildContext context) {
     final now = ref.watch(eventsWsProvider);
@@ -122,8 +171,9 @@ class _HomePageState extends ConsumerState<HomePage> {
                   _glassCard(
                     child: _SettingsToggles(
                       settings: settings,
-                      saving: savingSettings,
-                      onUpdate: _updateSettings,
+                      saving: savingSettings || launchingSpotify,
+                      onSpotifyChanged: _handleSpotifyToggle,
+                      onSonosChanged: _handleSonosToggle,
                     ),
                   ),
                   const SizedBox(height: 14),
@@ -181,10 +231,16 @@ class _UserSummary extends StatelessWidget {
 }
 
 class _SettingsToggles extends StatelessWidget {
-  const _SettingsToggles({required this.settings, required this.saving, required this.onUpdate});
+  const _SettingsToggles({
+    required this.settings,
+    required this.saving,
+    required this.onSpotifyChanged,
+    required this.onSonosChanged,
+  });
   final Map<String, dynamic>? settings;
   final bool saving;
-  final Future<void> Function(Map<String, dynamic>) onUpdate;
+  final Future<void> Function(bool) onSpotifyChanged;
+  final Future<void> Function(bool) onSonosChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -202,14 +258,14 @@ class _SettingsToggles extends StatelessWidget {
           label: 'Spotify',
           subtitle: 'Live Now Playing and control',
           value: spotify,
-          onChanged: saving ? null : (v) => onUpdate({'spotify_enabled': v}),
+          onChanged: saving ? null : (v) => onSpotifyChanged(v),
         ),
         const SizedBox(height: 10),
         _toggleRow(
           label: 'Sonos',
           subtitle: 'Fallback and group playback',
           value: sonos,
-          onChanged: saving ? null : (v) => onUpdate({'sonos_enabled': v}),
+          onChanged: saving ? null : (v) => onSonosChanged(v),
         ),
         if (saving) ...[
           const SizedBox(height: 10),

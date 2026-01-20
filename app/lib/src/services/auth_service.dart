@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:media_display/src/services/api_client.dart';
 import 'package:media_display/src/services/token_storage.dart';
 import 'package:media_display/src/services/auth_state.dart';
@@ -16,6 +17,7 @@ class AuthService {
   final Dio _dio;
   final TokenStorage _storage;
   final AuthNotifier _authNotifier;
+  static const _redirectKey = 'oauth_redirect_path';
 
   Future<Uri> getGoogleAuthUrl() async {
     final res = await _dio.get<Map<String, dynamic>>('/api/auth/google/url');
@@ -60,6 +62,20 @@ class AuthService {
 
   Future<void> logout() async {
     await _authNotifier.clear();
+  }
+
+  Future<void> setPendingOauthRedirect(String path) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_redirectKey, path);
+  }
+
+  Future<String?> consumePendingOauthRedirect() async {
+    final prefs = await SharedPreferences.getInstance();
+    final val = prefs.getString(_redirectKey);
+    if (val != null) {
+      await prefs.remove(_redirectKey);
+    }
+    return val;
   }
 }
 

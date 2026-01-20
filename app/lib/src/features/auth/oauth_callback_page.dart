@@ -101,6 +101,11 @@ class _OAuthCallbackPageState extends ConsumerState<OAuthCallbackPage> {
     setState(() => _error = message);
     // Navigate back to account if possible, otherwise home/login fallback.
     final auth = ref.read(authStateProvider);
+    final desired = await ref.read(authServiceProvider).consumePendingOauthRedirect();
+    if (desired != null && desired.isNotEmpty) {
+      context.go(desired);
+      return;
+    }
     if (context.canPop()) {
       context.pop();
     } else if (auth.isAuthenticated) {
