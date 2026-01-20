@@ -63,7 +63,12 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       _channel = WebSocketChannel.connect(uri);
     }, allowInsecure: !env.eventsWsSslVerify);
     _retryPolicy.reset();
-    state = const NowPlayingState(connected: true);
+    state = NowPlayingState(
+      provider: state.provider,
+      payload: state.payload,
+      connected: true,
+      error: null,
+    );
 
     _channel?.stream.listen(
       (message) {

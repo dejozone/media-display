@@ -299,7 +299,7 @@ class _NowPlayingSection extends StatelessWidget {
     final device = _deviceText(payload, provider);
     final status = _statusLabel(payload, provider);
     final isPlaying = _isPlaying(payload);
-    final isConnected = now.connected && now.error == null && payload != null;
+    final isConnected = now.connected && now.error == null;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
