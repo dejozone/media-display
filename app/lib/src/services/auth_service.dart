@@ -34,18 +34,42 @@ class AuthService {
   }
 
   Future<void> completeOAuth({required String provider, required String code, String? state}) async {
-    final res = await _dio.get<Map<String, dynamic>>(
-      '/api/auth/$provider/callback',
-      queryParameters: {'code': code, 'state': state},
-    );
-    final data = res.data ?? {};
-    final token = data['jwt'] as String?;
-    if (token == null) throw Exception('Missing token');
-    await _storage.save(token);
-    await _authNotifier.setToken(token);
+    try {
+      final res = await _dio.get<Map<String, dynamic>>(
+        '/api/auth/$provider/callback',
+        queryParameters: {'code': code, 'state': state},
+      );
+      final data = res.data ?? {};
+      final token = data['jwt'] as String?;
+      if (token == null) throw Exception('Missing token');
+      await _storage.save(token);
+      await _authNotifier.setToken(token);
+    } on DioException catch (e) {
+      final status = e.response?.statusCode;
+      final payload = e.response?.data;
+      if (status == 409 && payload is Map<String, dynamic>) {
+        final codeVal = payload['code']?.toString();
+        final msgVal = payload['error']?.toString() ?? payload['message']?.toString();
+        if (codeVal != null) {
+          throw OAuthApiException(code: codeVal, message: msgVal, status: status);
+        }
+      }
+      rethrow;
+    }
   }
 
   Future<void> logout() async {
     await _authNotifier.clear();
   }
+}
+
+class OAuthApiException implements Exception {
+  OAuthApiException({required this.code, this.message, this.status});
+
+  final String code;
+  final String? message;
+  final int? status;
+
+  @override
+  String toString() => 'OAuthApiException(code: $code, message: $message, status: $status)';
 }

@@ -103,7 +103,10 @@ def spotify_callback():
 
     token, err = auth_manager.login_with_spotify(code, link_user_id=link_user_id, allow_create_if_new=allow_create)
     if err == 'spotify_identity_in_use':
-        return jsonify({'error': 'This Spotify account is already linked to another user.', 'code': err}), 409
+        message = 'This Spotify account is already linked to another user.'
+        frontend = Config.FRONTEND_BASE_URL
+        target = f"{frontend}/oauth/spotify/callback?error={err}&message={message}"
+        return redirect(target)
     if not token:
         return jsonify({'error': 'Spotify OAuth failed'}), 401
     frontend = Config.FRONTEND_BASE_URL
@@ -134,7 +137,10 @@ def api_auth_callback(provider: str):
         return jsonify({'error': 'Unsupported provider'}), 400
 
     if err == 'spotify_identity_in_use':
-        return jsonify({'error': 'This Spotify account is already linked to another user.', 'code': err}), 409
+        message = 'This Spotify account is already linked to another user.'
+        frontend = Config.FRONTEND_BASE_URL
+        target = f"{frontend}/oauth/{provider}/callback?error={err}&message={message}"
+        return redirect(target)
     if not token:
         return jsonify({'error': f'{provider.capitalize()} OAuth failed'}), 401
     frontend = Config.FRONTEND_BASE_URL

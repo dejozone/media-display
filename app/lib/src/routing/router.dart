@@ -20,11 +20,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       final loggedIn = auth.isAuthenticated;
       final loggingIn = state.uri.path == '/login';
       final oauthFlow = state.uri.path.startsWith('/oauth/');
+      final oauthHasError = oauthFlow && state.uri.queryParameters.containsKey('error');
 
       if (!loggedIn && !(loggingIn || oauthFlow)) {
         return '/login';
       }
-      if (loggedIn && (loggingIn || oauthFlow)) {
+      if (loggedIn && (loggingIn || (oauthFlow && !oauthHasError))) {
         return '/home';
       }
       return null;
@@ -41,11 +42,15 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           final code = state.uri.queryParameters['code'];
           final jwt = state.uri.queryParameters['jwt'];
           final oauthState = state.uri.queryParameters['state'];
+          final error = state.uri.queryParameters['error'];
+          final message = state.uri.queryParameters['message'];
           return OAuthCallbackPage(
             provider: provider,
             code: code,
             jwt: jwt,
             stateParam: oauthState,
+            errorParam: error,
+            errorMessage: message,
           );
         },
       ),
