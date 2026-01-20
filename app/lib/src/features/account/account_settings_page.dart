@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -179,7 +177,7 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
     }
 
     // Enforce a single selected avatar, preferring selectedAvatar, then currentRaw, then any backend-selected entry.
-    String? selectedNorm;
+    String selectedNorm;
     if (selectedAvatar?.isNotEmpty == true) {
       selectedNorm = _normalizeUrl(selectedAvatar!);
     } else if (normalizedCurrent.isNotEmpty) {
@@ -191,7 +189,7 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
       ).key;
     }
 
-    if (selectedNorm != null && selectedNorm.isNotEmpty) {
+    if (selectedNorm.isNotEmpty) {
       ordered.updateAll((_, value) => {
             ...value,
             'is_selected': false,
@@ -315,7 +313,7 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
       final displayUrl = _cacheBustedUrl(backendUrl);
       final updatedProviderAvatars = _updateSelectedAvatarInList(displayUrl);
       user = {
-        ...?updated,
+        ...updated,
         'avatar_url': displayUrl,
         'provider_avatar_list': updatedProviderAvatars,
       };
