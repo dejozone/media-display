@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:media_display/src/config/env.dart';
 import 'package:media_display/src/services/auth_state.dart';
+import 'package:media_display/src/services/settings_service.dart';
 import 'package:media_display/src/services/ws_retry_policy.dart';
 import 'package:media_display/src/services/ws_ssl_override.dart'
   if (dart.library.io) 'package:media_display/src/services/ws_ssl_override_io.dart';
@@ -56,6 +57,11 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
 
   Future<void> _connect(AuthState auth) async {
     if (!auth.isAuthenticated) return;
+    final shouldConnect = await _shouldConnectToServices();
+    if (!shouldConnect) {
+      _disconnect(scheduleRetry: false);
+      return;
+    }
     final env = ref.read(envConfigProvider);
     _retryTimer?.cancel();
     final uri = Uri.parse('${env.eventsWsUrl}?token=${auth.token}');
@@ -105,19 +111,24 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     if (delay == null) {
       return; // Exhausted retry window
     }
-    _retryTimer = Timer(delay, () {
+    _retryTimer = Timer(delay, () async {
       final auth = ref.read(authStateProvider);
-      if (auth.isAuthenticated) {
+      if (!auth.isAuthenticated) return;
+      final shouldConnect = await _shouldConnectToServices();
+      if (shouldConnect) {
         _connect(auth);
       }
     });
   }
 
-  void _disconnect() {
+  void _disconnect({bool scheduleRetry = true}) {
     _retryTimer?.cancel();
-    _channel?.sink.close();
+      _channel?.sink.close();
     _channel = null;
     state = NowPlayingState(provider: state.provider, payload: state.payload, connected: false);
+    if (scheduleRetry) {
+      _scheduleRetry();
+    }
   }
 
   // Public trigger to (re)connect on demand from UI actions.
@@ -125,6 +136,17 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     final auth = ref.read(authStateProvider);
     if (auth.isAuthenticated) {
       _connect(auth);
+    }
+  }
+
+  Future<bool> _shouldConnectToServices() async {
+    try {
+      final settings = await ref.read(settingsServiceProvider).fetchSettings();
+      final spotify = settings['spotify_enabled'] == true;
+      final sonos = settings['sonos_enabled'] == true;
+      return spotify || sonos;
+    } catch (_) {
+      return true; // fall back to connecting if settings cannot be fetched
     }
   }
 }
