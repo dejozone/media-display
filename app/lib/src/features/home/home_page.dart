@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -297,7 +299,7 @@ class _NowPlayingSection extends StatelessWidget {
     final device = _deviceText(payload, provider);
     final status = _statusLabel(payload, provider);
     final isPlaying = _isPlaying(payload);
-    final color = now.connected ? const Color(0xFF22C55E) : const Color(0xFFEF4444);
+    final isConnected = now.connected && now.error == null && payload != null;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -308,11 +310,16 @@ class _NowPlayingSection extends StatelessWidget {
             const SizedBox(width: 10),
             _pill(provider.toUpperCase()),
             const Spacer(),
-            _liveDot(color, pulsing: now.connected),
+            _EqualizerIndicator(
+              isConnected: isConnected,
+              isPlaying: isPlaying,
+            ),
           ],
         ),
         const SizedBox(height: 14),
-        if (now.error != null)
+        if (!now.connected && now.error != null)
+          const _AnimatedSkeletonNowPlaying()
+        else if (now.error != null)
           Text(now.error!, style: const TextStyle(color: Color(0xFFFF8C8C)))
         else if (payload == null)
           _skeletonNowPlaying()
@@ -381,6 +388,146 @@ class _Artwork extends StatelessWidget {
   }
 }
 
+class _AnimatedSkeletonNowPlaying extends StatefulWidget {
+  const _AnimatedSkeletonNowPlaying();
+
+  @override
+  State<_AnimatedSkeletonNowPlaying> createState() => _AnimatedSkeletonNowPlayingState();
+}
+
+class _AnimatedSkeletonNowPlayingState extends State<_AnimatedSkeletonNowPlaying> with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _alpha;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 1100))
+      ..repeat(reverse: true);
+    _alpha = Tween<double>(begin: 0.45, end: 0.9).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _alpha,
+      builder: (context, _) => Opacity(
+        opacity: _alpha.value,
+        child: _skeletonNowPlaying(),
+      ),
+    );
+  }
+}
+
+class _EqualizerIndicator extends StatefulWidget {
+  const _EqualizerIndicator({required this.isConnected, required this.isPlaying});
+  final bool isConnected;
+  final bool isPlaying;
+
+  @override
+  State<_EqualizerIndicator> createState() => _EqualizerIndicatorState();
+}
+
+class _EqualizerIndicatorState extends State<_EqualizerIndicator> with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final AnimationController _blinkController;
+  late final Animation<double> _blink;
+  late final List<double> _phases;
+  late final List<double> _speeds;
+
+  static const double _minHeight = 6;
+  static const double _maxHeight = 16;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 1100));
+    _blinkController = AnimationController(vsync: this, duration: const Duration(milliseconds: 1400))
+      ..repeat(reverse: true);
+    _blink = Tween<double>(begin: 0.55, end: 1.0).animate(CurvedAnimation(parent: _blinkController, curve: Curves.easeInOut));
+    final rnd = math.Random();
+    _phases = List.generate(3, (_) => rnd.nextDouble() * math.pi * 2);
+    _speeds = List.generate(3, (_) => 0.8 + rnd.nextDouble() * 0.7); // vary speeds per bar
+    _maybeAnimate();
+  }
+
+  @override
+  void didUpdateWidget(covariant _EqualizerIndicator oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _maybeAnimate();
+  }
+
+  void _maybeAnimate() {
+    if (widget.isConnected && widget.isPlaying) {
+      if (!_controller.isAnimating) {
+        _controller.repeat(reverse: true);
+      }
+      _blinkController.stop();
+      _blinkController.value = 1.0;
+    } else {
+      _controller.stop();
+      _controller.reset();
+      if (!_blinkController.isAnimating) {
+        _blinkController.repeat(reverse: true);
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _blinkController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = widget.isConnected ? const Color(0xFF22C55E) : const Color(0xFFEF4444);
+
+    return SizedBox(
+      width: 32,
+      height: 22,
+      child: AnimatedBuilder(
+        animation: Listenable.merge([_controller, _blinkController]),
+        builder: (context, _) {
+          final t = _controller.value;
+          final blinking = !widget.isConnected || !widget.isPlaying;
+          final opacity = blinking ? _blink.value : 1.0;
+          return Opacity(
+            opacity: opacity,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: List.generate(3, (i) {
+                final h = (widget.isConnected && widget.isPlaying)
+                    ? _minHeight + (_maxHeight - _minHeight) * (0.35 + 0.65 * ((math.sin((t * 2 * math.pi * _speeds[i]) + _phases[i]) + 1) / 2))
+                    : _minHeight;
+                return Container(
+                  width: 4,
+                  height: h,
+                  margin: EdgeInsets.only(left: i == 0 ? 0 : 4),
+                  decoration: BoxDecoration(
+                    color: color,
+                    borderRadius: BorderRadius.circular(2),
+                    boxShadow: [
+                      BoxShadow(color: color.withValues(alpha: 0.4), blurRadius: 8, spreadRadius: 1.5),
+                    ],
+                  ),
+                );
+              }),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
 // ---- helpers ----
 
 Widget _glassCard({required Widget child}) {
@@ -408,22 +555,6 @@ Widget _pill(String text) {
       border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
     ),
     child: Text(text, style: const TextStyle(fontSize: 12, color: Color(0xFFC2CADC))),
-  );
-}
-
-Widget _liveDot(Color color, {bool pulsing = false}) {
-  return Container(
-    width: 12,
-    height: 12,
-    decoration: BoxDecoration(
-      shape: BoxShape.circle,
-      color: color,
-      boxShadow: pulsing
-          ? [
-              BoxShadow(color: color.withValues(alpha: 0.45), blurRadius: 10, spreadRadius: 3),
-            ]
-          : null,
-    ),
   );
 }
 
