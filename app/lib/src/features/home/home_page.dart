@@ -66,7 +66,6 @@ class _HomePageState extends ConsumerState<HomePage> {
       setState(() => settings = next);
       final ws = ref.read(eventsWsProvider.notifier);
       await ws.sendConfig();
-      ws.connect();
     } catch (e) {
       if (mounted) setState(() => error = e.toString());
     } finally {

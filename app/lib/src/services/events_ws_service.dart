@@ -57,6 +57,10 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
 
   Future<void> _connect(AuthState auth) async {
     if (!auth.isAuthenticated) return;
+
+    // Ensure we don't stack multiple channels; close any existing one first.
+    _disconnect(scheduleRetry: false);
+
     final shouldConnect = await _shouldConnectToServices();
     if (!shouldConnect) {
       _disconnect(scheduleRetry: false);

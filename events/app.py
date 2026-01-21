@@ -452,6 +452,15 @@ async def media_events(ws: WebSocket) -> None:
     await ws.accept(subprotocol=None)
     await ws.send_json({"type": "ready", "user": user_info, "settings": {}})
 
+    # Enforce a single active session per user: close and drop any existing sessions before adding this one.
+    for sid, existing in list(ctx.channel.sessions.items()):
+        try:
+            if existing.application_state == WebSocketState.CONNECTED:
+                await existing.close(code=1013, reason="Replaced by new session")
+        except Exception:
+            pass
+        await ctx.channel.remove(sid)
+
     await ctx.channel.add(session_id, ws)
 
     if ctx.driver_task is None or ctx.driver_task.done():
