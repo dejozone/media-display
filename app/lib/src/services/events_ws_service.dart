@@ -20,8 +20,10 @@ class NowPlayingState {
 class EventsWsNotifier extends Notifier<NowPlayingState> {
   WebSocketChannel? _channel;
   Timer? _retryTimer;
+  Timer? _configRetryTimer;
   late final WsRetryPolicy _retryPolicy;
   bool _connecting = false;
+  Map<String, dynamic>? _lastSettings;
 
   @override
   NowPlayingState build() {
@@ -35,13 +37,14 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
 
     ref.onDispose(() {
       _retryTimer?.cancel();
+      _configRetryTimer?.cancel();
       _channel?.sink.close();
     });
 
     // React to auth changes and connect/disconnect accordingly.
     ref.listen<AuthState>(authStateProvider, (prev, next) {
       if (next.isAuthenticated && (prev == null || !prev.isAuthenticated)) {
-        _connect(next);
+        _refreshAndMaybeConnect(next);
       }
       if (!next.isAuthenticated) {
         _disconnect();
@@ -50,7 +53,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
 
     final auth = ref.read(authStateProvider);
     if (auth.isAuthenticated) {
-      _connect(auth);
+      _refreshAndMaybeConnect(auth);
     }
 
     return const NowPlayingState();
@@ -64,12 +67,6 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     try {
       // Ensure we don't stack multiple channels; close any existing one first.
       _disconnect(scheduleRetry: false);
-
-      final shouldConnect = await _shouldConnectToServices();
-      if (!shouldConnect) {
-        _disconnect(scheduleRetry: false);
-        return;
-      }
       final env = ref.read(envConfigProvider);
       _retryTimer?.cancel();
       final uri = Uri.parse('${env.eventsWsUrl}?token=${auth.token}');
@@ -136,10 +133,9 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     _retryTimer = Timer(delay, () async {
       final auth = ref.read(authStateProvider);
       if (!auth.isAuthenticated) return;
-      final shouldConnect = await _shouldConnectToServices();
-      if (shouldConnect) {
-        _connect(auth);
-      }
+      // Only retry if services are (or were) enabled.
+      if (!_servicesEnabled(_lastSettings)) return;
+      _connect(auth);
     });
   }
 
@@ -157,14 +153,30 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   void connect() {
     final auth = ref.read(authStateProvider);
     if (auth.isAuthenticated) {
-      _connect(auth);
+      _refreshAndMaybeConnect(auth);
     }
   }
 
   Future<void> sendConfig() async {
-    if (_channel == null) return;
     try {
-      final settings = await ref.read(settingsServiceProvider).fetchSettings();
+      Map<String, dynamic>? settings;
+      try {
+        settings = await ref.read(settingsServiceProvider).fetchSettings();
+        _lastSettings = settings;
+        _configRetryTimer?.cancel();
+      } catch (_) {
+        // On failure, retry soon; use last known settings if we have them, otherwise send a safe disabled payload to unblock server wait.
+        _configRetryTimer?.cancel();
+        _configRetryTimer = Timer(const Duration(seconds: 2), () {
+          // Ignore result; best effort.
+          sendConfig();
+        });
+        settings = _lastSettings ?? {
+          'spotify_enabled': false,
+          'sonos_enabled': false,
+        };
+      }
+      final hasService = _servicesEnabled(settings);
       final env = ref.read(envConfigProvider);
       int? asInt(dynamic v) {
         if (v is int) return v;
@@ -187,7 +199,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
           ) ??
           // If only ms is provided, convert down where possible.
           (() {
-        final ms = asInt(settings['spotify_poll_interval_ms']);
+        final ms = asInt(settings?['spotify_poll_interval_ms'] ?? 0);
             return ms != null ? (ms / 1000).round() : null;
           })() ?? env.spotifyPollIntervalSec;
 
@@ -200,7 +212,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
             settings['sonos_poll_interval_ms'],
           ) ??
           (() {
-            final ms = asInt(settings['sonos_poll_interval_ms']);
+            final ms = asInt(settings?['sonos_poll_interval_ms']);
             return ms != null ? (ms / 1000).round() : null;
           })() ?? env.sonosPollIntervalSec;
 
@@ -215,22 +227,44 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
           'sonos': sonosPoll,
         },
       });
+      // If we currently have no socket (e.g., after navigation or a tab opened), establish it first.
+      if (!hasService) {
+        // Nothing to stream; close any existing channel without scheduling retries.
+        _disconnect(scheduleRetry: false);
+        return;
+      }
+
+      if (_channel == null || state.connected == false) {
+        final auth = ref.read(authStateProvider);
+        if (!auth.isAuthenticated || _connecting) return;
+        await _connect(auth);
+        return; // _connect will call sendConfig again once connected
+      }
       _channel?.sink.add(payload);
     } catch (_) {
       // best-effort
     }
   }
 
-  Future<bool> _shouldConnectToServices() async {
+  bool _servicesEnabled(Map<String, dynamic>? settings) {
+    if (settings == null) return false;
+    return settings['spotify_enabled'] == true || settings['sonos_enabled'] == true;
+  }
+
+  Future<void> _refreshAndMaybeConnect(AuthState auth) async {
     try {
       final settings = await ref.read(settingsServiceProvider).fetchSettings();
-      final spotify = settings['spotify_enabled'] == true;
-      final sonos = settings['sonos_enabled'] == true;
-      return spotify || sonos;
+      _lastSettings = settings;
+      _configRetryTimer?.cancel();
+      if (_servicesEnabled(settings)) {
+        await _connect(auth);
+      } else {
+        _disconnect(scheduleRetry: false);
+      }
     } catch (_) {
-      return true; // fall back to connecting if settings cannot be fetched
+      // If we can't read settings, wait for sendConfig retry path to decide; do not force connect to respect "no services" requirement.
     }
   }
 }
 
-final eventsWsProvider = NotifierProvider.autoDispose<EventsWsNotifier, NowPlayingState>(EventsWsNotifier.new);
+final eventsWsProvider = NotifierProvider<EventsWsNotifier, NowPlayingState>(EventsWsNotifier.new);

@@ -30,6 +30,10 @@ class _HomePageState extends ConsumerState<HomePage> {
   @override
   void initState() {
     super.initState();
+    // Ensure websocket kicks off as soon as Home loads after login.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(eventsWsProvider.notifier).connect();
+    });
     _loadData();
   }
 
