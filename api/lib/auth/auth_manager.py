@@ -627,6 +627,136 @@ class AuthManager:
             'provider_avatar_list': provider_avatar_list,
         }
 
+    # =============================================================================
+    # Avatar management methods
+    # =============================================================================
+    
+    def get_avatars(self, user_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """Get all avatars for a user."""
+        return self._fetch_all(
+            """
+            SELECT id, url, source, provider_id, is_selected, file_size, mime_type, created_at, updated_at
+            FROM avatars
+            WHERE user_id = %s
+            ORDER BY is_selected DESC, created_at DESC
+            LIMIT %s
+            """,
+            (str(user_id), limit),
+        )
+    
+    def get_avatar_by_id(self, user_id: str, avatar_id: str) -> Optional[Dict[str, Any]]:
+        """Get a specific avatar by ID."""
+        return self._fetch_one(
+            """
+            SELECT id, url, source, provider_id, is_selected, file_size, mime_type, created_at, updated_at
+            FROM avatars
+            WHERE user_id = %s AND id = %s
+            """,
+            (str(user_id), str(avatar_id)),
+        )
+    
+    def get_avatar_by_url(self, user_id: str, avatar_url: str) -> Optional[Dict[str, Any]]:
+        """Get a specific avatar by URL."""
+        return self._fetch_one(
+            """
+            SELECT id, url, source, provider_id, is_selected, file_size, mime_type, created_at, updated_at
+            FROM avatars
+            WHERE user_id = %s AND url = %s
+            """,
+            (str(user_id), avatar_url),
+        )
+    
+    def create_avatar(
+        self,
+        user_id: str,
+        url: str,
+        source: str,
+        provider_id: Optional[str] = None,
+        is_selected: bool = False,
+        file_size: Optional[int] = None,
+        mime_type: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Create a new avatar record."""
+        # If this is the first avatar or is_selected=True, ensure only one is selected
+        if is_selected:
+            self._execute(
+                "UPDATE avatars SET is_selected = FALSE WHERE user_id = %s",
+                (str(user_id),),
+            )
+        
+        self._execute(
+            """
+            INSERT INTO avatars (user_id, url, source, provider_id, is_selected, file_size, mime_type)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (user_id, url) DO UPDATE SET
+                is_selected = EXCLUDED.is_selected,
+                file_size = COALESCE(EXCLUDED.file_size, avatars.file_size),
+                mime_type = COALESCE(EXCLUDED.mime_type, avatars.mime_type),
+                updated_at = CURRENT_TIMESTAMP
+            RETURNING id
+            """,
+            (str(user_id), url, source, provider_id, is_selected, file_size, mime_type),
+        )
+        
+        result = self.get_avatar_by_url(user_id, url)
+        if not result:
+            raise RuntimeError(f"Failed to fetch created avatar for user {user_id}")
+        return result
+    
+    def update_avatar_selection(self, user_id: str, avatar_id: str) -> bool:
+        """Set an avatar as selected, deselecting all others."""
+        # Verify the avatar exists and belongs to the user
+        avatar = self.get_avatar_by_id(user_id, avatar_id)
+        if not avatar:
+            return False
+        
+        # Deselect all other avatars
+        self._execute(
+            "UPDATE avatars SET is_selected = FALSE WHERE user_id = %s",
+            (str(user_id),),
+        )
+        
+        # Select the target avatar
+        self._execute(
+            "UPDATE avatars SET is_selected = TRUE, updated_at = CURRENT_TIMESTAMP WHERE user_id = %s AND id = %s",
+            (str(user_id), str(avatar_id)),
+        )
+        
+        return True
+    
+    def delete_avatar(self, user_id: str, avatar_id: str) -> bool:
+        """Delete an avatar. If it was selected, auto-select another."""
+        avatar = self.get_avatar_by_id(user_id, avatar_id)
+        if not avatar:
+            return False
+        
+        was_selected = avatar.get('is_selected', False)
+        
+        self._execute(
+            "DELETE FROM avatars WHERE user_id = %s AND id = %s",
+            (str(user_id), str(avatar_id)),
+        )
+        
+        # If deleted avatar was selected, auto-select the most recent one
+        if was_selected:
+            remaining = self.get_avatars(user_id, limit=1)
+            if remaining:
+                self.update_avatar_selection(user_id, remaining[0]['id'])
+        
+        return True
+    
+    def get_selected_avatar(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """Get the currently selected avatar for a user."""
+        return self._fetch_one(
+            """
+            SELECT id, url, source, provider_id, is_selected, file_size, mime_type, created_at, updated_at
+            FROM avatars
+            WHERE user_id = %s AND is_selected = TRUE
+            LIMIT 1
+            """,
+            (str(user_id),),
+        )
+
 # =============================================================================
 # STANDALONE TESTING
 # =============================================================================

@@ -11,6 +11,7 @@ from pathlib import Path
 from lib.auth.auth_manager import AuthManager
 from config import Config
 from lib.utils.logger import auth_logger, server_logger
+from lib.utils.avatar import validate_avatar_file, get_mime_type, sanitize_avatar_filename
 
 app = Flask(__name__)
 CORS(app, origins=Config.CORS_ORIGINS)
@@ -430,6 +431,157 @@ def spotify_now_playing():
         server_logger.warning("Now-playing fetch failed: no tokens or refresh failure")
         return jsonify({'error': 'spotify_not_connected_or_token_invalid', 'code': 'ERR_SPOTIFY_4001', 'message': 'Spotify token is missing or expired. Please reconnect Spotify.'}), 400
     return jsonify(data), 200
+
+
+# =============================================================================
+# Avatar Management API
+# =============================================================================
+
+@app.route('/api/users/<user_id>/avatars', methods=['GET'])
+@require_auth
+def get_user_avatars(user_id: str):
+    """List all avatars for a user."""
+    if user_id != g.user_id:
+        return jsonify({'error': 'Forbidden'}), 403
+    
+    limit = request.args.get('limit', 50, type=int)
+    if limit < 1 or limit > 100:
+        return jsonify({'error': 'Limit must be between 1 and 100'}), 400
+    
+    avatars = auth_manager.get_avatars(g.user_id, limit=limit)
+    return jsonify({'avatars': avatars}), 200
+
+
+@app.route('/api/users/<user_id>/avatars', methods=['POST'])
+@require_auth
+def upload_user_avatar(user_id: str):
+    """Upload a new avatar for a user."""
+    if user_id != g.user_id:
+        return jsonify({'error': 'Forbidden'}), 403
+    
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file provided'}), 400
+    
+    file = request.files['file']
+    filename = (file.filename or '').strip()
+    if not file or not filename:
+        return jsonify({'error': 'No file provided'}), 400
+    
+    # Read file content
+    try:
+        raw = file.read()
+        if not raw:
+            return jsonify({'error': 'Empty file'}), 400
+    except Exception as e:
+        server_logger.warning(f"Avatar upload failed to read: {e}")
+        return jsonify({'error': 'Invalid image data'}), 400
+    
+    # Validate file
+    is_valid, error_msg = validate_avatar_file(filename, len(raw))
+    if not is_valid:
+        return jsonify({'error': error_msg}), 400
+    
+    # Create user directory
+    user_dir = ASSETS_DIR / 'images' / 'users' / str(g.user_id)
+    try:
+        user_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        server_logger.error(f"Failed to create avatar directory {user_dir}: {e}")
+        return jsonify({'error': 'Could not create storage directory'}), 500
+    
+    # Save file
+    safe_filename = sanitize_avatar_filename(filename)
+    out_path = user_dir / safe_filename
+    try:
+        out_path.write_bytes(raw)
+    except Exception as e:
+        server_logger.error(f"Failed to save avatar image: {e}")
+        return jsonify({'error': 'Could not save avatar'}), 500
+    
+    # Generate public URL
+    public_url = f"{Config.ASSETS_BASE_URL}/images/users/{g.user_id}/{safe_filename}"
+    
+    # Get MIME type
+    mime_type = get_mime_type(filename)
+    
+    # Determine if this should be selected (select if user has no avatars)
+    existing = auth_manager.get_avatars(g.user_id, limit=1)
+    is_selected = len(existing) == 0
+    
+    # Create avatar record
+    try:
+        avatar = auth_manager.create_avatar(
+            user_id=g.user_id,
+            url=public_url,
+            source='upload',
+            is_selected=is_selected,
+            file_size=len(raw),
+            mime_type=mime_type,
+        )
+        return jsonify({'avatar': avatar}), 201
+    except Exception as e:
+        server_logger.error(f"Failed to create avatar record: {e}")
+        return jsonify({'error': 'Could not save avatar metadata'}), 500
+
+
+@app.route('/api/users/<user_id>/avatars/<avatar_id>', methods=['PATCH'])
+@require_auth
+def update_user_avatar(user_id: str, avatar_id: str):
+    """Update avatar properties (e.g., set as selected)."""
+    if user_id != g.user_id:
+        return jsonify({'error': 'Forbidden'}), 403
+    
+    data = request.get_json() or {}
+    if not isinstance(data, dict):
+        return jsonify({'error': 'Invalid payload'}), 400
+    
+    # Only support updating is_selected for now
+    if 'is_selected' in data and data['is_selected']:
+        success = auth_manager.update_avatar_selection(g.user_id, avatar_id)
+        if not success:
+            return jsonify({'error': 'Avatar not found'}), 404
+        
+        avatar = auth_manager.get_avatar_by_id(g.user_id, avatar_id)
+        return jsonify({'avatar': avatar}), 200
+    
+    return jsonify({'error': 'No valid updates provided'}), 400
+
+
+@app.route('/api/users/<user_id>/avatars/<avatar_id>', methods=['DELETE'])
+@require_auth
+def delete_user_avatar(user_id: str, avatar_id: str):
+    """Delete an avatar."""
+    if user_id != g.user_id:
+        return jsonify({'error': 'Forbidden'}), 403
+    
+    # Get avatar to check source and get URL for file deletion
+    avatar = auth_manager.get_avatar_by_id(g.user_id, avatar_id)
+    if not avatar:
+        return jsonify({'error': 'Avatar not found'}), 404
+    
+    if avatar.get('source') == 'provider':
+        return jsonify({'error': 'Cannot delete provider avatars'}), 400
+    
+    avatar_url = avatar.get('url')
+    
+    # Delete from database
+    success = auth_manager.delete_avatar(g.user_id, avatar_id)
+    if not success:
+        return jsonify({'error': 'Failed to delete avatar'}), 500
+    
+    # Try to delete file from disk (best effort)
+    if avatar_url:
+        try:
+            # Extract filename from URL
+            url_path = avatar_url.replace(Config.ASSETS_BASE_URL, '')
+            file_path = ASSETS_DIR / url_path.lstrip('/')
+            if file_path.exists():
+                file_path.unlink()
+        except Exception as e:
+            server_logger.warning(f"Failed to delete avatar file: {e}")
+    
+    return jsonify({'message': 'Avatar deleted successfully'}), 200
+
 
 if __name__ == '__main__':
     app.run(host=Config.HOST, port=Config.PORT, debug=Config.DEBUG)

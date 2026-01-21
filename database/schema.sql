@@ -43,6 +43,7 @@ CREATE INDEX idx_identities_provider_id ON identities(provider_id);
 -- AVATARS TABLE (manages user avatars from multiple sources)
 -- =============================================================================
 CREATE TABLE avatars (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     url TEXT NOT NULL,
     source VARCHAR(20) NOT NULL CHECK (source IN ('provider', 'upload', 'default')),
