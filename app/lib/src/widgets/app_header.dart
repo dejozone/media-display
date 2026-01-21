@@ -21,7 +21,9 @@ class AppHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final displayName = _displayName(user);
-    final initials = displayName.isNotEmpty ? displayName.trim().characters.first.toUpperCase() : 'U';
+    final initials = displayName.isNotEmpty
+        ? displayName.trim().characters.first.toUpperCase()
+        : 'U';
     final avatarUrl = _avatarUrl(user);
 
     return Row(
@@ -29,11 +31,14 @@ class AppHeader extends StatelessWidget {
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
+            Text(title,
+                style:
+                    const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
             if (subtitle != null)
               Padding(
                 padding: const EdgeInsets.only(top: 6),
-                child: Text(subtitle!, style: const TextStyle(color: Color(0xFF9FB1D0))),
+                child: Text(subtitle!,
+                    style: const TextStyle(color: Color(0xFF9FB1D0))),
               ),
           ],
         ),
@@ -63,28 +68,37 @@ class AppHeader extends StatelessWidget {
             ),
             child: Row(
               children: [
-                Text(displayName, style: const TextStyle(fontWeight: FontWeight.w600)),
+                Text(displayName,
+                    style: const TextStyle(fontWeight: FontWeight.w600)),
                 const SizedBox(width: 10),
                 CircleAvatar(
                   radius: 16,
                   backgroundColor: const Color(0xFF1F2A44),
-                  backgroundImage: avatarUrl.isNotEmpty ? NetworkImage(avatarUrl) : null,
+                  backgroundImage:
+                      avatarUrl.isNotEmpty ? NetworkImage(avatarUrl) : null,
                   child: avatarUrl.isEmpty
-                      ? Text(initials, style: const TextStyle(color: Color(0xFFC2CADC), fontWeight: FontWeight.w700))
+                      ? Text(initials,
+                          style: const TextStyle(
+                              color: Color(0xFFC2CADC),
+                              fontWeight: FontWeight.w700))
                       : null,
                 ),
               ],
             ),
           ),
         ),
-        
       ],
     );
   }
 }
 
 String _displayName(Map<String, dynamic>? user) {
-  return (user?['display_name'] ?? user?['name'] ?? user?['username'] ?? user?['email'] ?? 'User').toString();
+  return (user?['display_name'] ??
+          user?['name'] ??
+          user?['username'] ??
+          user?['email'] ??
+          'User')
+      .toString();
 }
 
 String _avatarUrl(Map<String, dynamic>? user) {
@@ -102,11 +116,20 @@ String _avatarUrl(Map<String, dynamic>? user) {
   ].map(pick).firstWhere((v) => v.isNotEmpty, orElse: () => '');
   if (direct.isNotEmpty) return direct;
 
-  final providerAvatars = user['provider_avatars'];
-  if (providerAvatars is Map) {
-    for (final val in providerAvatars.values) {
-      if (val is String && val.isNotEmpty) return val;
+  // Prefer the DB-chosen identity avatar (is_selected) and avoid pulling provider avatars directly.
+  final avatarList = user['provider_avatar_list'];
+  if (avatarList is List) {
+    final selected = avatarList.whereType<Map>().firstWhere(
+        (p) => p['is_selected'] == true && pick(p['avatar_url']).isNotEmpty,
+        orElse: () => {});
+    final selectedUrl = pick(selected['avatar_url']);
+    if (selectedUrl.isNotEmpty) return selectedUrl;
+
+    for (final entry in avatarList.whereType<Map>()) {
+      final url = pick(entry['avatar_url']);
+      if (url.isNotEmpty) return url;
     }
   }
+
   return '';
 }

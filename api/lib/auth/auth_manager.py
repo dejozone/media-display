@@ -245,7 +245,13 @@ class AuthManager:
                 self._link_identity(
                     user['id'], 'google', google_id, avatar_url=avatar_url, select_if_none=True
                 )
-                self._select_identity(user['id'], 'google', google_id)
+                # Only select this identity if no identity is currently selected (preserves user's avatar choice)
+                existing_selected = self._fetch_one(
+                    "SELECT 1 FROM identities WHERE user_id = %s AND is_selected = TRUE LIMIT 1",
+                    (str(user['id']),),
+                )
+                if not existing_selected:
+                    self._select_identity(user['id'], 'google', google_id)
             token = self.create_jwt(user, provider='google')
             return token
         except Exception as e:
@@ -360,7 +366,7 @@ class AuthManager:
             VALUES (%s, %s, %s, %s, %s)
             ON CONFLICT (provider, provider_id) DO UPDATE SET
                 user_id = EXCLUDED.user_id,
-                avatar_url = COALESCE(EXCLUDED.avatar_url, identities.avatar_url),
+                avatar_url = identities.avatar_url,
                 is_selected = identities.is_selected OR EXCLUDED.is_selected
             """,
             (str(user_id), provider, provider_id, avatar_url, is_selected),
@@ -567,7 +573,13 @@ class AuthManager:
             self._link_identity(
                 user['id'], 'spotify', spotify_id, avatar_url=avatar_url, select_if_none=True
             )
-            self._select_identity(user['id'], 'spotify', spotify_id)
+            # Only select this identity if no identity is currently selected (preserves user's avatar choice)
+            existing_selected = self._fetch_one(
+                "SELECT 1 FROM identities WHERE user_id = %s AND is_selected = TRUE LIMIT 1",
+                (str(user['id']),),
+            )
+            if not existing_selected:
+                self._select_identity(user['id'], 'spotify', spotify_id)
             self._save_spotify_tokens(user['id'], spotify_id, tokens)
             # Mark Spotify as enabled for the user once OAuth completes
             try:
