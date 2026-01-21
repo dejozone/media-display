@@ -65,7 +65,8 @@ class _HomePageState extends ConsumerState<HomePage> {
       error = null;
     });
     try {
-      final next = await ref.read(settingsServiceProvider).updateSettings(partial);
+      final next =
+          await ref.read(settingsServiceProvider).updateSettings(partial);
       if (!mounted) return;
       setState(() => settings = next);
       final ws = ref.read(eventsWsProvider.notifier);
@@ -87,7 +88,8 @@ class _HomePageState extends ConsumerState<HomePage> {
     final identitiesRaw = user?['provider_avatar_list'];
     if (identitiesRaw is List) {
       for (final entry in identitiesRaw) {
-        if (entry is Map && (entry['provider']?.toString().toLowerCase() == 'spotify')) {
+        if (entry is Map &&
+            (entry['provider']?.toString().toLowerCase() == 'spotify')) {
           return true;
         }
       }
@@ -103,7 +105,9 @@ class _HomePageState extends ConsumerState<HomePage> {
         launchingSpotify = true;
       });
       try {
-        await ref.read(authServiceProvider).setPendingOauthRedirect(GoRouterState.of(context).uri.toString());
+        await ref
+            .read(authServiceProvider)
+            .setPendingOauthRedirect(GoRouterState.of(context).uri.toString());
         final url = await ref.read(authServiceProvider).getSpotifyAuthUrl();
         if (!mounted) return;
         final ok = await launchUrl(
@@ -169,7 +173,8 @@ class _HomePageState extends ConsumerState<HomePage> {
                   if (error != null)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 12),
-                      child: Text(error!, style: const TextStyle(color: Color(0xFFFF8C8C))),
+                      child: Text(error!,
+                          style: const TextStyle(color: Color(0xFFFF8C8C))),
                     ),
                   _glassCard(
                     child: _UserSummary(user: user),
@@ -213,9 +218,11 @@ class _UserSummary extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Welcome back', style: TextStyle(color: Color(0xFF9FB1D0), letterSpacing: 0.4)),
+        const Text('Welcome back',
+            style: TextStyle(color: Color(0xFF9FB1D0), letterSpacing: 0.4)),
         const SizedBox(height: 6),
-        Text(displayName, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+        Text(displayName,
+            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
         if (email.isNotEmpty) ...[
           const SizedBox(height: 4),
           Text(email, style: const TextStyle(color: Color(0xFFC2CADC))),
@@ -229,7 +236,8 @@ class _UserSummary extends StatelessWidget {
               borderRadius: BorderRadius.circular(10),
               border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
             ),
-            child: Text('Signed in with $provider', style: const TextStyle(color: Color(0xFF9FB1D0), fontSize: 13)),
+            child: Text('Signed in with $provider',
+                style: const TextStyle(color: Color(0xFF9FB1D0), fontSize: 13)),
           ),
         ],
       ],
@@ -259,7 +267,8 @@ class _SettingsToggles extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Services', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+        const Text('Services',
+            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
         const SizedBox(height: 12),
         _toggleRow(
           label: 'Spotify',
@@ -290,18 +299,20 @@ class _NowPlayingSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hasService = (settings?['spotify_enabled'] == true) || (settings?['sonos_enabled'] == true);
+    final hasService = (settings?['spotify_enabled'] == true) ||
+        (settings?['sonos_enabled'] == true);
     if (!hasService) {
-      return const Text('Enable Spotify or Sonos to see Now Playing.', style: TextStyle(color: Color(0xFF9FB1D0)));
+      return const Text('Enable Spotify or Sonos to see Now Playing.',
+          style: TextStyle(color: Color(0xFF9FB1D0)));
     }
 
-    final payload = now.payload;
+    final payload = _unwrapPayload(now.payload);
     final provider = now.provider ?? 'spotify';
     final artwork = _artworkUrl(payload, provider);
     final title = _trackTitle(payload, provider);
     final artist = _artistText(payload, provider);
     final album = _albumText(payload, provider);
-    final device = _deviceText(payload, provider);
+    final deviceInfo = _deviceInfo(payload, provider);
     final status = _statusLabel(payload, provider);
     final isPlaying = _isPlaying(payload);
     final isConnected = now.connected && now.error == null;
@@ -311,10 +322,40 @@ class _NowPlayingSection extends StatelessWidget {
       children: [
         Row(
           children: [
-            Text('Now Playing', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
-            const SizedBox(width: 10),
-            _pill(provider.toUpperCase()),
-            const Spacer(),
+            Expanded(
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Text('Now Playing',
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleMedium
+                          ?.copyWith(fontWeight: FontWeight.w700)),
+                  _pill(provider.toUpperCase()),
+                  _pill(status),
+                  if (deviceInfo.primary.isNotEmpty)
+                    () {
+                      final label = deviceInfo.rest.isEmpty
+                          ? deviceInfo.primary
+                          : '${deviceInfo.primary} +${deviceInfo.rest.length} more';
+                      if (deviceInfo.rest.isEmpty) {
+                        return _pill(label);
+                      }
+                      final fullList =
+                          [deviceInfo.primary, ...deviceInfo.rest].join('\n');
+                      return Tooltip(
+                        message: fullList,
+                        preferBelow: false,
+                        child: _pill(label),
+                      );
+                    }(),
+                  _pill(isPlaying ? 'Live' : 'Paused'),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
             _EqualizerIndicator(
               isConnected: isConnected,
               isPlaying: isPlaying,
@@ -338,25 +379,19 @@ class _NowPlayingSection extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(title.isNotEmpty ? title : 'Unknown Track', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                    Text(title.isNotEmpty ? title : 'Unknown Track',
+                        style: const TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.w700)),
                     const SizedBox(height: 6),
-                    if (artist.isNotEmpty) Text(artist, style: const TextStyle(color: Color(0xFFC2CADC))),
+                    if (artist.isNotEmpty)
+                      Text(artist,
+                          style: const TextStyle(color: Color(0xFFC2CADC))),
                     if (album.isNotEmpty) ...[
                       const SizedBox(height: 4),
-                      Text(album, style: const TextStyle(color: Color(0xFF9FB1D0), fontSize: 13)),
+                      Text(album,
+                          style: const TextStyle(
+                              color: Color(0xFF9FB1D0), fontSize: 13)),
                     ],
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        _pill(status),
-                        if (device.isNotEmpty) ...[
-                          const SizedBox(width: 8),
-                          _pill(device),
-                        ],
-                        const SizedBox(width: 8),
-                        _pill(isPlaying ? 'Live' : 'Paused'),
-                      ],
-                    ),
                   ],
                 ),
               ),
@@ -380,8 +415,8 @@ class _Artwork extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-        
-        gradient: const LinearGradient(colors: [Color(0xFF24324F), Color(0xFF1A2338)]),
+        gradient: const LinearGradient(
+            colors: [Color(0xFF24324F), Color(0xFF1A2338)]),
         image: url.isNotEmpty
             ? DecorationImage(image: NetworkImage(url), fit: BoxFit.cover)
             : null,
@@ -397,19 +432,24 @@ class _AnimatedSkeletonNowPlaying extends StatefulWidget {
   const _AnimatedSkeletonNowPlaying();
 
   @override
-  State<_AnimatedSkeletonNowPlaying> createState() => _AnimatedSkeletonNowPlayingState();
+  State<_AnimatedSkeletonNowPlaying> createState() =>
+      _AnimatedSkeletonNowPlayingState();
 }
 
-class _AnimatedSkeletonNowPlayingState extends State<_AnimatedSkeletonNowPlaying> with SingleTickerProviderStateMixin {
+class _AnimatedSkeletonNowPlayingState
+    extends State<_AnimatedSkeletonNowPlaying>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   late final Animation<double> _alpha;
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 1100))
+    _controller = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 1100))
       ..repeat(reverse: true);
-    _alpha = Tween<double>(begin: 0.45, end: 0.9).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
+    _alpha = Tween<double>(begin: 0.45, end: 0.9)
+        .animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
   }
 
   @override
@@ -431,7 +471,8 @@ class _AnimatedSkeletonNowPlayingState extends State<_AnimatedSkeletonNowPlaying
 }
 
 class _EqualizerIndicator extends StatefulWidget {
-  const _EqualizerIndicator({required this.isConnected, required this.isPlaying});
+  const _EqualizerIndicator(
+      {required this.isConnected, required this.isPlaying});
   final bool isConnected;
   final bool isPlaying;
 
@@ -439,7 +480,8 @@ class _EqualizerIndicator extends StatefulWidget {
   State<_EqualizerIndicator> createState() => _EqualizerIndicatorState();
 }
 
-class _EqualizerIndicatorState extends State<_EqualizerIndicator> with SingleTickerProviderStateMixin {
+class _EqualizerIndicatorState extends State<_EqualizerIndicator>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   late final AnimationController _blinkController;
   late final Animation<double> _blink;
@@ -452,13 +494,17 @@ class _EqualizerIndicatorState extends State<_EqualizerIndicator> with SingleTic
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 1100));
-    _blinkController = AnimationController(vsync: this, duration: const Duration(milliseconds: 1400))
+    _controller = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 1100));
+    _blinkController = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 1400))
       ..repeat(reverse: true);
-    _blink = Tween<double>(begin: 0.55, end: 1.0).animate(CurvedAnimation(parent: _blinkController, curve: Curves.easeInOut));
+    _blink = Tween<double>(begin: 0.55, end: 1.0).animate(
+        CurvedAnimation(parent: _blinkController, curve: Curves.easeInOut));
     final rnd = math.Random();
     _phases = List.generate(3, (_) => rnd.nextDouble() * math.pi * 2);
-    _speeds = List.generate(3, (_) => 0.8 + rnd.nextDouble() * 0.7); // vary speeds per bar
+    _speeds = List.generate(
+        3, (_) => 0.8 + rnd.nextDouble() * 0.7); // vary speeds per bar
     _maybeAnimate();
   }
 
@@ -493,7 +539,8 @@ class _EqualizerIndicatorState extends State<_EqualizerIndicator> with SingleTic
 
   @override
   Widget build(BuildContext context) {
-    final color = widget.isConnected ? const Color(0xFF22C55E) : const Color(0xFFEF4444);
+    final color =
+        widget.isConnected ? const Color(0xFF22C55E) : const Color(0xFFEF4444);
 
     return SizedBox(
       width: 32,
@@ -510,7 +557,14 @@ class _EqualizerIndicatorState extends State<_EqualizerIndicator> with SingleTic
               mainAxisAlignment: MainAxisAlignment.end,
               children: List.generate(3, (i) {
                 final h = (widget.isConnected && widget.isPlaying)
-                    ? _minHeight + (_maxHeight - _minHeight) * (0.35 + 0.65 * ((math.sin((t * 2 * math.pi * _speeds[i]) + _phases[i]) + 1) / 2))
+                    ? _minHeight +
+                        (_maxHeight - _minHeight) *
+                            (0.35 +
+                                0.65 *
+                                    ((math.sin((t * 2 * math.pi * _speeds[i]) +
+                                                _phases[i]) +
+                                            1) /
+                                        2))
                     : _minHeight;
                 return Container(
                   width: 4,
@@ -520,7 +574,10 @@ class _EqualizerIndicatorState extends State<_EqualizerIndicator> with SingleTic
                     color: color,
                     borderRadius: BorderRadius.circular(2),
                     boxShadow: [
-                      BoxShadow(color: color.withValues(alpha: 0.4), blurRadius: 8, spreadRadius: 1.5),
+                      BoxShadow(
+                          color: color.withValues(alpha: 0.4),
+                          blurRadius: 8,
+                          spreadRadius: 1.5),
                     ],
                   ),
                 );
@@ -555,11 +612,12 @@ Widget _pill(String text) {
   return Container(
     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
     decoration: BoxDecoration(
-      color: const Color(0xFFFFFFFF).withValues(alpha: 0.08),
-      borderRadius: BorderRadius.circular(999),
-      border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+      color: const Color(0xFF1A2333),
+      borderRadius: BorderRadius.circular(10),
+      border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
     ),
-    child: Text(text, style: const TextStyle(fontSize: 12, color: Color(0xFFC2CADC))),
+    child: Text(text,
+        style: const TextStyle(fontSize: 12, color: Color(0xFF9FB1D0))),
   );
 }
 
@@ -602,7 +660,11 @@ Widget _skeletonNowPlaying() {
   );
 }
 
-Widget _toggleRow({required String label, required String subtitle, required bool value, required ValueChanged<bool>? onChanged}) {
+Widget _toggleRow(
+    {required String label,
+    required String subtitle,
+    required bool value,
+    required ValueChanged<bool>? onChanged}) {
   return Row(
     children: [
       Expanded(
@@ -611,7 +673,8 @@ Widget _toggleRow({required String label, required String subtitle, required boo
           children: [
             Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
             const SizedBox(height: 2),
-            Text(subtitle, style: const TextStyle(color: Color(0xFF9FB1D0), fontSize: 12)),
+            Text(subtitle,
+                style: const TextStyle(color: Color(0xFF9FB1D0), fontSize: 12)),
           ],
         ),
       ),
@@ -626,7 +689,12 @@ Widget _toggleRow({required String label, required String subtitle, required boo
 }
 
 String _displayName(Map<String, dynamic>? user) {
-  return (user?['display_name'] ?? user?['name'] ?? user?['username'] ?? user?['email'] ?? 'User').toString();
+  return (user?['display_name'] ??
+          user?['name'] ??
+          user?['username'] ??
+          user?['email'] ??
+          'User')
+      .toString();
 }
 
 bool _isPlaying(Map<String, dynamic>? payload) {
@@ -645,21 +713,45 @@ String _statusLabel(Map<String, dynamic>? payload, String provider) {
   return 'Idle';
 }
 
-String _deviceText(Map<String, dynamic>? payload, String provider) {
-  if (payload == null) return '';
-  final device = payload['device'];
-  if (device is Map && device['name'] is String) {
-    return device['name'] as String;
+class _DeviceInfo {
+  const _DeviceInfo({required this.primary, required this.rest});
+  final String primary;
+  final List<String> rest;
+}
+
+Map<String, dynamic>? _unwrapPayload(dynamic payload) {
+  if (payload is Map && payload['data'] is Map) {
+    return payload['data'] as Map<String, dynamic>;
   }
+  return payload as Map<String, dynamic>?;
+}
+
+_DeviceInfo _deviceInfo(Map<String, dynamic>? payload, String provider) {
+  if (payload == null) return const _DeviceInfo(primary: '', rest: []);
+
   final group = payload['group_devices'];
   if (group is List && group.isNotEmpty) {
-    final first = group.first;
-    final rest = group.length - 1;
-    if (first is String) {
-      return rest > 0 ? '$first +$rest more' : first;
+    final names = group
+        .map((g) {
+          if (g is String) return g;
+          if (g is Map && g['name'] is String) return g['name'] as String;
+          return null;
+        })
+        .whereType<String>()
+        .toList();
+    if (names.isNotEmpty) {
+      final primary = names.first;
+      final rest = names.skip(1).toList();
+      return _DeviceInfo(primary: primary, rest: rest);
     }
   }
-  return '';
+
+  final device = payload['device'];
+  if (device is Map && device['name'] is String) {
+    return _DeviceInfo(primary: device['name'] as String, rest: const []);
+  }
+
+  return const _DeviceInfo(primary: '', rest: []);
 }
 
 String _trackTitle(Map<String, dynamic>? payload, String provider) {
@@ -675,18 +767,33 @@ String _artistText(Map<String, dynamic>? payload, String provider) {
   if (payload == null) return '';
   final item = payload['item'];
   if (item is Map && item['artists'] is List) {
-    final artists = (item['artists'] as List).whereType<Map>().map((a) => a['name']).whereType<String>().toList();
+    final artists = (item['artists'] as List)
+        .map((a) {
+          if (a is String) return a;
+          if (a is Map && a['name'] is String) return a['name'] as String;
+          return null;
+        })
+        .whereType<String>()
+        .toList();
     if (artists.isNotEmpty) return artists.join(', ');
   }
   final artists = payload['artists'];
   if (artists is List) {
-    final names = artists.map((e) {
-      if (e is String) return e;
-      if (e is Map && e['name'] is String) return e['name'] as String;
-      return null;
-    }).whereType<String>().toList();
+    final names = artists
+        .map((e) {
+          if (e is String) return e;
+          if (e is Map && e['name'] is String) return e['name'] as String;
+          return null;
+        })
+        .whereType<String>()
+        .toList();
     if (names.isNotEmpty) return names.join(', ');
   }
+  // Common single-artist fallbacks
+  final itemArtist = item is Map ? item['artist'] : null;
+  if (itemArtist is String && itemArtist.isNotEmpty) return itemArtist;
+  final artist = payload['artist'];
+  if (artist is String && artist.isNotEmpty) return artist;
   return '';
 }
 

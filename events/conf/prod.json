@@ -9,10 +9,11 @@
     "path": "/events/media",
     "sslCertFile": "certs/localhost.crt",
     "sslKeyFile": "certs/localhost.key",
-    "sslEnabled": true
+    "sslEnabled": false
   },
   "spotify": {
-    "pollIntervalSec": 5,
+    "minPollIntervalSec": 2,
+    "pollIntervalSec": 2,
     "requestTimeoutSec": 10,
     "retryIntervalSec": 2,
     "retryWindowSec": 20,
@@ -23,7 +24,8 @@
     "discoveryRetryWindowSec": 120,
     "discoveryCooldownSec": 30,
     "coordinatorRetrySec": 3,
-    "pollIntervalSec": 5,
+    "minPollIntervalSec": 2,
+    "pollIntervalSec": 3,
     "discoveryCacheTtlSec": 60,
     "resumeDiscoveryIntervalSec": 10,
     "idleStuckTimeoutSec": 10,

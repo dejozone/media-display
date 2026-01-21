@@ -14,7 +14,8 @@ class SettingsService {
   Map<String, dynamic>? _cachedSettings;
   Future<Map<String, dynamic>>? _inflightFetch;
 
-  Future<Map<String, dynamic>> fetchSettings({bool forceRefresh = false}) async {
+  Future<Map<String, dynamic>> fetchSettings(
+      {bool forceRefresh = false}) async {
     if (!forceRefresh) {
       if (_cachedSettings != null) return _cachedSettings!;
       if (_inflightFetch != null) return _inflightFetch!;
@@ -30,7 +31,8 @@ class SettingsService {
     }
   }
 
-  Future<Map<String, dynamic>> updateSettings(Map<String, dynamic> partial) async {
+  Future<Map<String, dynamic>> updateSettings(
+      Map<String, dynamic> partial) async {
     final updated = await _updateSettingsRemote(partial);
     _cachedSettings = updated;
     _inflightFetch = null;
@@ -42,8 +44,10 @@ class SettingsService {
     return res.data?['settings'] as Map<String, dynamic>? ?? {};
   }
 
-  Future<Map<String, dynamic>> _updateSettingsRemote(Map<String, dynamic> partial) async {
-    final res = await _dio.put<Map<String, dynamic>>('/api/settings', data: partial);
+  Future<Map<String, dynamic>> _updateSettingsRemote(
+      Map<String, dynamic> partial) async {
+    final res =
+        await _dio.put<Map<String, dynamic>>('/api/settings', data: partial);
     return res.data?['settings'] as Map<String, dynamic>? ?? {};
   }
 }
