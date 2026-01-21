@@ -30,15 +30,41 @@ CREATE INDEX idx_users_username ON users(username);
 CREATE TABLE identities (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     provider VARCHAR(50) NOT NULL,
-    provider_id VARCHAR(255) NOT NULL,
+    provider_id VARCHAR(255) NOT NULL UNIQUE,
     avatar_url TEXT,
-    is_selected BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (provider, provider_id)
 );
 
 CREATE INDEX idx_identities_user_id ON identities(user_id);
 CREATE INDEX idx_identities_provider_id ON identities(provider_id);
+
+-- =============================================================================
+-- AVATARS TABLE (manages user avatars from multiple sources)
+-- =============================================================================
+CREATE TABLE avatars (
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    url TEXT NOT NULL,
+    source VARCHAR(20) NOT NULL CHECK (source IN ('provider', 'upload', 'default')),
+    provider_id VARCHAR(255) REFERENCES identities(provider_id) ON DELETE CASCADE,
+    is_selected BOOLEAN NOT NULL DEFAULT FALSE,
+    file_size INTEGER,
+    mime_type VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    -- Constraints
+    UNIQUE (user_id, url),
+    CHECK (
+        (source = 'provider' AND provider_id IS NOT NULL) OR
+        (source IN ('upload', 'default') AND provider_id IS NULL)
+    )
+);
+
+-- Indexes for avatars
+CREATE INDEX idx_avatars_user_id ON avatars(user_id);
+CREATE INDEX idx_avatars_user_selected ON avatars(user_id, is_selected) WHERE is_selected = TRUE;
+CREATE INDEX idx_avatars_provider_id ON avatars(provider_id);
 
 -- =============================================================================
 -- SPOTIFY TOKENS TABLE (keyed by user_id; spotify_id unique)
@@ -146,6 +172,9 @@ CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
 CREATE TRIGGER update_dashboard_settings_updated_at BEFORE UPDATE ON dashboard_settings
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+CREATE TRIGGER update_avatars_updated_at BEFORE UPDATE ON avatars
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
 -- =============================================================================
 -- INITIAL DATA (optional)
 -- =============================================================================
@@ -177,7 +206,7 @@ CREATE TABLE schema_version (
 );
 
 INSERT INTO schema_version (version, description)
-VALUES (4, 'Identities primary key on (provider, provider_id); no surrogate id; enforce user_id mapping');
+VALUES (5, 'Added avatars table; removed is_selected from identities; avatars support provider, upload, and default sources');
 
 -- =============================================================================
 -- END OF SCHEMA
