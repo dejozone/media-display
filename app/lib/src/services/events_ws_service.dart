@@ -165,11 +165,54 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     if (_channel == null) return;
     try {
       final settings = await ref.read(settingsServiceProvider).fetchSettings();
+      final env = ref.read(envConfigProvider);
+      int? asInt(dynamic v) {
+        if (v is int) return v;
+        if (v is double) return v.toInt();
+        if (v is String) {
+          final parsed = int.tryParse(v);
+          if (parsed != null) return parsed;
+        }
+        return null;
+      }
+
+      // Attempt to pick up client-configured poll intervals if present.
+      final spotifyPoll = asInt(
+            settings['spotify_poll_interval_sec'] ??
+            settings['spotify_poll_interval'] ??
+            settings['spotify_poll'] ??
+            settings['poll_spotify'] ??
+            settings['spotify_poll_ms'] ??
+            settings['spotify_poll_interval_ms'],
+          ) ??
+          // If only ms is provided, convert down where possible.
+          (() {
+        final ms = asInt(settings['spotify_poll_interval_ms']);
+            return ms != null ? (ms / 1000).round() : null;
+          })() ?? env.spotifyPollIntervalSec;
+
+      final sonosPoll = asInt(
+            settings['sonos_poll_interval_sec'] ??
+            settings['sonos_poll_interval'] ??
+            settings['sonos_poll'] ??
+            settings['poll_sonos'] ??
+            settings['sonos_poll_ms'] ??
+            settings['sonos_poll_interval_ms'],
+          ) ??
+          (() {
+            final ms = asInt(settings['sonos_poll_interval_ms']);
+            return ms != null ? (ms / 1000).round() : null;
+          })() ?? env.sonosPollIntervalSec;
+
       final payload = jsonEncode({
         'type': 'config',
         'enabled': {
           'spotify': settings['spotify_enabled'] == true,
           'sonos': settings['sonos_enabled'] == true,
+        },
+        'poll': {
+          'spotify': spotifyPoll,
+          'sonos': sonosPoll,
         },
       });
       _channel?.sink.add(payload);

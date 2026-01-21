@@ -470,6 +470,29 @@ async def media_events(ws: WebSocket) -> None:
             "spotify": poll_cfg.get("spotify") if isinstance(poll_cfg.get("spotify"), (int, float)) else None,
             "sonos": poll_cfg.get("sonos") if isinstance(poll_cfg.get("sonos"), (int, float)) else None,
         }
+
+        # Enforce minimum poll intervals; if client sends below min, fall back to configured defaults.
+        def _apply_min(raw: Optional[float], min_allowed: Optional[float], default_val: Optional[float]) -> Optional[float]:
+            if raw is None:
+                return None
+            if min_allowed is not None and raw < min_allowed:
+                return default_val
+            return raw
+
+        poll["spotify"] = _apply_min(
+            poll.get("spotify"),
+            SPOTIFY_CFG.get("minPollIntervalSec"),
+            SPOTIFY_CFG.get("pollIntervalSec"),
+        )
+
+        # Sonos: if client sends None, honor None (no polling). Otherwise enforce minimum and default.
+        if poll.get("sonos") is not None:
+            poll["sonos"] = _apply_min(
+                poll.get("sonos"),
+                SONOS_CFG.get("minPollIntervalSec"),
+                SONOS_CFG.get("pollIntervalSec"),
+            )
+
         async with ctx.lock:
             ctx.config = {"enabled": enabled, "poll": poll}
             # Signal current streams to stop when config flips services off, then prepare a fresh stop event.

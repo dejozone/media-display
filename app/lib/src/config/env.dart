@@ -12,6 +12,8 @@ class EnvConfig {
     required this.wsRetryActiveSeconds,
     required this.wsRetryCooldownSeconds,
     required this.wsRetryMaxTotalSeconds,
+    required this.spotifyPollIntervalSec,
+    this.sonosPollIntervalSec,
   });
 
   final String apiBaseUrl;
@@ -23,6 +25,8 @@ class EnvConfig {
   final int wsRetryActiveSeconds;
   final int wsRetryCooldownSeconds;
   final int wsRetryMaxTotalSeconds;
+  final int spotifyPollIntervalSec;
+  final int? sonosPollIntervalSec;
 }
 
 final envConfigProvider = Provider<EnvConfig>((ref) {
@@ -35,6 +39,8 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
   final wsRetryActiveSeconds = int.tryParse(dotenv.env['WS_RETRY_ACTIVE_SECONDS'] ?? '') ?? 60;
   final wsRetryCooldownSeconds = int.tryParse(dotenv.env['WS_RETRY_COOLDOWN_SECONDS'] ?? '') ?? 180;
   final wsRetryMaxTotalSeconds = int.tryParse(dotenv.env['WS_RETRY_MAX_TOTAL_SECONDS'] ?? '') ?? 1800;
+  final spotifyPollIntervalSec = int.tryParse(dotenv.env['SPOTIFY_POLL_INTERVAL_SEC'] ?? '') ?? 3;
+  final sonosPollIntervalSec = int.tryParse(dotenv.env['SONOS_POLL_INTERVAL_SEC'] ?? '');
   return EnvConfig(
     apiBaseUrl: api,
     eventsWsUrl: ws,
@@ -45,6 +51,8 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
     wsRetryActiveSeconds: wsRetryActiveSeconds,
     wsRetryCooldownSeconds: wsRetryCooldownSeconds,
     wsRetryMaxTotalSeconds: wsRetryMaxTotalSeconds,
+    spotifyPollIntervalSec: spotifyPollIntervalSec,
+    sonosPollIntervalSec: sonosPollIntervalSec,
   );
 });
 

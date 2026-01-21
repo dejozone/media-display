@@ -47,7 +47,7 @@ class SpotifyManager:
         # Avoid very long cooldowns so we can recover quickly once the API is back
         cooldown = min(max(5, self.config.get("cooldownSec", 30)), 120)
 
-        async def _safe_close(target_ws: WebSocket, code: int, reason: str = "") -> None:
+        async def _safe_close(target_ws: SupportsWebSocket, code: int, reason: str = "") -> None:
             try:
                 if target_ws.application_state == WebSocketState.CONNECTED:
                     await target_ws.close(code=code, reason=reason)
