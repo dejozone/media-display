@@ -21,6 +21,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   WebSocketChannel? _channel;
   Timer? _retryTimer;
   late final WsRetryPolicy _retryPolicy;
+  bool _connecting = false;
 
   @override
   NowPlayingState build() {
@@ -57,58 +58,72 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
 
   Future<void> _connect(AuthState auth) async {
     if (!auth.isAuthenticated) return;
+    if (_connecting) return;
+    _connecting = true;
 
-    // Ensure we don't stack multiple channels; close any existing one first.
-    _disconnect(scheduleRetry: false);
-
-    final shouldConnect = await _shouldConnectToServices();
-    if (!shouldConnect) {
+    try {
+      // Ensure we don't stack multiple channels; close any existing one first.
       _disconnect(scheduleRetry: false);
-      return;
-    }
-    final env = ref.read(envConfigProvider);
-    _retryTimer?.cancel();
-    final uri = Uri.parse('${env.eventsWsUrl}?token=${auth.token}');
-    await withInsecureWs(() async {
-      _channel = WebSocketChannel.connect(uri);
-    }, allowInsecure: !env.eventsWsSslVerify);
-    _retryPolicy.reset();
-    state = NowPlayingState(
-      provider: state.provider,
-      payload: state.payload,
-      connected: true,
-      error: null,
-    );
 
-    // Send current service enablement to the server.
-    await sendConfig();
+      final shouldConnect = await _shouldConnectToServices();
+      if (!shouldConnect) {
+        _disconnect(scheduleRetry: false);
+        return;
+      }
+      final env = ref.read(envConfigProvider);
+      _retryTimer?.cancel();
+      final uri = Uri.parse('${env.eventsWsUrl}?token=${auth.token}');
+      try {
+        await withInsecureWs(() async {
+          _channel = WebSocketChannel.connect(uri);
+        }, allowInsecure: !env.eventsWsSslVerify);
+      } catch (e) {
+        state = NowPlayingState(error: 'WebSocket connect failed: $e', connected: false, provider: state.provider, payload: state.payload);
+        _channel = null;
+        _scheduleRetry();
+        return;
+      }
 
-    _channel?.stream.listen(
-      (message) {
-        try {
-          final data = jsonDecode(message as String) as Map<String, dynamic>;
-          final type = data['type'];
-          if (type == 'now_playing') {
-            final provider = data['provider'] as String?;
-            final payload = (data['data'] as Map?)?.cast<String, dynamic>();
-            state = NowPlayingState(provider: provider, payload: payload, connected: true);
-          } else if (type == 'ready') {
-            // ready message ignored for now
+      _retryPolicy.reset();
+      state = NowPlayingState(
+        provider: state.provider,
+        payload: state.payload,
+        connected: true,
+        error: null,
+      );
+
+      // Send current service enablement to the server.
+      await sendConfig();
+
+      _channel?.stream.listen(
+        (message) {
+          try {
+            final data = jsonDecode(message as String) as Map<String, dynamic>;
+            final type = data['type'];
+            if (type == 'now_playing') {
+              final provider = data['provider'] as String?;
+              final payload = (data['data'] as Map?)?.cast<String, dynamic>();
+              state = NowPlayingState(provider: provider, payload: payload, connected: true);
+            } else if (type == 'ready') {
+              // ready message ignored for now
+            }
+          } catch (e) {
+            state = NowPlayingState(error: 'Parse error: $e', connected: true);
           }
-        } catch (e) {
-          state = NowPlayingState(error: 'Parse error: $e', connected: true);
-        }
-      },
-      onError: (err) {
-        state = NowPlayingState(error: 'WebSocket error: $err', connected: false, provider: state.provider, payload: state.payload);
-        _scheduleRetry();
-      },
-      onDone: () {
-        state = NowPlayingState(error: 'Connection closed', connected: false, provider: state.provider, payload: state.payload);
-        _scheduleRetry();
-      },
-      cancelOnError: true,
-    );
+        },
+        onError: (err) {
+          state = NowPlayingState(error: 'WebSocket error: $err', connected: false, provider: state.provider, payload: state.payload);
+          _scheduleRetry();
+        },
+        onDone: () {
+          state = NowPlayingState(error: 'Connection closed', connected: false, provider: state.provider, payload: state.payload);
+          _scheduleRetry();
+        },
+        cancelOnError: true,
+      );
+    } finally {
+      _connecting = false;
+    }
   }
 
   void _scheduleRetry() {

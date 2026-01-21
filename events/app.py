@@ -452,15 +452,6 @@ async def media_events(ws: WebSocket) -> None:
     await ws.accept(subprotocol=None)
     await ws.send_json({"type": "ready", "user": user_info, "settings": {}})
 
-    # Enforce a single active session per user: close and drop any existing sessions before adding this one.
-    for sid, existing in list(ctx.channel.sessions.items()):
-        try:
-            if existing.application_state == WebSocketState.CONNECTED:
-                await existing.close(code=1013, reason="Replaced by new session")
-        except Exception:
-            pass
-        await ctx.channel.remove(sid)
-
     await ctx.channel.add(session_id, ws)
 
     if ctx.driver_task is None or ctx.driver_task.done():
@@ -486,7 +477,7 @@ async def media_events(ws: WebSocket) -> None:
             ctx.service_stop_event = asyncio.Event()
         ctx.config_event.set()
         logger.info(
-            "config updated user=%s enabled_spotify=%s enabled_sonos=%s poll_spotify=%s poll_sonos=%s sessions=%d",
+            "config updated user=%s enabled_spotify=%s enabled_sonos=%s poll_spotify=%s poll_sonos=%s sessions=%d (multi-session allowed)",
             user_id,
             enabled["spotify"],
             enabled["sonos"],

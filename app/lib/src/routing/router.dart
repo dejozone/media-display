@@ -12,7 +12,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   ref.onDispose(refresh.dispose);
   ref.listen<AuthState>(authStateProvider, (_, __) => refresh.value++);
   return GoRouter(
-    initialLocation: '/login',
+    initialLocation: '/',
     refreshListenable: refresh,
     redirect: (context, state) {
       final auth = ref.read(authStateProvider);
@@ -25,12 +25,16 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       if (!loggedIn && !(loggingIn || oauthFlow)) {
         return '/login';
       }
-      if (loggedIn && (loggingIn || (oauthFlow && !oauthHasError))) {
+      if (loggedIn && (loggingIn || (oauthFlow && !oauthHasError) || state.uri.path == '/')) {
         return '/home';
       }
       return null;
     },
     routes: [
+      GoRoute(
+        path: '/',
+        builder: (context, state) => const HomePage(),
+      ),
       GoRoute(
         path: '/login',
         builder: (context, state) => const LoginPage(),
@@ -63,5 +67,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const AccountSettingsPage(),
       ),
     ],
+    errorBuilder: (context, state) => const HomePage(),
   );
 });
