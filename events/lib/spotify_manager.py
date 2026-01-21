@@ -1,10 +1,24 @@
 import asyncio
 import logging
 import time
-from typing import Any, Awaitable, Callable, Dict, Optional
+from typing import Any, Awaitable, Callable, Dict, Optional, Protocol
 
 import httpx
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
+
+
+class SupportsWebSocket(Protocol):
+    """Minimal protocol for objects that behave like a WebSocket."""
+
+    @property
+    def application_state(self) -> WebSocketState:
+        ...
+
+    async def send_json(self, data: Any, mode: str = "text") -> None:
+        ...
+
+    async def close(self, code: int = 1000, reason: str = "") -> None:  # pragma: no cover - signature only
+        ...
 
 
 class SpotifyManager:
@@ -16,13 +30,13 @@ class SpotifyManager:
     async def stream_now_playing(
         self,
         *,
-        ws: WebSocket,
+        ws: SupportsWebSocket,
         token: str,
         stop_event: asyncio.Event,
         http_client: httpx.AsyncClient,
         close_on_stop: bool = True,
         poll_interval_override: Optional[int] = None,
-        safe_close: Optional[Callable[[WebSocket, int, str], Awaitable[None]]] = None,
+        safe_close: Optional[Callable[[SupportsWebSocket, int, str], Awaitable[None]]] = None,
     ) -> None:
         assert stop_event is not None
         assert http_client is not None
