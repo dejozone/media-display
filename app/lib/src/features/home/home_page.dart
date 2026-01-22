@@ -708,17 +708,24 @@ String _displayName(Map<String, dynamic>? user) {
 
 bool _isPlaying(Map<String, dynamic>? payload) {
   if (payload == null) return false;
-  final v = payload['is_playing'];
-  if (v is bool) return v;
+  final playback = payload['playback'];
+  if (playback is Map) {
+    final v = playback['is_playing'];
+    if (v is bool) return v;
+  }
   return false;
 }
 
 String _statusLabel(Map<String, dynamic>? payload, String provider) {
   if (payload == null) return 'Waiting';
-  final isPlaying = _isPlaying(payload);
-  if (isPlaying) return 'Playing';
-  final val = payload['status'] ?? payload['state'];
-  if (val is String && val.isNotEmpty) return val;
+  final playback = payload['playback'];
+  if (playback is Map) {
+    final status = playback['status'];
+    if (status is String && status.isNotEmpty) {
+      // Capitalize first letter
+      return status[0].toUpperCase() + status.substring(1);
+    }
+  }
   return 'Idle';
 }
 
@@ -729,18 +736,22 @@ class _DeviceInfo {
 }
 
 Map<String, dynamic>? _unwrapPayload(dynamic payload) {
-  if (payload is Map && payload['data'] is Map) {
-    return payload['data'] as Map<String, dynamic>;
+  if (payload is Map) {
+    // New normalized structure is already at top level
+    return payload as Map<String, dynamic>;
   }
-  return payload as Map<String, dynamic>?;
+  return null;
 }
 
 _DeviceInfo _deviceInfo(Map<String, dynamic>? payload, String provider) {
   if (payload == null) return const _DeviceInfo(primary: '', rest: []);
 
-  final group = payload['group_devices'];
-  if (group is List && group.isNotEmpty) {
-    final names = group
+  final device = payload['device'];
+  if (device is! Map) return const _DeviceInfo(primary: '', rest: []);
+
+  final groupDevices = device['group_devices'];
+  if (groupDevices is List && groupDevices.isNotEmpty) {
+    final names = groupDevices
         .map((g) {
           if (g is String) return g;
           if (g is Map && g['name'] is String) return g['name'] as String;
@@ -755,8 +766,7 @@ _DeviceInfo _deviceInfo(Map<String, dynamic>? payload, String provider) {
     }
   }
 
-  final device = payload['device'];
-  if (device is Map && device['name'] is String) {
+  if (device['name'] is String) {
     return _DeviceInfo(primary: device['name'] as String, rest: const []);
   }
 
@@ -765,97 +775,36 @@ _DeviceInfo _deviceInfo(Map<String, dynamic>? payload, String provider) {
 
 String _trackTitle(Map<String, dynamic>? payload, String provider) {
   if (payload == null) return '';
-  final item = payload['item'];
-  if (item is Map && item['name'] is String) return item['name'] as String;
-  if (payload['title'] is String) return payload['title'] as String;
-  if (payload['name'] is String) return payload['name'] as String;
+  final track = payload['track'];
+  if (track is Map && track['title'] is String) {
+    return track['title'] as String;
+  }
   return '';
 }
 
 String _artistText(Map<String, dynamic>? payload, String provider) {
   if (payload == null) return '';
-  final item = payload['item'];
-  if (item is Map && item['artists'] is List) {
-    final artists = (item['artists'] as List)
-        .map((a) {
-          if (a is String) return a;
-          if (a is Map && a['name'] is String) return a['name'] as String;
-          return null;
-        })
-        .whereType<String>()
-        .toList();
-    if (artists.isNotEmpty) return artists.join(', ');
+  final track = payload['track'];
+  if (track is Map && track['artist'] is String) {
+    return track['artist'] as String;
   }
-  final artists = payload['artists'];
-  if (artists is List) {
-    final names = artists
-        .map((e) {
-          if (e is String) return e;
-          if (e is Map && e['name'] is String) return e['name'] as String;
-          return null;
-        })
-        .whereType<String>()
-        .toList();
-    if (names.isNotEmpty) return names.join(', ');
-  }
-  // Common single-artist fallbacks
-  final itemArtist = item is Map ? item['artist'] : null;
-  if (itemArtist is String && itemArtist.isNotEmpty) return itemArtist;
-  final artist = payload['artist'];
-  if (artist is String && artist.isNotEmpty) return artist;
   return '';
 }
 
 String _albumText(Map<String, dynamic>? payload, String provider) {
   if (payload == null) return '';
-  final item = payload['item'];
-  final album = (item is Map ? item['album'] : null) ?? payload['album'];
-  if (album is Map) {
-    if (album['name'] is String) return album['name'] as String;
-    if (album['title'] is String) return album['title'] as String;
+  final track = payload['track'];
+  if (track is Map && track['album'] is String) {
+    return track['album'] as String;
   }
-  if (album is String) return album;
-  final show = item is Map ? item['show'] : null;
-  if (show is Map && show['name'] is String) return show['name'] as String;
   return '';
 }
 
 String _artworkUrl(Map<String, dynamic>? payload, String provider) {
   if (payload == null) return '';
-
-  String fromImages(dynamic images) {
-    if (images is List) {
-      for (final img in images) {
-        if (img is Map && img['url'] is String) return img['url'] as String;
-        if (img is String) return img;
-      }
-    }
-    return '';
+  final track = payload['track'];
+  if (track is Map && track['artwork_url'] is String) {
+    return track['artwork_url'] as String;
   }
-
-  final item = payload['item'];
-  if (provider == 'sonos') {
-    if (item is Map) {
-      final candidates = [
-        item['album_art_url'],
-        item['albumArt'],
-        item['album_art'],
-      ];
-      for (final c in candidates) {
-        if (c is String && c.isNotEmpty) return c;
-      }
-    }
-  }
-
-  final album = (item is Map ? item['album'] : null) ?? payload['album'];
-  final fromAlbum = fromImages(album is Map ? album['images'] : null);
-  if (fromAlbum.isNotEmpty) return fromAlbum;
-
-  final fromItem = fromImages(item is Map ? item['images'] : null);
-  if (fromItem.isNotEmpty) return fromItem;
-
-  final fromTop = fromImages(payload['images']);
-  if (fromTop.isNotEmpty) return fromTop;
-
   return '';
 }

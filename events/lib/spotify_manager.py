@@ -6,6 +6,8 @@ from typing import Any, Awaitable, Callable, Dict, Optional, Protocol
 import httpx
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
+from lib.payload_normalizer import normalize_payload
+
 
 class SupportsWebSocket(Protocol):
     """Minimal protocol for objects that behave like a WebSocket."""
@@ -108,10 +110,11 @@ class SpotifyManager:
                     etag = resp.headers.get("ETag", etag)
                     if payload != last_payload:
                         self.logger.info("spotify: new now-playing payload")
+                        normalized = normalize_payload(payload, "spotify")
                         await ws.send_json({
                             "type": "now_playing",
                             "provider": "spotify",
-                            "data": payload,
+                            "data": normalized,
                         })
                         last_payload = payload
                     if failure_start is not None:

@@ -10,6 +10,8 @@ try:
 except ImportError as exc:  # pragma: no cover
     raise ImportError("soco is required for Sonos support; please install soco") from exc
 
+from lib.payload_normalizer import normalize_payload
+
 
 class SonosManager:
     """Lightweight Sonos polling manager for local network playback info."""
@@ -299,7 +301,8 @@ class SonosManager:
                         stop_event.set()
                         break
                     try:
-                        await ws.send_json({"type": "now_playing", "provider": "sonos", "data": payload})
+                        normalized = normalize_payload(payload, "sonos")
+                        await ws.send_json({"type": "now_playing", "provider": "sonos", "data": normalized})
                         self.logger.info("sonos: new payload emitted")
                         last_payload = payload
                         last_signature = signature
