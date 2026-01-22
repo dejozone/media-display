@@ -1374,12 +1374,14 @@ file:///Users/hthai00/Projects/media-display/app/lib/src/features/account/accoun
 file:///Users/hthai00/Projects/media-display/app/lib/src/features/auth/login_page.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/features/auth/oauth_callback_page.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/features/home/home_page.dart
+file:///Users/hthai00/Projects/media-display/app/lib/src/models/avatar.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/routing/router.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/services/account_service.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/services/api_client.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/services/api_client_web.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/services/auth_service.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/services/auth_state.dart
+file:///Users/hthai00/Projects/media-display/app/lib/src/services/avatar_service.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/services/events_ws_service.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/services/settings_service.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/services/token_storage.dart

@@ -31,7 +31,6 @@ CREATE TABLE identities (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     provider VARCHAR(50) NOT NULL,
     provider_id VARCHAR(255) NOT NULL UNIQUE,
-    avatar_url TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (provider, provider_id)
 );

@@ -23,12 +23,17 @@ class AccountService {
     return res.data?['settings'] as Map<String, dynamic>? ?? {};
   }
 
-  Future<Map<String, dynamic>> updateAccount(Map<String, dynamic> payload) async {
-    final res = await _dio.put<Map<String, dynamic>>('/api/account', data: payload);
+  Future<Map<String, dynamic>> updateAccount(
+      Map<String, dynamic> payload) async {
+    final res =
+        await _dio.put<Map<String, dynamic>>('/api/account', data: payload);
     return res.data?['user'] as Map<String, dynamic>? ?? {};
   }
 
-  Future<Map<String, dynamic>> updateService({required String userId, required String service, required bool enable}) async {
+  Future<Map<String, dynamic>> updateService(
+      {required String userId,
+      required String service,
+      required bool enable}) async {
     final path = '/api/users/$userId/services/$service';
     final res = enable
         ? await _dio.post<Map<String, dynamic>>(path)
@@ -39,7 +44,8 @@ class AccountService {
     return {};
   }
 
-  Future<Map<String, dynamic>> saveAvatar({required String avatarUrl, String? avatarProvider}) async {
+  Future<Map<String, dynamic>> saveAvatar(
+      {required String avatarUrl, String? avatarProvider}) async {
     final res = await _dio.put<Map<String, dynamic>>(
       '/api/account',
       data: {
@@ -48,17 +54,5 @@ class AccountService {
       },
     );
     return res.data?['user'] as Map<String, dynamic>? ?? {};
-  }
-
-  Future<String> uploadAvatarBytes({required Uint8List bytes, required String filename}) async {
-    final formData = FormData.fromMap({
-      'file': MultipartFile.fromBytes(bytes, filename: filename),
-    });
-    final res = await _dio.post<Map<String, dynamic>>(
-      '/api/account/avatar',
-      data: formData,
-      options: Options(contentType: 'multipart/form-data'),
-    );
-    return res.data?['avatar_url']?.toString() ?? '';
   }
 }

@@ -16,16 +16,21 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     refreshListenable: refresh,
     redirect: (context, state) {
       final auth = ref.read(authStateProvider);
-      if (auth.loading) return null; // avoid redirects until token load finishes
+      if (auth.loading)
+        return null; // avoid redirects until token load finishes
       final loggedIn = auth.isAuthenticated;
       final loggingIn = state.uri.path == '/login';
       final oauthFlow = state.uri.path.startsWith('/oauth/');
-      final oauthHasError = oauthFlow && state.uri.queryParameters.containsKey('error');
+      final oauthHasError =
+          oauthFlow && state.uri.queryParameters.containsKey('error');
 
       if (!loggedIn && !(loggingIn || oauthFlow)) {
         return '/login';
       }
-      if (loggedIn && (loggingIn || (oauthFlow && !oauthHasError) || state.uri.path == '/')) {
+      if (loggedIn &&
+          (loggingIn ||
+              (oauthFlow && !oauthHasError) ||
+              state.uri.path == '/')) {
         return '/home';
       }
       return null;

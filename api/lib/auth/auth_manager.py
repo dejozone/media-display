@@ -243,15 +243,8 @@ class AuthManager:
 
             if google_id:
                 self._link_identity(
-                    user['id'], 'google', google_id, avatar_url=avatar_url, select_if_none=True
+                    user['id'], 'google', google_id, avatar_url=avatar_url
                 )
-                # Only select this identity if no identity is currently selected (preserves user's avatar choice)
-                existing_selected = self._fetch_one(
-                    "SELECT 1 FROM identities WHERE user_id = %s AND is_selected = TRUE LIMIT 1",
-                    (str(user['id']),),
-                )
-                if not existing_selected:
-                    self._select_identity(user['id'], 'google', google_id)
             token = self.create_jwt(user, provider='google')
             return token
         except Exception as e:
@@ -328,60 +321,82 @@ class AuthManager:
         )
 
     def update_identity_avatar(self, user_id: str, avatar_url: Optional[str]) -> None:
-        # Update only the currently selected identity; never overwrite other providers unintentionally
-        identity = self._fetch_one(
-            "SELECT provider, provider_id FROM identities WHERE user_id = %s AND is_selected = TRUE ORDER BY created_at DESC LIMIT 1",
-            (str(user_id),),
-        )
-        if not identity:
-            return
-
-        self._execute(
-            "UPDATE identities SET avatar_url = %s WHERE user_id = %s AND provider = %s AND provider_id = %s",
-            (avatar_url, str(user_id), identity['provider'], identity['provider_id']),
-        )
+        # Deprecated - identities no longer store avatar_url
+        # Avatars are now managed via the avatars table
+        pass
 
     def select_identity_by_provider(self, user_id: str, provider: str) -> None:
-        # Pick the newest identity for the provider and mark it selected, deselecting others
+        # Avatar selection now handled via avatars table - this method is deprecated
+        # Find the avatar with this provider and select it
         identity = self._fetch_one(
-            "SELECT provider, provider_id FROM identities WHERE user_id = %s AND provider = %s ORDER BY created_at DESC LIMIT 1",
+            "SELECT provider_id FROM identities WHERE user_id = %s AND provider = %s ORDER BY created_at DESC LIMIT 1",
             (str(user_id), provider),
         )
         if not identity:
             return
-        self._select_identity(str(user_id), identity['provider'], identity['provider_id'])
+        
+        # Find and select the avatar with this provider_id
+        avatar = self._fetch_one(
+            "SELECT id FROM avatars WHERE user_id = %s AND provider_id = %s",
+            (str(user_id), identity['provider_id']),
+        )
+        if avatar:
+            self.update_avatar_selection(user_id, avatar['id'])
 
-    def _link_identity(self, user_id: str, provider: str, provider_id: str, avatar_url: Optional[str] = None, select_if_none: bool = False) -> None:
-        is_selected = False
-        if select_if_none:
-            existing_selected = self._fetch_one(
-                "SELECT 1 FROM identities WHERE user_id = %s AND is_selected = TRUE LIMIT 1",
-                (str(user_id),),
-            )
-            is_selected = existing_selected is None
-
+    def _link_identity(self, user_id: str, provider: str, provider_id: str, avatar_url: Optional[str] = None) -> None:
         self._execute(
             """
-            INSERT INTO identities (user_id, provider, provider_id, avatar_url, is_selected)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO identities (user_id, provider, provider_id)
+            VALUES (%s, %s, %s)
             ON CONFLICT (provider, provider_id) DO UPDATE SET
-                user_id = EXCLUDED.user_id,
-                avatar_url = identities.avatar_url,
-                is_selected = identities.is_selected OR EXCLUDED.is_selected
+                user_id = EXCLUDED.user_id
             """,
-            (str(user_id), provider, provider_id, avatar_url, is_selected),
+            (str(user_id), provider, provider_id),
         )
+        
+        # Create avatar record from provider if we have an avatar_url
+        if avatar_url:
+            # Check if provider avatar already exists
+            existing = self._fetch_one(
+                "SELECT id FROM avatars WHERE user_id = %s AND source = 'provider' AND provider_id = %s",
+                (str(user_id), provider_id),
+            )
+            if not existing:
+                # Check if user has any avatars
+                has_avatars = self._fetch_one(
+                    "SELECT 1 FROM avatars WHERE user_id = %s LIMIT 1",
+                    (str(user_id),),
+                )
+                is_selected = has_avatars is None
+                
+                self._execute(
+                    """
+                    INSERT INTO avatars (user_id, url, source, provider_id, is_selected)
+                    VALUES (%s, %s, 'provider', %s, %s)
+                    """,
+                    (str(user_id), avatar_url, provider_id, is_selected),
+                )
 
     def _reassign_spotify_identity(self, old_user_id: str, new_user_id: str, spotify_id: str, avatar_url: Optional[str]) -> None:
         # Move identity and tokens to the new user, then remove the old user record
         self._execute(
             """
             UPDATE identities
-            SET user_id = %s, avatar_url = COALESCE(%s, avatar_url), is_selected = TRUE
+            SET user_id = %s
             WHERE provider = 'spotify' AND provider_id = %s
             """,
-            (str(new_user_id), avatar_url, spotify_id),
+            (str(new_user_id), spotify_id),
         )
+        # Move any avatars associated with this provider
+        if avatar_url:
+            self._execute(
+                """
+                UPDATE avatars
+                SET user_id = %s
+                WHERE provider_id = %s
+                """,
+                (str(new_user_id), spotify_id),
+            )
         self._execute(
             """
             UPDATE spotify_tokens
@@ -390,27 +405,17 @@ class AuthManager:
             """,
             (str(new_user_id), str(old_user_id)),
         )
-        # Deselect other identities for the new user and select this spotify identity
-        self._select_identity(str(new_user_id), 'spotify', spotify_id)
+        # Avatar selection now handled via avatars table
         # Remove old user row now that associations are moved
         self._execute("DELETE FROM users WHERE id = %s", (str(old_user_id),))
 
-    def _select_identity(self, user_id: str, provider: str, provider_id: str) -> None:
-        # Select the given identity for the user and deselect others
-        self._execute(
-            """
-            UPDATE identities
-            SET is_selected = (provider = %s AND provider_id = %s)
-            WHERE user_id = %s
-            """,
-            (provider, provider_id, str(user_id)),
-        )
+    # _select_identity method removed - avatar selection now handled via avatars table
 
     def _get_selected_avatar_url(self, user_id: str) -> Optional[str]:
         row = self._fetch_one(
             """
-            SELECT avatar_url
-            FROM identities
+            SELECT url
+            FROM avatars
             WHERE user_id = %s AND is_selected = TRUE
             ORDER BY created_at ASC
             LIMIT 1
@@ -418,7 +423,7 @@ class AuthManager:
             (str(user_id),),
         )
         if row:
-            return row.get('avatar_url')
+            return row['url']
         return None
 
     def get_selected_avatar_url(self, user_id: str) -> Optional[str]:
@@ -571,15 +576,8 @@ class AuthManager:
 
             tokens['expires_at'] = int(time.time()) + tokens.get('expires_in', 3600)
             self._link_identity(
-                user['id'], 'spotify', spotify_id, avatar_url=avatar_url, select_if_none=True
+                user['id'], 'spotify', spotify_id, avatar_url=avatar_url
             )
-            # Only select this identity if no identity is currently selected (preserves user's avatar choice)
-            existing_selected = self._fetch_one(
-                "SELECT 1 FROM identities WHERE user_id = %s AND is_selected = TRUE LIMIT 1",
-                (str(user['id']),),
-            )
-            if not existing_selected:
-                self._select_identity(user['id'], 'spotify', spotify_id)
             self._save_spotify_tokens(user['id'], spotify_id, tokens)
             # Mark Spotify as enabled for the user once OAuth completes
             try:
@@ -597,21 +595,32 @@ class AuthManager:
         if not user:
             return {}
         identities = self.get_identities(user_id) or []
-        provider_avatars = {i.get('provider'): i.get('avatar_url') for i in identities if i.get('provider')}
-        provider_avatar_list = [
-            {
-                'provider': i.get('provider'),
-                'provider_id': i.get('provider_id'),
-                'avatar_url': i.get('avatar_url'),
-                'is_selected': i.get('is_selected'),
-            }
-            for i in identities if i.get('provider')
-        ]
-        selected_identity = next((i for i in identities if i.get('is_selected')), identities[0] if identities else None)
-        avatar_url = selected_identity.get('avatar_url') if selected_identity else None
-        if not avatar_url:
-            avatar_url = next((i.get('avatar_url') for i in identities if i.get('avatar_url')), None)
-        provider = selected_identity.get('provider') if selected_identity else None
+        
+        # Get provider avatars from avatars table
+        avatars = self.get_avatars(user_id, limit=50)
+        provider_avatars = {}
+        provider_avatar_list = []
+        
+        for avatar in avatars:
+            if avatar.get('source') == 'provider' and avatar.get('provider_id'):
+                # Find the provider for this avatar
+                identity = next((i for i in identities if i.get('provider_id') == avatar.get('provider_id')), None)
+                if identity:
+                    provider_name = identity.get('provider')
+                    provider_avatars[provider_name] = avatar.get('url')
+                    provider_avatar_list.append({
+                        'provider': provider_name,
+                        'provider_id': avatar.get('provider_id'),
+                        'avatar_url': avatar.get('url'),
+                    })
+        
+        # Get selected avatar from avatars table
+        avatar_url = self._get_selected_avatar_url(user_id)
+        if not avatar_url and avatars:
+            avatar_url = avatars[0].get('url')
+        
+        # Get primary provider (first identity)
+        provider = identities[0].get('provider') if identities else None
         spotify_connected = self.has_spotify_tokens(user_id)
         return {
             'id': user.get('id'),
@@ -635,7 +644,7 @@ class AuthManager:
         """Get all avatars for a user."""
         return self._fetch_all(
             """
-            SELECT id, url, source, provider_id, is_selected, file_size, mime_type, created_at, updated_at
+            SELECT id, user_id, url, source, provider_id, is_selected, file_size, mime_type, created_at, updated_at
             FROM avatars
             WHERE user_id = %s
             ORDER BY is_selected DESC, created_at DESC
@@ -648,7 +657,7 @@ class AuthManager:
         """Get a specific avatar by ID."""
         return self._fetch_one(
             """
-            SELECT id, url, source, provider_id, is_selected, file_size, mime_type, created_at, updated_at
+            SELECT id, user_id, url, source, provider_id, is_selected, file_size, mime_type, created_at, updated_at
             FROM avatars
             WHERE user_id = %s AND id = %s
             """,
@@ -659,7 +668,7 @@ class AuthManager:
         """Get a specific avatar by URL."""
         return self._fetch_one(
             """
-            SELECT id, url, source, provider_id, is_selected, file_size, mime_type, created_at, updated_at
+            SELECT id, user_id, url, source, provider_id, is_selected, file_size, mime_type, created_at, updated_at
             FROM avatars
             WHERE user_id = %s AND url = %s
             """,

@@ -176,21 +176,35 @@ def user_me():
         return jsonify({'error': 'User not found'}), 404
 
     identities = auth_manager.get_identities(g.user_id) or []
-    selected_identity = next((i for i in identities if i.get('is_selected')), identities[0] if identities else None)
-    provider = selected_identity.get('provider') if selected_identity else None
-    provider_avatars = {i.get('provider'): i.get('avatar_url') for i in identities if i.get('provider')}
-    provider_avatar_list = [
-        {
-            'provider': i.get('provider'),
-            'provider_id': i.get('provider_id'),
-            'avatar_url': i.get('avatar_url'),
-            'is_selected': i.get('is_selected'),
-        }
-        for i in identities if i.get('provider')
-    ]
-    avatar_url = next((i.get('avatar_url') for i in identities if i.get('is_selected') and i.get('avatar_url')), None)
-    if not avatar_url:
-        avatar_url = next((i.get('avatar_url') for i in identities if i.get('avatar_url')), None)
+    provider = identities[0].get('provider') if identities else None
+    
+    # Get provider avatars from avatars table
+    avatars = auth_manager.get_avatars(g.user_id, limit=50)
+    provider_avatars = {}
+    provider_avatar_list = []
+    
+    for avatar in avatars:
+        if avatar.get('source') == 'provider' and avatar.get('provider_id'):
+            # Find the provider for this avatar
+            identity = next((i for i in identities if i.get('provider_id') == avatar.get('provider_id')), None)
+            if identity:
+                provider_name = identity.get('provider')
+                provider_avatars[provider_name] = avatar.get('url')
+                provider_avatar_list.append({
+                    'provider': provider_name,
+                    'provider_id': avatar.get('provider_id'),
+                    'avatar_url': avatar.get('url'),
+                })
+    
+    # Get selected avatar from avatars table
+    selected_avatar = auth_manager._fetch_one(
+        "SELECT url FROM avatars WHERE user_id = %s AND is_selected = TRUE ORDER BY created_at DESC LIMIT 1",
+        (str(g.user_id),),
+    )
+    avatar_url = selected_avatar['url'] if selected_avatar else None
+    if not avatar_url and avatars:
+        avatar_url = avatars[0].get('url')
+    
     spotify_connected = auth_manager.has_spotify_tokens(g.user_id)
 
     return jsonify({'user': {
@@ -272,23 +286,39 @@ def get_account():
     user = auth_manager.get_user(g.user_id)
     if not user:
         return jsonify({'error': 'User not found'}), 404
+    
     identities = auth_manager.get_identities(g.user_id) or []
-    provider_avatars = {i.get('provider'): i.get('avatar_url') for i in identities if i.get('provider')}
-    provider_avatar_list = [
-        {
-            'provider': i.get('provider'),
-            'provider_id': i.get('provider_id'),
-            'avatar_url': i.get('avatar_url'),
-            'is_selected': i.get('is_selected'),
-        }
-        for i in identities if i.get('provider')
-    ]
-    selected_identity = next((i for i in identities if i.get('is_selected')), identities[0] if identities else None)
-    avatar_url = selected_identity.get('avatar_url') if selected_identity else None
-    if not avatar_url:
-        avatar_url = next((i.get('avatar_url') for i in identities if i.get('avatar_url')), None)
-    provider = selected_identity.get('provider') if selected_identity else None
+    
+    # Get provider avatars from avatars table
+    avatars = auth_manager.get_avatars(g.user_id, limit=50)
+    provider_avatars = {}
+    provider_avatar_list = []
+    
+    for avatar in avatars:
+        if avatar.get('source') == 'provider' and avatar.get('provider_id'):
+            # Find the provider for this avatar
+            identity = next((i for i in identities if i.get('provider_id') == avatar.get('provider_id')), None)
+            if identity:
+                provider_name = identity.get('provider')
+                provider_avatars[provider_name] = avatar.get('url')
+                provider_avatar_list.append({
+                    'provider': provider_name,
+                    'provider_id': avatar.get('provider_id'),
+                    'avatar_url': avatar.get('url'),
+                })
+    
+    # Get selected avatar from avatars table
+    selected_avatar = auth_manager._fetch_one(
+        "SELECT url FROM avatars WHERE user_id = %s AND is_selected = TRUE ORDER BY created_at DESC LIMIT 1",
+        (str(g.user_id),),
+    )
+    avatar_url = selected_avatar['url'] if selected_avatar else None
+    if not avatar_url and avatars:
+        avatar_url = avatars[0].get('url')
+    
+    provider = identities[0].get('provider') if identities else None
     spotify_connected = auth_manager.has_spotify_tokens(g.user_id)
+    
     return jsonify({
         'user': {
             'id': user.get('id'),
@@ -341,21 +371,35 @@ def update_account():
         auth_manager.update_identity_avatar(g.user_id, avatar_url)
 
     identities = auth_manager.get_identities(g.user_id) or []
-    provider_avatars = {i.get('provider'): i.get('avatar_url') for i in identities if i.get('provider')}
-    provider_avatar_list = [
-        {
-            'provider': i.get('provider'),
-            'provider_id': i.get('provider_id'),
-            'avatar_url': i.get('avatar_url'),
-            'is_selected': i.get('is_selected'),
-        }
-        for i in identities if i.get('provider')
-    ]
-    selected_identity = next((i for i in identities if i.get('is_selected')), identities[0] if identities else None)
-    chosen_avatar = avatar_url or (selected_identity.get('avatar_url') if selected_identity else None)
+    
+    # Get provider avatars from avatars table
+    avatars = auth_manager.get_avatars(g.user_id, limit=50)
+    provider_avatars = {}
+    provider_avatar_list = []
+    
+    for avatar in avatars:
+        if avatar.get('source') == 'provider' and avatar.get('provider_id'):
+            # Find the provider for this avatar
+            identity = next((i for i in identities if i.get('provider_id') == avatar.get('provider_id')), None)
+            if identity:
+                provider_name = identity.get('provider')
+                provider_avatars[provider_name] = avatar.get('url')
+                provider_avatar_list.append({
+                    'provider': provider_name,
+                    'provider_id': avatar.get('provider_id'),
+                    'avatar_url': avatar.get('url'),
+                })
+    
+    # Get selected avatar from avatars table
+    selected_avatar = auth_manager._fetch_one(
+        "SELECT url FROM avatars WHERE user_id = %s AND is_selected = TRUE ORDER BY created_at DESC LIMIT 1",
+        (str(g.user_id),),
+    )
+    chosen_avatar = selected_avatar['url'] if selected_avatar else None
     if not chosen_avatar:
-        chosen_avatar = next((i.get('avatar_url') for i in identities if i.get('avatar_url')), None)
-    selected_provider = selected_identity.get('provider') if selected_identity else None
+        chosen_avatar = avatar_url or (avatars[0].get('url') if avatars else None)
+    
+    selected_provider = identities[0].get('provider') if identities else None
 
     return jsonify({
         'user': {
@@ -367,59 +411,6 @@ def update_account():
             'provider_selected': selected_provider,
         }
     }), 200
-
-
-@app.route('/api/account/avatar', methods=['POST'])
-@require_auth
-def upload_avatar():
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file provided'}), 400
-
-    file = request.files['file']
-    filename = (file.filename or '').strip()
-    if not file or not filename:
-        return jsonify({'error': 'No file provided'}), 400
-
-    ext = Path(filename).suffix.lower()
-    if ext not in ALLOWED_IMAGE_EXT:
-        return jsonify({'error': 'Unsupported file type. Use JPG, PNG, BMP, or HEIC/HEIF.'}), 400
-
-    content_length = request.content_length or 0
-    if content_length > MAX_AVATAR_UPLOAD:
-        return jsonify({'error': 'File too large. Max 8MB.'}), 413
-
-    try:
-        raw = file.read()
-        if not raw:
-            return jsonify({'error': 'Empty file'}), 400
-        if len(raw) > MAX_AVATAR_UPLOAD:
-            return jsonify({'error': 'File too large. Max 8MB.'}), 413
-    except Exception as e:
-        server_logger.warning(f"Avatar upload failed to read: {e}")
-        return jsonify({'error': 'Invalid image data'}), 400
-
-    user_dir = ASSETS_DIR / 'images' / 'users' / str(g.user_id)
-    try:
-        user_dir.mkdir(parents=True, exist_ok=True)
-    except Exception as e:
-        server_logger.error(f"Failed to create avatar directory {user_dir}: {e}")
-        return jsonify({'error': 'Could not create storage directory'}), 500
-
-    out_path = user_dir / 'avatar.jpg'
-    try:
-        out_path.write_bytes(raw)
-    except Exception as e:
-        server_logger.error(f"Failed to save avatar image: {e}")
-        return jsonify({'error': 'Could not save avatar'}), 500
-
-    public_url = f"{Config.ASSETS_BASE_URL}/images/users/{g.user_id}/avatar.jpg"
-
-    try:
-        auth_manager.update_identity_avatar(g.user_id, public_url)
-    except Exception as e:
-        server_logger.warning(f"Failed to update identity avatar for user {g.user_id}: {e}")
-
-    return jsonify({'avatar_url': public_url}), 200
 
 
 @app.route('/api/spotify/now-playing', methods=['GET'])
@@ -482,7 +473,7 @@ def upload_user_avatar(user_id: str):
         return jsonify({'error': error_msg}), 400
     
     # Create user directory
-    user_dir = ASSETS_DIR / 'images' / 'users' / str(g.user_id)
+    user_dir = ASSETS_DIR / 'images' / 'users' / str(g.user_id) / 'avatars'
     try:
         user_dir.mkdir(parents=True, exist_ok=True)
     except Exception as e:
@@ -499,7 +490,7 @@ def upload_user_avatar(user_id: str):
         return jsonify({'error': 'Could not save avatar'}), 500
     
     # Generate public URL
-    public_url = f"{Config.ASSETS_BASE_URL}/images/users/{g.user_id}/{safe_filename}"
+    public_url = f"{Config.ASSETS_BASE_URL}/images/users/{g.user_id}/avatars/{safe_filename}"
     
     # Get MIME type
     mime_type = get_mime_type(filename)

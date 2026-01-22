@@ -8,6 +8,9 @@ import 'package:crop_your_image/crop_your_image.dart';
 import 'package:media_display/src/services/account_service.dart';
 import 'package:media_display/src/services/auth_state.dart';
 import 'package:media_display/src/services/auth_service.dart';
+import 'package:media_display/src/services/avatar_service.dart';
+import 'package:media_display/src/models/avatar.dart';
+import 'package:media_display/src/config/env.dart';
 import 'package:media_display/src/widgets/app_header.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -15,7 +18,8 @@ class AccountSettingsPage extends ConsumerStatefulWidget {
   const AccountSettingsPage({super.key});
 
   @override
-  ConsumerState<AccountSettingsPage> createState() => _AccountSettingsPageState();
+  ConsumerState<AccountSettingsPage> createState() =>
+      _AccountSettingsPageState();
 }
 
 class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
@@ -23,8 +27,6 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
   Map<String, dynamic>? settings;
   bool loading = true;
   bool saving = false;
-  bool avatarSaving = false;
-  bool uploadingAvatar = false;
   bool showCropper = false;
   bool cropping = false;
   bool launchingSpotify = false;
@@ -34,15 +36,13 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
   final _emailController = TextEditingController();
   final _usernameController = TextEditingController();
   final _displayNameController = TextEditingController();
-  final _avatarController = TextEditingController();
 
-  String? selectedProvider;
-  String? selectedAvatar;
   Uint8List? _pendingImageBytes;
   String _pendingExt = 'jpg';
   final CropController _cropController = CropController();
 
-  static const Set<String> _allowedExtensions = {'png', 'jpg', 'jpeg', 'bmp', 'heic', 'heif'};
+  // Callback for when child component crops an image
+  Future<void> Function(Uint8List)? _onChildCropped;
 
   @override
   void initState() {
@@ -55,7 +55,6 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
     _emailController.dispose();
     _usernameController.dispose();
     _displayNameController.dispose();
-    _avatarController.dispose();
     super.dispose();
   }
 
@@ -75,12 +74,6 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
       _emailController.text = acc['email']?.toString() ?? '';
       _usernameController.text = acc['username']?.toString() ?? '';
       _displayNameController.text = acc['display_name']?.toString() ?? '';
-      selectedProvider = acc['provider_selected']?.toString() ?? acc['provider']?.toString();
-      selectedAvatar = acc['avatar_url']?.toString() ?? _providerAvatarList(acc).firstWhere(
-        (p) => p['is_selected'] == true && p['avatar_url'] != null,
-        orElse: () => {},
-      )['avatar_url']?.toString();
-      _avatarController.text = selectedAvatar ?? '';
     } catch (e) {
       if (!mounted) return;
       error = e.toString();
@@ -100,112 +93,6 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
     return const [];
   }
 
-  String _normalizeUrl(String url) {
-    final trimmed = url.trim();
-    if (trimmed.isEmpty) return '';
-    final hashStripped = trimmed.split('#').first;
-    return hashStripped.split('?').first;
-  }
-
-  List<Map<String, dynamic>> _updateSelectedAvatarInList(String newUrl) {
-    final list = _providerAvatarList(user);
-    if (list.isEmpty) {
-      return list;
-    }
-    final norm = _normalizeUrl(newUrl);
-    bool replaced = false;
-    for (var i = 0; i < list.length; i++) {
-      final isSel = list[i]['is_selected'] == true;
-      if (isSel) {
-        list[i] = {
-          ...list[i].map((k, v) => MapEntry(k.toString(), v)),
-          'avatar_url': newUrl,
-          'is_selected': true,
-        };
-        replaced = true;
-      } else {
-        final existingNorm = _normalizeUrl(list[i]['avatar_url']?.toString() ?? '');
-        if (existingNorm == norm) {
-          list[i] = {
-            ...list[i].map((k, v) => MapEntry(k.toString(), v)),
-            'avatar_url': newUrl,
-          };
-          replaced = true;
-        }
-      }
-    }
-    if (!replaced) {
-      list.add({
-        'avatar_url': newUrl,
-        'is_selected': true,
-      });
-    }
-    return list;
-  }
-
-  List<Map<String, dynamic>> _avatarListWithCurrent() {
-    final ordered = <String, Map<String, dynamic>>{}; // normalizedUrl -> entry
-
-    void upsert(String url, {bool selected = false}) {
-      final norm = _normalizeUrl(url);
-      if (norm.isEmpty) return;
-
-      final existing = ordered[norm];
-      ordered[norm] = {
-        ...?existing,
-        'avatar_url': url,
-        'is_selected': (existing?['is_selected'] == true) || selected,
-      };
-    }
-
-    for (final entry in _providerAvatarList(user)) {
-      final url = entry['avatar_url']?.toString() ?? '';
-      upsert(
-        url,
-        selected: entry['is_selected'] == true,
-      );
-    }
-
-    if (selectedAvatar?.isNotEmpty == true) {
-      upsert(selectedAvatar!, selected: true);
-    }
-
-    final currentRaw = _avatarController.text.trim();
-    final normalizedCurrent = _normalizeUrl(currentRaw);
-    if (normalizedCurrent.isNotEmpty && selectedAvatar?.isNotEmpty != true) {
-      // Only consider the raw text field when we don't already have a selected avatar.
-      upsert(currentRaw);
-    }
-
-    // Enforce a single selected avatar, preferring selectedAvatar, then currentRaw, then any backend-selected entry.
-    String selectedNorm;
-    if (selectedAvatar?.isNotEmpty == true) {
-      selectedNorm = _normalizeUrl(selectedAvatar!);
-    } else if (normalizedCurrent.isNotEmpty) {
-      selectedNorm = normalizedCurrent;
-    } else {
-      selectedNorm = ordered.entries.firstWhere(
-        (e) => e.value['is_selected'] == true,
-        orElse: () => MapEntry('', <String, dynamic>{}),
-      ).key;
-    }
-
-    if (selectedNorm.isNotEmpty) {
-      ordered.updateAll((_, value) => {
-            ...value,
-            'is_selected': false,
-          });
-      if (ordered.containsKey(selectedNorm)) {
-        ordered[selectedNorm] = {
-          ...ordered[selectedNorm]!,
-          'is_selected': true,
-        };
-      }
-    }
-
-    return ordered.values.toList();
-  }
-
   Future<void> _saveProfile() async {
     setState(() {
       saving = true;
@@ -215,9 +102,15 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
     try {
       final service = ref.read(accountServiceProvider);
       final updated = await service.updateAccount({
-        'email': _emailController.text.trim().isEmpty ? null : _emailController.text.trim(),
-        'username': _usernameController.text.trim().isEmpty ? null : _usernameController.text.trim(),
-        'display_name': _displayNameController.text.trim().isEmpty ? null : _displayNameController.text.trim(),
+        'email': _emailController.text.trim().isEmpty
+            ? null
+            : _emailController.text.trim(),
+        'username': _usernameController.text.trim().isEmpty
+            ? null
+            : _usernameController.text.trim(),
+        'display_name': _displayNameController.text.trim().isEmpty
+            ? null
+            : _displayNameController.text.trim(),
       });
       if (!mounted) return;
       user = updated;
@@ -266,7 +159,8 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
     });
     try {
       final auth = ref.read(authServiceProvider);
-      await auth.setPendingOauthRedirect(GoRouterState.of(context).uri.toString());
+      await auth
+          .setPendingOauthRedirect(GoRouterState.of(context).uri.toString());
       final url = await auth.getSpotifyAuthUrl();
       if (!mounted) return;
       final ok = await launchUrl(
@@ -281,15 +175,18 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
       if (!mounted) return;
       setState(() => error = e.toString());
     } finally {
-      if (mounted) setState(() {
-        saving = false;
-        launchingSpotify = false;
-      });
+      if (mounted) {
+        setState(() {
+          saving = false;
+          launchingSpotify = false;
+        });
+      }
     }
   }
 
   Future<void> _handleSpotifyToggle(bool enable) async {
-    final hasIdentity = _providerAvatarList(user).any((e) => (e['provider']?.toString().toLowerCase() == 'spotify'));
+    final hasIdentity = _providerAvatarList(user)
+        .any((e) => (e['provider']?.toString().toLowerCase() == 'spotify'));
     if (enable && !hasIdentity) {
       await _startSpotifyEnable();
       return;
@@ -297,106 +194,10 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
     await _toggleService('spotify', enable);
   }
 
-  Future<void> _saveAvatar() async {
-    final avatar = _avatarController.text.trim();
-    if (avatar.isEmpty) {
-      setState(() => error = 'Enter an avatar URL or pick one');
-      return;
-    }
-    setState(() {
-      avatarSaving = true;
-      error = null;
-      success = null;
-    });
-    try {
-      final service = ref.read(accountServiceProvider);
-      final updated = await service.saveAvatar(
-        avatarUrl: avatar,
-        avatarProvider: selectedProvider,
-      );
-      if (!mounted) return;
-      final updatedProvider = updated['provider_selected']?.toString() ?? updated['provider']?.toString() ?? selectedProvider;
-      final backendUrl = updated['avatar_url']?.toString() ?? avatar;
-      final displayUrl = _cacheBustedUrl(backendUrl);
-      final updatedProviderAvatars = _updateSelectedAvatarInList(displayUrl);
-      user = {
-        ...updated,
-        'avatar_url': displayUrl,
-        'provider_avatar_list': updatedProviderAvatars,
-      };
-      selectedProvider = updatedProvider;
-      selectedAvatar = displayUrl;
-      _avatarController.text = backendUrl; // keep raw URL for edits
-      success = 'Avatar saved';
-    } catch (e) {
-      if (!mounted) return;
-      error = e.toString();
-    } finally {
-      if (mounted) setState(() => avatarSaving = false);
-    }
-  }
-
-  String _extensionFromName(String name) {
-    final dotIndex = name.lastIndexOf('.');
-    if (dotIndex == -1 || dotIndex == name.length - 1) return '';
-    return name.substring(dotIndex + 1).toLowerCase();
-  }
-
   String _cacheBustedUrl(String url) {
     if (url.isEmpty) return '';
     final sep = url.contains('?') ? '&' : '?';
     return '$url${sep}v=${DateTime.now().millisecondsSinceEpoch}';
-  }
-
-  Future<void> _selectAndUploadAvatar() async {
-    setState(() {
-      uploadingAvatar = true;
-      error = null;
-      success = null;
-    });
-    try {
-      final picker = ImagePicker();
-      final picked = await picker.pickImage(source: ImageSource.gallery, requestFullMetadata: false);
-      if (picked == null) {
-        if (mounted) setState(() => uploadingAvatar = false);
-        return;
-      }
-
-      final ext = _extensionFromName(picked.name);
-      if (!_allowedExtensions.contains(ext)) {
-        if (mounted) {
-          setState(() {
-            error = 'Unsupported file type. Use PNG, JPG, BMP, or HEIC.';
-            uploadingAvatar = false;
-          });
-        }
-        return;
-      }
-
-      final rawBytes = await picked.readAsBytes();
-      if (rawBytes.isEmpty) {
-        if (mounted) {
-          setState(() {
-            error = 'Selected image is empty.';
-            uploadingAvatar = false;
-          });
-        }
-        return;
-      }
-
-      setState(() {
-        _pendingImageBytes = rawBytes;
-        _pendingExt = (ext == 'png' || ext == 'jpg' || ext == 'jpeg') ? (ext == 'jpeg' ? 'jpg' : ext) : 'jpg';
-        showCropper = true;
-        uploadingAvatar = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        error = e.toString();
-        uploadingAvatar = false;
-      });
-    }
   }
 
   Future<void> _handleCropResult(CropResult result) async {
@@ -409,7 +210,24 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
         });
         return;
       }
-      await _handleCropped(data);
+
+      // Child component always provides a handler
+      if (_onChildCropped != null) {
+        await _onChildCropped!(data);
+        setState(() {
+          showCropper = false;
+          cropping = false;
+          _pendingImageBytes = null;
+          _onChildCropped = null;
+        });
+        return;
+      }
+
+      // Fallback: should not happen as child always passes handler
+      setState(() {
+        error = 'Upload handler not provided';
+        cropping = false;
+      });
       return;
     }
 
@@ -417,60 +235,6 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
       if (!mounted) return;
       setState(() {
         error = result.cause.toString();
-        cropping = false;
-      });
-    }
-  }
-
-  Future<void> _handleCropped(Uint8List croppedBytes) async {
-    setState(() {
-      cropping = true;
-      error = null;
-      success = null;
-    });
-    try {
-      final decoded = img.decodeImage(croppedBytes);
-      if (decoded == null) {
-        throw Exception('Could not decode cropped image');
-      }
-      final resized = img.copyResize(decoded, width: 150, height: 150, interpolation: img.Interpolation.average);
-      final targetExt = _pendingExt;
-      final encoded = targetExt == 'png'
-          ? img.encodePng(resized)
-          : img.encodeJpg(resized, quality: 92);
-
-      final service = ref.read(accountServiceProvider);
-      final url = await service.uploadAvatarBytes(bytes: Uint8List.fromList(encoded), filename: 'avatar.$targetExt');
-      if (!mounted) return;
-      if (url.isEmpty) {
-        setState(() {
-          error = 'Failed to upload avatar';
-          cropping = false;
-        });
-        return;
-      }
-
-      final displayUrl = _cacheBustedUrl(url);
-
-      setState(() {
-        final updatedProviderAvatars = _updateSelectedAvatarInList(displayUrl);
-        user = {
-          ...?user,
-          'avatar_url': displayUrl,
-          'provider_avatar_list': updatedProviderAvatars,
-        };
-        selectedProvider = selectedProvider ?? 'custom';
-        selectedAvatar = displayUrl;
-        _avatarController.text = url; // keep raw URL for saving
-        success = 'Avatar updated';
-        showCropper = false;
-        cropping = false;
-        _pendingImageBytes = null;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        error = e.toString();
         cropping = false;
       });
     }
@@ -486,8 +250,8 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final avatarList = _avatarListWithCurrent();
-    final spotifyLinked = _providerAvatarList(user).any((e) => (e['provider']?.toString().toLowerCase() == 'spotify'));
+    final spotifyLinked = _providerAvatarList(user)
+        .any((e) => (e['provider']?.toString().toLowerCase() == 'spotify'));
     final sonosEnabled = settings?['sonos_enabled'] == true;
 
     return Scaffold(
@@ -503,7 +267,8 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
             ),
             child: SafeArea(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -537,18 +302,22 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
                       if (error != null)
                         Padding(
                           padding: const EdgeInsets.only(bottom: 12),
-                          child: Text(error!, style: const TextStyle(color: Color(0xFFFF8C8C))),
+                          child: Text(error!,
+                              style: const TextStyle(color: Color(0xFFFF8C8C))),
                         ),
                       if (success != null)
                         Padding(
                           padding: const EdgeInsets.only(bottom: 12),
-                          child: Text(success!, style: const TextStyle(color: Color(0xFF9FB1D0))),
+                          child: Text(success!,
+                              style: const TextStyle(color: Color(0xFF9FB1D0))),
                         ),
                       _glassCard(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('Profile', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                            const Text('Profile',
+                                style: TextStyle(
+                                    fontSize: 18, fontWeight: FontWeight.w700)),
                             const SizedBox(height: 12),
                             _field('Email', _emailController),
                             const SizedBox(height: 12),
@@ -577,97 +346,34 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('Services', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                            const Text('Services',
+                                style: TextStyle(
+                                    fontSize: 18, fontWeight: FontWeight.w700)),
                             const SizedBox(height: 10),
                             _serviceToggle(
                               label: 'Spotify',
                               value: spotifyLinked,
-                              onChanged: (saving || launchingSpotify) ? null : _handleSpotifyToggle,
+                              onChanged: (saving || launchingSpotify)
+                                  ? null
+                                  : _handleSpotifyToggle,
                             ),
                             const SizedBox(height: 10),
                             _serviceToggle(
                               label: 'Sonos',
                               value: sonosEnabled,
-                              onChanged: saving ? null : (v) => _toggleService('sonos', v),
+                              onChanged: saving
+                                  ? null
+                                  : (v) => _toggleService('sonos', v),
                             ),
                           ],
                         ),
                       ),
                       const SizedBox(height: 14),
-                      _glassCard(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text('Avatar', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-                            const SizedBox(height: 10),
-                            Wrap(
-                              runSpacing: 8,
-                              spacing: 8,
-                              children: avatarList.map((p) {
-                                final url = p['avatar_url']?.toString() ?? '';
-                                final active = (p['is_selected'] == true) || (_normalizeUrl(url) == _normalizeUrl(selectedAvatar ?? ''));
-                                return GestureDetector(
-                                  onTap: () {
-                                    setState(() {
-                                      selectedAvatar = url;
-                                      _avatarController.text = url;
-                                    });
-                                  },
-                                  child: Container(
-                                    width: 68,
-                                    padding: const EdgeInsets.all(6),
-                                    decoration: BoxDecoration(
-                                      color: active ? const Color(0xFF5AC8FA).withValues(alpha: 0.12) : const Color(0xFFFFFFFF).withValues(alpha: 0.04),
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(color: active ? const Color(0xFF5AC8FA) : Colors.white.withValues(alpha: 0.12)),
-                                    ),
-                                    child: Column(
-                                      children: [
-                                        CircleAvatar(
-                                          radius: 22,
-                                          backgroundImage: url.isNotEmpty ? NetworkImage(url) : null,
-                                          backgroundColor: const Color(0xFF1F2A44),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                );
-                              }).toList(),
-                            ),
-                            const SizedBox(height: 12),
-                            TextField(
-                              controller: _avatarController,
-                              decoration: const InputDecoration(
-                                labelText: 'Custom image URL',
-                                hintText: 'https://example.com/avatar.png',
-                              ),
-                            ),
-                            const SizedBox(height: 10),
-                            Row(
-                              children: [
-                                ElevatedButton(
-                                  onPressed: avatarSaving ? null : _saveAvatar,
-                                  child: Text(avatarSaving ? 'Saving…' : 'Save avatar'),
-                                ),
-                                const SizedBox(width: 10),
-                                OutlinedButton(
-                                  onPressed: uploadingAvatar ? null : _selectAndUploadAvatar,
-                                  child: Text(uploadingAvatar ? 'Uploading…' : 'Upload image'),
-                                ),
-                                const SizedBox(width: 10),
-                                OutlinedButton(
-                                  onPressed: () {
-                                    setState(() {
-                                      _avatarController.clear();
-                                      selectedAvatar = null;
-                                    });
-                                  },
-                                  child: const Text('Clear'),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
+                      _AvatarManagementSection(
+                        userId: user?['user_id']?.toString() ??
+                            user?['id']?.toString() ??
+                            '',
+                        onAvatarChanged: _load,
                       ),
                     ],
                   ],
@@ -718,17 +424,23 @@ Widget _field(String label, TextEditingController controller) {
         decoration: const InputDecoration(
           filled: true,
           fillColor: Color(0xFF1A2333),
-          border: OutlineInputBorder(borderSide: BorderSide(color: Color(0xFF2A3347))),
+          border: OutlineInputBorder(
+              borderSide: BorderSide(color: Color(0xFF2A3347))),
         ),
       ),
     ],
   );
 }
 
-Widget _serviceToggle({required String label, required bool value, required ValueChanged<bool>? onChanged}) {
+Widget _serviceToggle(
+    {required String label,
+    required bool value,
+    required ValueChanged<bool>? onChanged}) {
   return Row(
     children: [
-      Expanded(child: Text(label, style: const TextStyle(fontWeight: FontWeight.w600))),
+      Expanded(
+          child:
+              Text(label, style: const TextStyle(fontWeight: FontWeight.w600))),
       Switch(
         value: value,
         onChanged: onChanged,
@@ -787,7 +499,9 @@ class _CropDialog extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Crop avatar', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                  const Text('Crop avatar',
+                      style:
+                          TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
                   const SizedBox(height: 12),
                   SizedBox(
                     width: 480,
@@ -808,7 +522,9 @@ class _CropDialog extends StatelessWidget {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
-                      TextButton(onPressed: cropping ? null : onCancel, child: const Text('Cancel')),
+                      TextButton(
+                          onPressed: cropping ? null : onCancel,
+                          child: const Text('Cancel')),
                       const SizedBox(width: 10),
                       ElevatedButton(
                         onPressed: cropping ? null : () => controller.crop(),
@@ -820,6 +536,475 @@ class _CropDialog extends StatelessWidget {
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+// Avatar Management Section Widget
+class _AvatarManagementSection extends ConsumerStatefulWidget {
+  const _AvatarManagementSection({
+    required this.userId,
+    required this.onAvatarChanged,
+  });
+
+  final String userId;
+  final VoidCallback onAvatarChanged;
+
+  @override
+  ConsumerState<_AvatarManagementSection> createState() =>
+      _AvatarManagementSectionState();
+}
+
+class _AvatarManagementSectionState
+    extends ConsumerState<_AvatarManagementSection> {
+  bool _uploading = false;
+  String? _error;
+  String _pendingFilename = 'avatar.jpg';
+
+  static const Set<String> _allowedExtensions = {
+    'png',
+    'jpg',
+    'jpeg',
+    'bmp',
+    'heic',
+    'heif'
+  };
+
+  String _extensionFromName(String name) {
+    final dotIndex = name.lastIndexOf('.');
+    if (dotIndex == -1 || dotIndex == name.length - 1) return '';
+    return name.substring(dotIndex + 1).toLowerCase();
+  }
+
+  Future<void> _pickAndUploadAvatar() async {
+    if (widget.userId.isEmpty) return;
+
+    final avatarsAsync = ref.read(avatarsProvider(widget.userId));
+    final currentCount = avatarsAsync.value?.length ?? 0;
+    final maxAvatars = ref.read(envConfigProvider).maxAvatarsPerUser;
+
+    if (currentCount >= maxAvatars) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text(
+                  'Maximum of $maxAvatars avatars reached. Delete one first.')),
+        );
+      }
+      return;
+    }
+
+    setState(() {
+      _uploading = true;
+      _error = null;
+    });
+
+    try {
+      final picker = ImagePicker();
+      final pickedFile = await picker.pickImage(
+        source: ImageSource.gallery,
+        requestFullMetadata: false,
+      );
+
+      if (pickedFile == null) {
+        if (mounted) setState(() => _uploading = false);
+        return;
+      }
+
+      final ext = _extensionFromName(pickedFile.name);
+      if (!_allowedExtensions.contains(ext)) {
+        if (mounted) {
+          setState(() {
+            _error = 'Unsupported file type. Use PNG, JPG, BMP, or HEIC.';
+            _uploading = false;
+          });
+        }
+        return;
+      }
+
+      final rawBytes = await pickedFile.readAsBytes();
+      if (rawBytes.isEmpty) {
+        if (mounted) {
+          setState(() {
+            _error = 'Selected image is empty.';
+            _uploading = false;
+          });
+        }
+        return;
+      }
+
+      // Store filename and delegate to parent page's crop dialog
+      setState(() {
+        _pendingFilename = 'avatar.${ext == 'jpeg' ? 'jpg' : ext}';
+        _uploading = false;
+      });
+
+      // Show crop dialog at page level by finding ancestor
+      if (mounted &&
+          context.findAncestorStateOfType<_AccountSettingsPageState>() !=
+              null) {
+        final pageState =
+            context.findAncestorStateOfType<_AccountSettingsPageState>()!;
+        pageState.setState(() {
+          pageState._pendingImageBytes = rawBytes;
+          pageState._pendingExt = ext == 'jpeg' ? 'jpg' : ext;
+          pageState.showCropper = true;
+          // Pass our crop handler to parent
+          pageState._onChildCropped = _handleCropped;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _uploading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _handleCropped(Uint8List croppedBytes) async {
+    setState(() {
+      _error = null;
+    });
+
+    try {
+      final decoded = img.decodeImage(croppedBytes);
+      if (decoded == null) {
+        throw Exception('Could not decode cropped image');
+      }
+      final resized = img.copyResize(decoded,
+          width: 150, height: 150, interpolation: img.Interpolation.average);
+
+      final isPng = _pendingFilename.endsWith('.png');
+      final encoded =
+          isPng ? img.encodePng(resized) : img.encodeJpg(resized, quality: 92);
+
+      final operations = ref.read(avatarOperationsProvider);
+      await operations.uploadAvatarBytes(
+        widget.userId,
+        Uint8List.fromList(encoded),
+        _pendingFilename,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Avatar uploaded successfully')),
+        );
+        widget.onAvatarChanged();
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+        });
+      }
+    }
+  }
+
+  Future<void> _selectAvatar(Avatar avatar) async {
+    if (avatar.isSelected) return;
+
+    try {
+      final operations = ref.read(avatarOperationsProvider);
+      await operations.selectAvatar(widget.userId, avatar.id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Avatar selected')),
+        );
+        widget.onAvatarChanged();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to select avatar: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _deleteAvatar(Avatar avatar) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Avatar'),
+        content: Text(
+          avatar.isSelected
+              ? 'Delete your selected avatar? You\'ll see a placeholder until you select another.'
+              : 'Delete this avatar?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      final operations = ref.read(avatarOperationsProvider);
+      await operations.deleteAvatar(widget.userId, avatar.id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Avatar deleted')),
+        );
+        widget.onAvatarChanged();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to delete: $e')),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.userId.isEmpty) {
+      return _glassCard(
+        child: const Text('Loading avatar management...'),
+      );
+    }
+
+    final avatarsAsync = ref.watch(avatarsProvider(widget.userId));
+    final maxAvatars = ref.watch(envConfigProvider).maxAvatarsPerUser;
+
+    return _glassCard(
+      child: avatarsAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (error, stack) => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Avatar',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 12),
+            Text('Error loading avatars: $error',
+                style: const TextStyle(color: Colors.red)),
+            const SizedBox(height: 8),
+            ElevatedButton(
+              onPressed: () => ref.invalidate(avatarsProvider(widget.userId)),
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+        data: (avatars) {
+          final selectedAvatar = avatars.where((a) => a.isSelected).firstOrNull;
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Text('Avatar',
+                      style:
+                          TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                  const Spacer(),
+                  Text(
+                    '${avatars.length}/$maxAvatars',
+                    style: const TextStyle(color: Color(0xFF9FB1D0)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                selectedAvatar != null
+                    ? 'Tap an avatar to select it'
+                    : 'No avatar selected',
+                style: const TextStyle(color: Color(0xFF9FB1D0), fontSize: 12),
+              ),
+              if (_error != null) ...[
+                const SizedBox(height: 8),
+                Text(_error!,
+                    style: const TextStyle(color: Colors.red, fontSize: 12)),
+              ],
+              const SizedBox(height: 12),
+              if (avatars.isEmpty)
+                Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 20),
+                    child: Column(
+                      children: [
+                        Icon(Icons.account_circle_outlined,
+                            size: 60,
+                            color: Colors.white.withValues(alpha: 0.3)),
+                        const SizedBox(height: 12),
+                        const Text('No avatars yet',
+                            style: TextStyle(color: Color(0xFF9FB1D0))),
+                      ],
+                    ),
+                  ),
+                )
+              else
+                GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 4,
+                    crossAxisSpacing: 10,
+                    mainAxisSpacing: 10,
+                    childAspectRatio: 0.9,
+                  ),
+                  itemCount: avatars.length,
+                  itemBuilder: (context, index) {
+                    final avatar = avatars[index];
+                    return _AvatarGridItem(
+                      avatar: avatar,
+                      onTap: () => _selectAvatar(avatar),
+                      onDelete: () => _deleteAvatar(avatar),
+                    );
+                  },
+                ),
+              const SizedBox(height: 12),
+              ElevatedButton.icon(
+                onPressed: _uploading || avatars.length >= maxAvatars
+                    ? null
+                    : _pickAndUploadAvatar,
+                icon: _uploading
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.upload, size: 18),
+                label: Text(_uploading ? 'Uploading...' : 'Upload New Avatar'),
+              ),
+              if (avatars.length >= maxAvatars)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    'Max $maxAvatars avatars. Delete one to upload more.',
+                    style:
+                        const TextStyle(color: Color(0xFFFF8C8C), fontSize: 11),
+                  ),
+                ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _AvatarGridItem extends StatelessWidget {
+  const _AvatarGridItem({
+    required this.avatar,
+    required this.onTap,
+    required this.onDelete,
+  });
+
+  final Avatar avatar;
+  final VoidCallback onTap;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFF1A2333),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: avatar.isSelected
+                ? const Color(0xFF5AC8FA)
+                : Colors.white.withValues(alpha: 0.08),
+            width: avatar.isSelected ? 2 : 1,
+          ),
+        ),
+        child: Stack(
+          children: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius:
+                        const BorderRadius.vertical(top: Radius.circular(9)),
+                    child: avatar.url.isNotEmpty
+                        ? Image.network(
+                            avatar.url,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => const Icon(
+                                Icons.broken_image,
+                                color: Color(0xFF9FB1D0)),
+                          )
+                        : const Icon(Icons.account_circle,
+                            size: 40, color: Color(0xFF9FB1D0)),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        avatar.isProviderAvatar ? Icons.cloud : Icons.upload,
+                        size: 10,
+                        color: avatar.isProviderAvatar
+                            ? const Color(0xFF34D399)
+                            : const Color(0xFF5AC8FA),
+                      ),
+                      const SizedBox(width: 3),
+                      Flexible(
+                        child: Text(
+                          avatar.isProviderAvatar
+                              ? avatar.providerName
+                              : 'Upload',
+                          style: TextStyle(
+                            fontSize: 9,
+                            color: avatar.isProviderAvatar
+                                ? const Color(0xFF34D399)
+                                : const Color(0xFF5AC8FA),
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            if (avatar.isSelected)
+              Positioned(
+                top: 6,
+                right: 6,
+                child: Container(
+                  padding: const EdgeInsets.all(3),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF5AC8FA),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.check, size: 12, color: Colors.white),
+                ),
+              ),
+            Positioned(
+              top: 6,
+              left: 6,
+              child: InkWell(
+                onTap: onDelete,
+                child: Container(
+                  padding: const EdgeInsets.all(3),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withValues(alpha: 0.9),
+                    shape: BoxShape.circle,
+                  ),
+                  child:
+                      const Icon(Icons.delete, size: 12, color: Colors.white),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

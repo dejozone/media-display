@@ -13,6 +13,7 @@ class EnvConfig {
     required this.wsRetryCooldownSeconds,
     required this.wsRetryMaxTotalSeconds,
     required this.spotifyPollIntervalSec,
+    required this.maxAvatarsPerUser,
     this.sonosPollIntervalSec,
   });
 
@@ -27,20 +28,31 @@ class EnvConfig {
   final int wsRetryMaxTotalSeconds;
   final int spotifyPollIntervalSec;
   final int? sonosPollIntervalSec;
+  final int maxAvatarsPerUser;
 }
 
 final envConfigProvider = Provider<EnvConfig>((ref) {
   final api = dotenv.env['API_BASE_URL'] ?? 'http://localhost:5001';
   final ws = dotenv.env['EVENTS_WS_URL'] ?? 'ws://localhost:5002/events/media';
   final flavor = dotenv.env['FLAVOR'] ?? 'dev';
-  final sslVerify = (dotenv.env['SSL_VERIFY'] ?? 'true').toLowerCase() == 'true';
-  final wsSslVerify = (dotenv.env['EVENTS_WS_SSL_VERIFY'] ?? 'true').toLowerCase() == 'true';
-  final wsRetryIntervalMs = int.tryParse(dotenv.env['WS_RETRY_INTERVAL_MS'] ?? '') ?? 2000;
-  final wsRetryActiveSeconds = int.tryParse(dotenv.env['WS_RETRY_ACTIVE_SECONDS'] ?? '') ?? 60;
-  final wsRetryCooldownSeconds = int.tryParse(dotenv.env['WS_RETRY_COOLDOWN_SECONDS'] ?? '') ?? 180;
-  final wsRetryMaxTotalSeconds = int.tryParse(dotenv.env['WS_RETRY_MAX_TOTAL_SECONDS'] ?? '') ?? 1800;
-  final spotifyPollIntervalSec = int.tryParse(dotenv.env['SPOTIFY_POLL_INTERVAL_SEC'] ?? '') ?? 3;
-  final sonosPollIntervalSec = int.tryParse(dotenv.env['SONOS_POLL_INTERVAL_SEC'] ?? '');
+  final sslVerify =
+      (dotenv.env['SSL_VERIFY'] ?? 'true').toLowerCase() == 'true';
+  final wsSslVerify =
+      (dotenv.env['EVENTS_WS_SSL_VERIFY'] ?? 'true').toLowerCase() == 'true';
+  final wsRetryIntervalMs =
+      int.tryParse(dotenv.env['WS_RETRY_INTERVAL_MS'] ?? '') ?? 2000;
+  final wsRetryActiveSeconds =
+      int.tryParse(dotenv.env['WS_RETRY_ACTIVE_SECONDS'] ?? '') ?? 60;
+  final wsRetryCooldownSeconds =
+      int.tryParse(dotenv.env['WS_RETRY_COOLDOWN_SECONDS'] ?? '') ?? 180;
+  final wsRetryMaxTotalSeconds =
+      int.tryParse(dotenv.env['WS_RETRY_MAX_TOTAL_SECONDS'] ?? '') ?? 1800;
+  final spotifyPollIntervalSec =
+      int.tryParse(dotenv.env['SPOTIFY_POLL_INTERVAL_SEC'] ?? '') ?? 3;
+  final sonosPollIntervalSec =
+      int.tryParse(dotenv.env['SONOS_POLL_INTERVAL_SEC'] ?? '');
+  final maxAvatarsPerUser =
+      int.tryParse(dotenv.env['MAX_AVATARS_PER_USER'] ?? '') ?? 5;
   return EnvConfig(
     apiBaseUrl: api,
     eventsWsUrl: ws,
@@ -53,6 +65,7 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
     wsRetryMaxTotalSeconds: wsRetryMaxTotalSeconds,
     spotifyPollIntervalSec: spotifyPollIntervalSec,
     sonosPollIntervalSec: sonosPollIntervalSec,
+    maxAvatarsPerUser: maxAvatarsPerUser,
   );
 });
 

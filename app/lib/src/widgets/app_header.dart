@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:media_display/src/services/avatar_service.dart';
 
-class AppHeader extends StatelessWidget {
+class AppHeader extends ConsumerWidget {
   const AppHeader({
     super.key,
     required this.user,
@@ -19,12 +21,19 @@ class AppHeader extends StatelessWidget {
   final String? subtitle;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final displayName = _displayName(user);
     final initials = displayName.isNotEmpty
         ? displayName.trim().characters.first.toUpperCase()
         : 'U';
-    final avatarUrl = _avatarUrl(user);
+
+    // Try to get selected avatar from new avatar service
+    final userId = user?['user_id']?.toString() ?? '';
+    final selectedAvatar =
+        userId.isNotEmpty ? ref.watch(selectedAvatarProvider(userId)) : null;
+
+    // Fall back to old method if avatar service hasn't loaded yet
+    final avatarUrl = selectedAvatar?.url ?? _avatarUrl(user);
 
     return Row(
       children: [
