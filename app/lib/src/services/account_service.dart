@@ -12,19 +12,20 @@ class AccountService {
   final Dio _dio;
 
   Future<Map<String, dynamic>> fetchAccount() async {
-    final res = await _dio.get<Map<String, dynamic>>('/api/account');
+    final res = await _dio.get<Map<String, dynamic>>('/api/users/me');
     return res.data?['user'] as Map<String, dynamic>? ?? {};
   }
 
-  Future<Map<String, dynamic>> fetchSettings() async {
-    final res = await _dio.get<Map<String, dynamic>>('/api/settings');
+  Future<Map<String, dynamic>> fetchSettings(String userId) async {
+    final res =
+        await _dio.get<Map<String, dynamic>>('/api/users/$userId/settings');
     return res.data?['settings'] as Map<String, dynamic>? ?? {};
   }
 
   Future<Map<String, dynamic>> updateAccount(
-      Map<String, dynamic> payload) async {
-    final res =
-        await _dio.put<Map<String, dynamic>>('/api/account', data: payload);
+      String userId, Map<String, dynamic> payload) async {
+    final res = await _dio.put<Map<String, dynamic>>('/api/users/$userId',
+        data: payload);
     return res.data?['user'] as Map<String, dynamic>? ?? {};
   }
 
@@ -43,9 +44,11 @@ class AccountService {
   }
 
   Future<Map<String, dynamic>> saveAvatar(
-      {required String avatarUrl, String? avatarProvider}) async {
+      {required String userId,
+      required String avatarUrl,
+      String? avatarProvider}) async {
     final res = await _dio.put<Map<String, dynamic>>(
-      '/api/account',
+      '/api/users/$userId',
       data: {
         'avatar_url': avatarUrl,
         if (avatarProvider != null) 'avatar_provider': avatarProvider,

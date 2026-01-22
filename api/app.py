@@ -168,7 +168,7 @@ def validate_jwt():
         return jsonify({'error': 'Invalid or expired JWT'}), 401
     return jsonify({'valid': True, 'payload': payload})
 
-@app.route('/api/user/me')
+@app.route('/api/users/me')
 @require_auth
 def user_me():
     user = auth_manager.get_user(g.user_id)
@@ -205,7 +205,7 @@ def user_me():
     if not avatar_url and avatars:
         avatar_url = avatars[0].get('url')
     
-    spotify_connected = auth_manager.has_spotify_tokens(g.user_id)
+    # spotify_connected = auth_manager.has_spotify_tokens(g.user_id)
 
     return jsonify({'user': {
         'id': user.get('id'),
@@ -215,23 +215,31 @@ def user_me():
         'name': user.get('display_name') or user.get('username') or user.get('email'),
         'provider': provider,
         'provider_selected': provider,
-        'spotifyConnected': spotify_connected,
+        # 'spotify_connected': spotify_connected,
         'avatar_url': avatar_url,
         'provider_avatars': provider_avatars,
         'provider_avatar_list': provider_avatar_list,
     }})
 
 
-@app.route('/api/settings', methods=['GET'])
+@app.route('/api/users/<user_id>/settings', methods=['GET'])
 @require_auth
-def get_settings():
+def get_settings(user_id: str):
+    # Enforce that the path user matches the JWT subject
+    if user_id != g.user_id:
+        return jsonify({'error': 'Forbidden'}), 403
+    
     settings = auth_manager.get_dashboard_settings(g.user_id) or {}
     return jsonify({'settings': settings})
 
 
-@app.route('/api/settings', methods=['PUT', 'PATCH'])
+@app.route('/api/users/<user_id>/settings', methods=['PUT', 'PATCH'])
 @require_auth
-def update_settings():
+def update_settings(user_id: str):
+    # Enforce that the path user matches the JWT subject
+    if user_id != g.user_id:
+        return jsonify({'error': 'Forbidden'}), 403
+    
     data = request.get_json() or {}
     if not isinstance(data, dict):
         return jsonify({'error': 'Invalid payload'}), 400
@@ -280,65 +288,13 @@ def manage_service(user_id: str, service: str):
     return jsonify({'settings': settings, 'user': account}), 200
 
 
-@app.route('/api/account', methods=['GET'])
+@app.route('/api/users/<user_id>', methods=['PUT', 'PATCH'])
 @require_auth
-def get_account():
-    user = auth_manager.get_user(g.user_id)
-    if not user:
-        return jsonify({'error': 'User not found'}), 404
+def update_user(user_id: str):
+    # Enforce that the path user matches the JWT subject
+    if user_id != g.user_id:
+        return jsonify({'error': 'Forbidden'}), 403
     
-    identities = auth_manager.get_identities(g.user_id) or []
-    
-    # Get provider avatars from avatars table
-    avatars = auth_manager.get_avatars(g.user_id, limit=50)
-    provider_avatars = {}
-    provider_avatar_list = []
-    
-    for avatar in avatars:
-        if avatar.get('source') == 'provider' and avatar.get('provider_id'):
-            # Find the provider for this avatar
-            identity = next((i for i in identities if i.get('provider_id') == avatar.get('provider_id')), None)
-            if identity:
-                provider_name = identity.get('provider')
-                provider_avatars[provider_name] = avatar.get('url')
-                provider_avatar_list.append({
-                    'provider': provider_name,
-                    'provider_id': avatar.get('provider_id'),
-                    'avatar_url': avatar.get('url'),
-                })
-    
-    # Get selected avatar from avatars table
-    selected_avatar = auth_manager._fetch_one(
-        "SELECT url FROM avatars WHERE user_id = %s AND is_selected = TRUE ORDER BY created_at DESC LIMIT 1",
-        (str(g.user_id),),
-    )
-    avatar_url = selected_avatar['url'] if selected_avatar else None
-    if not avatar_url and avatars:
-        avatar_url = avatars[0].get('url')
-    
-    provider = identities[0].get('provider') if identities else None
-    spotify_connected = auth_manager.has_spotify_tokens(g.user_id)
-    
-    return jsonify({
-        'user': {
-            'id': user.get('id'),
-            'email': user.get('email'),
-            'username': user.get('username'),
-            'display_name': user.get('display_name'),
-            'avatar_url': avatar_url,
-            'provider_avatars': provider_avatars,
-            'provider_avatar_list': provider_avatar_list,
-            'provider': provider,
-            'provider_selected': provider,
-            'spotifyConnected': spotify_connected,
-            'name': user.get('display_name') or user.get('username') or user.get('email'),
-        }
-    })
-
-
-@app.route('/api/account', methods=['PUT', 'PATCH'])
-@require_auth
-def update_account():
     data = request.get_json() or {}
     if not isinstance(data, dict):
         return jsonify({'error': 'Invalid payload'}), 400
@@ -413,10 +369,18 @@ def update_account():
     }), 200
 
 
-@app.route('/api/spotify/now-playing', methods=['GET'])
+@app.route('/api/users/<user_id>/services/<service>/now-playing', methods=['GET'])
 @require_auth
-def spotify_now_playing():
-    server_logger.debug(f"/api/spotify/now-playing requested by user_id={g.user_id}")
+def spotify_now_playing(user_id: str, service: str):
+    # Enforce that the path user matches the JWT subject
+    if user_id != g.user_id:
+        return jsonify({'error': 'Forbidden'}), 403
+    
+    service = service.lower()
+    if service != 'spotify':
+        return jsonify({'error': 'Unsupported service'}), 400
+    
+    server_logger.debug(f"/api/users/{user_id}/services/{service}/now-playing requested by user_id={g.user_id}")
     data = auth_manager.get_spotify_currently_playing(g.user_id)
     if data is None:
         server_logger.warning("Now-playing fetch failed: no tokens or refresh failure")

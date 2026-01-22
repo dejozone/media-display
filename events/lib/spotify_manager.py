@@ -32,6 +32,7 @@ class SpotifyManager:
         *,
         ws: SupportsWebSocket,
         token: str,
+        user_id: str,
         stop_event: asyncio.Event,
         http_client: httpx.AsyncClient,
         close_on_stop: bool = True,
@@ -40,6 +41,7 @@ class SpotifyManager:
     ) -> None:
         assert stop_event is not None
         assert http_client is not None
+        assert user_id is not None
 
         poll_interval = poll_interval_override or self.config.get("pollIntervalSec", 5)
         retry_interval = max(1, self.config.get("retryIntervalSec", 2))
@@ -68,7 +70,7 @@ class SpotifyManager:
 
                 self.logger.debug("spotify: poll now-playing")
                 resp = await http_client.get(
-                    f"{self.api_base_url}/api/spotify/now-playing",
+                    f"{self.api_base_url}/api/users/{user_id}/services/spotify/now-playing",
                     headers=headers,
                 )
 

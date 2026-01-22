@@ -190,6 +190,7 @@ async def _spotify_fallback_loop(
     *,
     channel: MultiSessionChannel,
     token: str,
+    user_id: str,
     connection_stop: asyncio.Event,
     http_client: httpx.AsyncClient,
     poll_interval_override: Optional[int],
@@ -211,6 +212,7 @@ async def _spotify_fallback_loop(
             SPOTIFY_MANAGER.stream_now_playing(
                 ws=channel,
                 token=token,
+                user_id=user_id,
                 stop_event=connection_stop,
                 http_client=http_client,
                 close_on_stop=False,
@@ -381,6 +383,7 @@ async def _user_driver(ctx: UserContext) -> None:
                 resume_found = await _spotify_fallback_loop(
                     channel=ctx.channel,
                     token=ctx.token,
+                    user_id=ctx.user_id,
                     connection_stop=current_stop,
                     http_client=HTTP_CLIENT,
                     poll_interval_override=client_spotify_poll,

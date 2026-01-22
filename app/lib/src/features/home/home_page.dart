@@ -44,7 +44,10 @@ class _HomePageState extends ConsumerState<HomePage> {
     });
     try {
       final me = await ref.read(userServiceProvider).fetchMe();
-      final s = await ref.read(settingsServiceProvider).fetchSettings();
+      final userId = me['id']?.toString() ?? '';
+      if (userId.isEmpty) throw Exception('User ID not found');
+      final s =
+          await ref.read(settingsServiceProvider).fetchSettingsForUser(userId);
       if (!mounted) return;
       setState(() {
         user = me;
@@ -60,13 +63,19 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   Future<void> _updateSettings(Map<String, dynamic> partial) async {
     if (savingSettings) return;
+    final userId = user?['id']?.toString() ?? '';
+    if (userId.isEmpty) {
+      setState(() => error = 'User ID not available');
+      return;
+    }
     setState(() {
       savingSettings = true;
       error = null;
     });
     try {
-      final next =
-          await ref.read(settingsServiceProvider).updateSettings(partial);
+      final next = await ref
+          .read(settingsServiceProvider)
+          .updateSettingsForUser(userId, partial);
       if (!mounted) return;
       setState(() => settings = next);
       final ws = ref.read(eventsWsProvider.notifier);

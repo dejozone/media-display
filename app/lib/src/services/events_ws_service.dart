@@ -5,12 +5,14 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:media_display/src/config/env.dart';
 import 'package:media_display/src/services/auth_state.dart';
 import 'package:media_display/src/services/settings_service.dart';
+import 'package:media_display/src/services/user_service.dart';
 import 'package:media_display/src/services/ws_retry_policy.dart';
 import 'package:media_display/src/services/ws_ssl_override.dart'
-  if (dart.library.io) 'package:media_display/src/services/ws_ssl_override_io.dart';
+    if (dart.library.io) 'package:media_display/src/services/ws_ssl_override_io.dart';
 
 class NowPlayingState {
-  const NowPlayingState({this.provider, this.payload, this.error, this.connected = false});
+  const NowPlayingState(
+      {this.provider, this.payload, this.error, this.connected = false});
   final String? provider;
   final Map<String, dynamic>? payload;
   final String? error;
@@ -75,7 +77,11 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
           _channel = WebSocketChannel.connect(uri);
         }, allowInsecure: !env.eventsWsSslVerify);
       } catch (e) {
-        state = NowPlayingState(error: 'WebSocket connect failed: $e', connected: false, provider: state.provider, payload: state.payload);
+        state = NowPlayingState(
+            error: 'WebSocket connect failed: $e',
+            connected: false,
+            provider: state.provider,
+            payload: state.payload);
         _channel = null;
         _scheduleRetry();
         return;
@@ -100,7 +106,8 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
             if (type == 'now_playing') {
               final provider = data['provider'] as String?;
               final payload = (data['data'] as Map?)?.cast<String, dynamic>();
-              state = NowPlayingState(provider: provider, payload: payload, connected: true);
+              state = NowPlayingState(
+                  provider: provider, payload: payload, connected: true);
             } else if (type == 'ready') {
               // ready message ignored for now
             }
@@ -109,11 +116,19 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
           }
         },
         onError: (err) {
-          state = NowPlayingState(error: 'WebSocket error: $err', connected: false, provider: state.provider, payload: state.payload);
+          state = NowPlayingState(
+              error: 'WebSocket error: $err',
+              connected: false,
+              provider: state.provider,
+              payload: state.payload);
           _scheduleRetry();
         },
         onDone: () {
-          state = NowPlayingState(error: 'Connection closed', connected: false, provider: state.provider, payload: state.payload);
+          state = NowPlayingState(
+              error: 'Connection closed',
+              connected: false,
+              provider: state.provider,
+              payload: state.payload);
           _scheduleRetry();
         },
         cancelOnError: true,
@@ -141,9 +156,10 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
 
   void _disconnect({bool scheduleRetry = true}) {
     _retryTimer?.cancel();
-      _channel?.sink.close();
+    _channel?.sink.close();
     _channel = null;
-    state = NowPlayingState(provider: state.provider, payload: state.payload, connected: false);
+    state = NowPlayingState(
+        provider: state.provider, payload: state.payload, connected: false);
     if (scheduleRetry) {
       _scheduleRetry();
     }
@@ -161,7 +177,12 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     try {
       Map<String, dynamic>? settings;
       try {
-        settings = await ref.read(settingsServiceProvider).fetchSettings();
+        final user = await ref.read(userServiceProvider).fetchMe();
+        final userId = user['id']?.toString() ?? '';
+        if (userId.isEmpty) throw Exception('User ID not found');
+        settings = await ref
+            .read(settingsServiceProvider)
+            .fetchSettingsForUser(userId);
         _lastSettings = settings;
         _configRetryTimer?.cancel();
       } catch (_) {
@@ -171,10 +192,11 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
           // Ignore result; best effort.
           sendConfig();
         });
-        settings = _lastSettings ?? {
-          'spotify_enabled': false,
-          'sonos_enabled': false,
-        };
+        settings = _lastSettings ??
+            {
+              'spotify_enabled': false,
+              'sonos_enabled': false,
+            };
       }
       final hasService = _servicesEnabled(settings);
       final env = ref.read(envConfigProvider);
@@ -191,30 +213,32 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       // Attempt to pick up client-configured poll intervals if present.
       final spotifyPoll = asInt(
             settings['spotify_poll_interval_sec'] ??
-            settings['spotify_poll_interval'] ??
-            settings['spotify_poll'] ??
-            settings['poll_spotify'] ??
-            settings['spotify_poll_ms'] ??
-            settings['spotify_poll_interval_ms'],
+                settings['spotify_poll_interval'] ??
+                settings['spotify_poll'] ??
+                settings['poll_spotify'] ??
+                settings['spotify_poll_ms'] ??
+                settings['spotify_poll_interval_ms'],
           ) ??
           // If only ms is provided, convert down where possible.
           (() {
-        final ms = asInt(settings?['spotify_poll_interval_ms'] ?? 0);
+            final ms = asInt(settings?['spotify_poll_interval_ms'] ?? 0);
             return ms != null ? (ms / 1000).round() : null;
-          })() ?? env.spotifyPollIntervalSec;
+          })() ??
+          env.spotifyPollIntervalSec;
 
       final sonosPoll = asInt(
             settings['sonos_poll_interval_sec'] ??
-            settings['sonos_poll_interval'] ??
-            settings['sonos_poll'] ??
-            settings['poll_sonos'] ??
-            settings['sonos_poll_ms'] ??
-            settings['sonos_poll_interval_ms'],
+                settings['sonos_poll_interval'] ??
+                settings['sonos_poll'] ??
+                settings['poll_sonos'] ??
+                settings['sonos_poll_ms'] ??
+                settings['sonos_poll_interval_ms'],
           ) ??
           (() {
             final ms = asInt(settings?['sonos_poll_interval_ms']);
             return ms != null ? (ms / 1000).round() : null;
-          })() ?? env.sonosPollIntervalSec;
+          })() ??
+          env.sonosPollIntervalSec;
 
       final payload = jsonEncode({
         'type': 'config',
@@ -248,12 +272,17 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
 
   bool _servicesEnabled(Map<String, dynamic>? settings) {
     if (settings == null) return false;
-    return settings['spotify_enabled'] == true || settings['sonos_enabled'] == true;
+    return settings['spotify_enabled'] == true ||
+        settings['sonos_enabled'] == true;
   }
 
   Future<void> _refreshAndMaybeConnect(AuthState auth) async {
     try {
-      final settings = await ref.read(settingsServiceProvider).fetchSettings();
+      final user = await ref.read(userServiceProvider).fetchMe();
+      final userId = user['id']?.toString() ?? '';
+      if (userId.isEmpty) throw Exception('User ID not found');
+      final settings =
+          await ref.read(settingsServiceProvider).fetchSettingsForUser(userId);
       _lastSettings = settings;
       _configRetryTimer?.cancel();
       if (_servicesEnabled(settings)) {
@@ -267,4 +296,5 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   }
 }
 
-final eventsWsProvider = NotifierProvider<EventsWsNotifier, NowPlayingState>(EventsWsNotifier.new);
+final eventsWsProvider =
+    NotifierProvider<EventsWsNotifier, NowPlayingState>(EventsWsNotifier.new);

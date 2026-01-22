@@ -66,7 +66,8 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
     try {
       final service = ref.read(accountServiceProvider);
       final acc = await service.fetchAccount();
-      final s = await service.fetchSettings();
+      final userId = acc['user_id']?.toString() ?? acc['id']?.toString() ?? '';
+      final s = await service.fetchSettings(userId);
       if (!mounted) return;
       user = acc;
       settings = s;
@@ -93,6 +94,10 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
   }
 
   Future<void> _saveProfile() async {
+    if (user == null || user?['id'] == null) {
+      setState(() => error = 'User ID not available');
+      return;
+    }
     setState(() {
       saving = true;
       error = null;
@@ -100,7 +105,8 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
     });
     try {
       final service = ref.read(accountServiceProvider);
-      final updated = await service.updateAccount({
+      final userId = user!['id'].toString();
+      final updated = await service.updateAccount(userId, {
         'email': _emailController.text.trim().isEmpty
             ? null
             : _emailController.text.trim(),
@@ -136,7 +142,7 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
         service: serviceKey,
         enable: enable,
       );
-      final newSettings = await service.fetchSettings();
+      final newSettings = await service.fetchSettings(user!['id'].toString());
       if (!mounted) return;
       user = updated.isNotEmpty ? updated : user;
       settings = newSettings;
