@@ -30,22 +30,15 @@ class AvatarService {
 
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body);
-      print('🔍 DEBUG: Raw avatars response: ${response.body}');
-
       final avatarsList = data['avatars'] as List;
-      print('🔍 DEBUG: Avatars list length: ${avatarsList.length}');
 
       final avatars = <Avatar>[];
       for (var i = 0; i < avatarsList.length; i++) {
         try {
           final json = avatarsList[i] as Map<String, dynamic>;
-          print('🔍 DEBUG: Parsing avatar $i: $json');
           final avatar = Avatar.fromJson(json);
           avatars.add(avatar);
         } catch (e, stack) {
-          print('❌ ERROR: Failed to parse avatar $i: $e');
-          print('Stack trace: $stack');
-          print('JSON data: ${avatarsList[i]}');
           rethrow;
         }
       }

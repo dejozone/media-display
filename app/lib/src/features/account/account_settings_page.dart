@@ -38,7 +38,6 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
   final _displayNameController = TextEditingController();
 
   Uint8List? _pendingImageBytes;
-  String _pendingExt = 'jpg';
   final CropController _cropController = CropController();
 
   // Callback for when child component crops an image
@@ -192,12 +191,6 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
       return;
     }
     await _toggleService('spotify', enable);
-  }
-
-  String _cacheBustedUrl(String url) {
-    if (url.isEmpty) return '';
-    final sep = url.contains('?') ? '&' : '?';
-    return '$url${sep}v=${DateTime.now().millisecondsSinceEpoch}';
   }
 
   Future<void> _handleCropResult(CropResult result) async {
@@ -649,7 +642,6 @@ class _AvatarManagementSectionState
             context.findAncestorStateOfType<_AccountSettingsPageState>()!;
         pageState.setState(() {
           pageState._pendingImageBytes = rawBytes;
-          pageState._pendingExt = ext == 'jpeg' ? 'jpg' : ext;
           pageState.showCropper = true;
           // Pass our crop handler to parent
           pageState._onChildCropped = _handleCropped;
@@ -846,22 +838,37 @@ class _AvatarManagementSectionState
                   ),
                 )
               else
-                GridView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 4,
-                    crossAxisSpacing: 10,
-                    mainAxisSpacing: 10,
-                    childAspectRatio: 0.9,
-                  ),
-                  itemCount: avatars.length,
-                  itemBuilder: (context, index) {
-                    final avatar = avatars[index];
-                    return _AvatarGridItem(
-                      avatar: avatar,
-                      onTap: () => _selectAvatar(avatar),
-                      onDelete: () => _deleteAvatar(avatar),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    // Calculate size for circular avatars (max 100px)
+                    final availableWidth = constraints.maxWidth;
+                    final spacing = 12.0;
+                    final crossAxisCount =
+                        (availableWidth / 112).floor().clamp(3, 6);
+                    final itemSize =
+                        ((availableWidth - (spacing * (crossAxisCount - 1))) /
+                                crossAxisCount)
+                            .clamp(60.0, 100.0);
+
+                    return GridView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: crossAxisCount,
+                        crossAxisSpacing: spacing,
+                        mainAxisSpacing: spacing,
+                        childAspectRatio: 1.0,
+                      ),
+                      itemCount: avatars.length,
+                      itemBuilder: (context, index) {
+                        final avatar = avatars[index];
+                        return _AvatarGridItem(
+                          avatar: avatar,
+                          size: itemSize,
+                          onTap: () => _selectAvatar(avatar),
+                          onDelete: () => _deleteAvatar(avatar),
+                        );
+                      },
                     );
                   },
                 ),
@@ -898,109 +905,123 @@ class _AvatarManagementSectionState
 class _AvatarGridItem extends StatelessWidget {
   const _AvatarGridItem({
     required this.avatar,
+    required this.size,
     required this.onTap,
     required this.onDelete,
   });
 
   final Avatar avatar;
+  final double size;
   final VoidCallback onTap;
   final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
+    final iconSize = (size * 0.14).clamp(10.0, 14.0);
+    final buttonSize = (size * 0.22).clamp(18.0, 22.0);
+    final buttonPadding = (size * 0.06).clamp(4.0, 6.0);
+
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
+      customBorder: const CircleBorder(),
       child: Container(
+        width: size,
+        height: size,
         decoration: BoxDecoration(
+          shape: BoxShape.circle,
           color: const Color(0xFF1A2333),
-          borderRadius: BorderRadius.circular(10),
           border: Border.all(
             color: avatar.isSelected
                 ? const Color(0xFF5AC8FA)
                 : Colors.white.withValues(alpha: 0.08),
-            width: avatar.isSelected ? 2 : 1,
+            width: avatar.isSelected ? 2.5 : 1.5,
           ),
         ),
         child: Stack(
           children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(
-                  child: ClipRRect(
-                    borderRadius:
-                        const BorderRadius.vertical(top: Radius.circular(9)),
-                    child: avatar.url.isNotEmpty
-                        ? Image.network(
-                            avatar.url,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => const Icon(
-                                Icons.broken_image,
-                                color: Color(0xFF9FB1D0)),
-                          )
-                        : const Icon(Icons.account_circle,
-                            size: 40, color: Color(0xFF9FB1D0)),
+            // Avatar image
+            ClipOval(
+              child: SizedBox.expand(
+                child: avatar.url.isNotEmpty
+                    ? Image.network(
+                        avatar.url,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Icon(Icons.broken_image,
+                            size: size * 0.4, color: const Color(0xFF9FB1D0)),
+                      )
+                    : Icon(Icons.account_circle,
+                        size: size * 0.5, color: const Color(0xFF9FB1D0)),
+              ),
+            ),
+            // Provider indicator badge at bottom
+            if (avatar.isProviderAvatar)
+              Positioned(
+                bottom: buttonPadding,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: Container(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: buttonPadding * 1.5,
+                      vertical: buttonPadding * 0.5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF34D399).withValues(alpha: 0.9),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(
+                      Icons.cloud,
+                      size: iconSize,
+                      color: Colors.white,
+                    ),
                   ),
                 ),
-                Container(
-                  padding: const EdgeInsets.all(6),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        avatar.isProviderAvatar ? Icons.cloud : Icons.upload,
-                        size: 10,
-                        color: avatar.isProviderAvatar
-                            ? const Color(0xFF34D399)
-                            : const Color(0xFF5AC8FA),
-                      ),
-                      const SizedBox(width: 3),
-                      Flexible(
-                        child: Text(
-                          avatar.isProviderAvatar
-                              ? avatar.providerName
-                              : 'Upload',
-                          style: TextStyle(
-                            fontSize: 9,
-                            color: avatar.isProviderAvatar
-                                ? const Color(0xFF34D399)
-                                : const Color(0xFF5AC8FA),
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
+              ),
+            // Selected indicator
+            if (avatar.isSelected)
+              Positioned(
+                top: buttonPadding,
+                right: buttonPadding,
+                child: Container(
+                  width: buttonSize,
+                  height: buttonSize,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF5AC8FA),
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.3),
+                        blurRadius: 4,
+                        offset: const Offset(0, 2),
                       ),
                     ],
                   ),
-                ),
-              ],
-            ),
-            if (avatar.isSelected)
-              Positioned(
-                top: 6,
-                right: 6,
-                child: Container(
-                  padding: const EdgeInsets.all(3),
-                  decoration: const BoxDecoration(
-                    color: Color(0xFF5AC8FA),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.check, size: 12, color: Colors.white),
+                  child: Icon(Icons.check, size: iconSize, color: Colors.white),
                 ),
               ),
+            // Delete button
             Positioned(
-              top: 6,
-              left: 6,
+              top: buttonPadding,
+              left: buttonPadding,
               child: InkWell(
                 onTap: onDelete,
+                customBorder: const CircleBorder(),
                 child: Container(
-                  padding: const EdgeInsets.all(3),
+                  width: buttonSize,
+                  height: buttonSize,
                   decoration: BoxDecoration(
-                    color: Colors.red.withValues(alpha: 0.9),
+                    color: Colors.red.withValues(alpha: 0.95),
                     shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.3),
+                        blurRadius: 4,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
                   ),
                   child:
-                      const Icon(Icons.delete, size: 12, color: Colors.white),
+                      Icon(Icons.delete, size: iconSize, color: Colors.white),
                 ),
               ),
             ),

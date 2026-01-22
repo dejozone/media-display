@@ -495,9 +495,8 @@ def upload_user_avatar(user_id: str):
     # Get MIME type
     mime_type = get_mime_type(filename)
     
-    # Determine if this should be selected (select if user has no avatars)
-    existing = auth_manager.get_avatars(g.user_id, limit=1)
-    is_selected = len(existing) == 0
+    # Always mark new uploads as selected
+    is_selected = True
     
     # Create avatar record
     try:
