@@ -9,6 +9,7 @@ import 'package:media_display/src/services/account_service.dart';
 import 'package:media_display/src/services/auth_state.dart';
 import 'package:media_display/src/services/auth_service.dart';
 import 'package:media_display/src/services/avatar_service.dart';
+import 'package:media_display/src/services/settings_service.dart';
 import 'package:media_display/src/models/avatar.dart';
 import 'package:media_display/src/config/env.dart';
 import 'package:media_display/src/widgets/app_header.dart';
@@ -137,12 +138,18 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
     });
     try {
       final service = ref.read(accountServiceProvider);
+      final userId = user!['id'].toString();
       final updated = await service.updateService(
-        userId: user!['id'].toString(),
+        userId: userId,
         service: serviceKey,
         enable: enable,
       );
-      final newSettings = await service.fetchSettings(user!['id'].toString());
+      final newSettings = await service.fetchSettings(userId);
+
+      // Update the global settings cache so home page stays in sync
+      final settingsService = ref.read(settingsServiceProvider);
+      await settingsService.fetchSettingsForUser(userId, forceRefresh: true);
+
       if (!mounted) return;
       user = updated.isNotEmpty ? updated : user;
       settings = newSettings;
@@ -196,7 +203,47 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
       await _startSpotifyEnable();
       return;
     }
+
+    // Show confirmation dialog when disabling
+    if (!enable) {
+      final confirmed = await _showDisableServiceDialog('Spotify');
+      if (confirmed != true) return;
+    }
+
     await _toggleService('spotify', enable);
+  }
+
+  Future<void> _handleSonosToggle(bool enable) async {
+    // Show confirmation dialog when disabling
+    if (!enable) {
+      final confirmed = await _showDisableServiceDialog('Sonos');
+      if (confirmed != true) return;
+    }
+
+    await _toggleService('sonos', enable);
+  }
+
+  Future<bool?> _showDisableServiceDialog(String serviceName) async {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Disable $serviceName'),
+        content: Text(
+          'This will permanently disable $serviceName integration. You can re-enable it later from this page.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _handleCropResult(CropResult result) async {
@@ -360,9 +407,7 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
                             _serviceToggle(
                               label: 'Sonos',
                               value: sonosEnabled,
-                              onChanged: saving
-                                  ? null
-                                  : (v) => _toggleService('sonos', v),
+                              onChanged: saving ? null : _handleSonosToggle,
                             ),
                           ],
                         ),
@@ -1005,32 +1050,33 @@ class _AvatarGridItem extends StatelessWidget {
                   child: Icon(Icons.check, size: iconSize, color: Colors.white),
                 ),
               ),
-            // Delete button
-            Positioned(
-              top: buttonPadding,
-              left: buttonPadding,
-              child: InkWell(
-                onTap: onDelete,
-                customBorder: const CircleBorder(),
-                child: Container(
-                  width: buttonSize,
-                  height: buttonSize,
-                  decoration: BoxDecoration(
-                    color: Colors.red.withValues(alpha: 0.95),
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.3),
-                        blurRadius: 4,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
+            // Delete button (hidden for provider avatars)
+            if (!avatar.isProviderAvatar)
+              Positioned(
+                top: buttonPadding,
+                left: buttonPadding,
+                child: InkWell(
+                  onTap: onDelete,
+                  customBorder: const CircleBorder(),
+                  child: Container(
+                    width: buttonSize,
+                    height: buttonSize,
+                    decoration: BoxDecoration(
+                      color: Colors.red.withValues(alpha: 0.95),
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.3),
+                          blurRadius: 4,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child:
+                        Icon(Icons.delete, size: iconSize, color: Colors.white),
                   ),
-                  child:
-                      Icon(Icons.delete, size: iconSize, color: Colors.white),
                 ),
               ),
-            ),
           ],
         ),
       ),

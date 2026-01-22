@@ -7,7 +7,6 @@ from functools import wraps
 import secrets
 from flask_cors import CORS
 import re
-from pathlib import Path
 from lib.auth.auth_manager import AuthManager
 from config import Config
 from lib.utils.logger import auth_logger, server_logger
@@ -39,13 +38,9 @@ def require_auth(f):
         return f(*args, **kwargs)
     return wrapper
 
-
-@app.route('/assets/<path:filename>')
-def serve_assets(filename: str):
-    target = ASSETS_DIR / filename
-    if not target.exists():
-        return jsonify({'error': 'Not found'}), 404
-    return send_from_directory(ASSETS_DIR, filename)
+# =============================================================================
+# Authentication Management API
+# =============================================================================
 
 @app.route('/api/auth/google/url')
 def google_auth_url():
@@ -167,6 +162,11 @@ def validate_jwt():
         auth_logger.warning("Validation failed: invalid or expired JWT")
         return jsonify({'error': 'Invalid or expired JWT'}), 401
     return jsonify({'valid': True, 'payload': payload})
+
+
+# =============================================================================
+# User Management API
+# =============================================================================
 
 @app.route('/api/users/me')
 @require_auth
@@ -536,6 +536,17 @@ def delete_user_avatar(user_id: str, avatar_id: str):
     
     return jsonify({'message': 'Avatar deleted successfully'}), 200
 
+
+# =============================================================================
+# Miscellaneous API
+# =============================================================================
+
+@app.route('/assets/<path:filename>')
+def serve_assets(filename: str):
+    target = ASSETS_DIR / filename
+    if not target.exists():
+        return jsonify({'error': 'Not found'}), 404
+    return send_from_directory(ASSETS_DIR, filename)
 
 if __name__ == '__main__':
     app.run(host=Config.HOST, port=Config.PORT, debug=Config.DEBUG)
