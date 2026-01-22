@@ -362,13 +362,18 @@ async def _user_driver(ctx: UserContext) -> None:
                 finally:
                     ACTIVE_TASKS.discard(sonos_task)
 
-                if (
-                    ctx.channel.application_state != WebSocketState.CONNECTED
-                    or ctx.stop_event.is_set()
-                    or current_stop.is_set()
-                ):
+                # Check if we should actually stop, or if sonos just timed out (no devices found)
+                # Only break if connection is truly stopped, not just because sonos couldn't find devices
+                if ctx.stop_event.is_set() or current_stop.is_set():
+                    logger.info("sonos: breaking due to stop_event (user=%s)", ctx.user_id)
                     break
+                if ctx.channel.application_state != WebSocketState.CONNECTED:
+                    logger.info("sonos: breaking due to channel disconnected (user=%s)", ctx.user_id)
+                    break
+                
+                # Sonos completed (possibly due to timeout/no devices) - defer to Spotify if enabled
                 defer_sonos = True
+                logger.info("sonos: completed, deferring to spotify (defer=True, user=%s)", ctx.user_id)
             else:
                 if sonos_enabled and defer_sonos:
                     logger.info(
@@ -377,6 +382,7 @@ async def _user_driver(ctx: UserContext) -> None:
 
             if spotify_enabled and not ctx.stop_event.is_set() and not current_stop.is_set():
                 if ctx.channel.application_state != WebSocketState.CONNECTED:
+                    logger.info("spotify: channel disconnected before start (user=%s)", ctx.user_id)
                     break
                 logger.info("starting spotify stream (fallback loop) user=%s", ctx.user_id)
                 assert HTTP_CLIENT is not None
@@ -414,8 +420,13 @@ async def _user_driver(ctx: UserContext) -> None:
                         defer_sonos = False
                         await asyncio.sleep(1)
                         continue
+                    logger.info("spotify: breaking due to stop/disconnect (user=%s)", ctx.user_id)
                     break
-            else:
+            
+            # If we get here and neither service ran, break out of inner loop
+            # This happens when spotify is disabled or already stopped
+            if not allow_sonos and not spotify_enabled:
+                logger.info("no services to run, breaking inner loop (user=%s)", ctx.user_id)
                 break
 
     await ctx.channel.close(code=1012, reason="User stop")

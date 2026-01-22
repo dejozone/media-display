@@ -377,11 +377,11 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
                                   onPressed: saving ? null : _saveProfile,
                                   child: Text(saving ? 'Saving…' : 'Save'),
                                 ),
-                                const SizedBox(width: 10),
-                                OutlinedButton(
-                                  onPressed: loading ? null : _load,
-                                  child: const Text('Reload'),
-                                ),
+                                // const SizedBox(width: 10),
+                                // OutlinedButton(
+                                //   onPressed: loading ? null : _load,
+                                //   child: const Text('Reload'),
+                                // ),
                               ],
                             ),
                           ],
