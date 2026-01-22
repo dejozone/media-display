@@ -38,7 +38,7 @@ class AvatarService {
           final json = avatarsList[i] as Map<String, dynamic>;
           final avatar = Avatar.fromJson(json);
           avatars.add(avatar);
-        } catch (e, stack) {
+        } catch (e) {
           rethrow;
         }
       }
