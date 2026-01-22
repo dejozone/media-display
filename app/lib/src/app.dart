@@ -19,7 +19,6 @@ class MediaDisplayApp extends ConsumerWidget {
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xFF5AC8FA),
           brightness: Brightness.dark,
-          background: const Color(0xFF0E1117),
           surface: const Color(0xFF111624),
           primary: const Color(0xFF5AC8FA),
           secondary: const Color(0xFF4B7BEC),
