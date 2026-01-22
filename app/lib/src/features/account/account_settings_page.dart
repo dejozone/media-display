@@ -1,3 +1,4 @@
+import 'dart:io' show File;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -5,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:crop_your_image/crop_your_image.dart';
+import 'package:flutter_heic_to_jpg/flutter_heic_to_jpg.dart';
 import 'package:media_display/src/services/account_service.dart';
 import 'package:media_display/src/services/auth_state.dart';
 import 'package:media_display/src/services/auth_service.dart';
@@ -607,14 +609,17 @@ class _AvatarManagementSectionState
   String? _error;
   String _pendingFilename = 'avatar.jpg';
 
-  static const Set<String> _allowedExtensions = {
-    'png',
-    'jpg',
-    'jpeg',
-    'bmp',
-    'heic',
-    'heif'
-  };
+  // HEIC/HEIF only supported on mobile/desktop, not web
+  Set<String> get _allowedExtensions => {
+        'png',
+        'jpg',
+        'jpeg',
+        'bmp',
+        if (!kIsWeb) ...[
+          'heic',
+          'heif',
+        ],
+      };
 
   String _extensionFromName(String name) {
     final dotIndex = name.lastIndexOf('.');
@@ -660,15 +665,17 @@ class _AvatarManagementSectionState
       final ext = _extensionFromName(pickedFile.name);
       if (!_allowedExtensions.contains(ext)) {
         if (mounted) {
+          final formats =
+              kIsWeb ? 'PNG, JPG, or BMP' : 'PNG, JPG, BMP, or HEIC';
           setState(() {
-            _error = 'Unsupported file type. Use PNG, JPG, BMP, or HEIC.';
+            _error = 'Unsupported file type. Use $formats.';
             _uploading = false;
           });
         }
         return;
       }
 
-      final rawBytes = await pickedFile.readAsBytes();
+      Uint8List rawBytes = await pickedFile.readAsBytes();
       if (rawBytes.isEmpty) {
         if (mounted) {
           setState(() {
@@ -679,9 +686,45 @@ class _AvatarManagementSectionState
         return;
       }
 
+      String finalFilename = 'avatar.${ext == 'jpeg' ? 'jpg' : ext}';
+
+      // Convert HEIC/HEIF to JPEG if needed
+      if (ext == 'heic' || ext == 'heif') {
+        try {
+          if (!kIsWeb && pickedFile.path.isNotEmpty) {
+            // For mobile/desktop platforms
+            final jpegPath = await FlutterHeicToJpg.convert(pickedFile.path);
+            if (jpegPath != null) {
+              rawBytes = await File(jpegPath).readAsBytes();
+              finalFilename = 'avatar.jpg';
+            } else {
+              throw Exception('HEIC conversion returned null');
+            }
+          } else {
+            // For web platform, HEIC is not supported
+            if (mounted) {
+              setState(() {
+                _error =
+                    'HEIC format not supported on web browser. Please use JPG or PNG.';
+                _uploading = false;
+              });
+            }
+            return;
+          }
+        } catch (e) {
+          if (mounted) {
+            setState(() {
+              _error = 'Failed to convert HEIC image. Please use JPG or PNG.';
+              _uploading = false;
+            });
+          }
+          return;
+        }
+      }
+
       // Store filename and delegate to parent page's crop dialog
       setState(() {
-        _pendingFilename = 'avatar.${ext == 'jpeg' ? 'jpg' : ext}';
+        _pendingFilename = finalFilename;
         _uploading = false;
       });
 

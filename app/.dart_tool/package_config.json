@@ -158,6 +158,12 @@
       "languageVersion": "2.12"
     },
     {
+      "name": "flutter_heic_to_jpg",
+      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/flutter_heic_to_jpg-1.0.0",
+      "packageUri": "lib/",
+      "languageVersion": "3.4"
+    },
+    {
       "name": "flutter_lints",
       "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/flutter_lints-6.0.0",
       "packageUri": "lib/",

@@ -9,7 +9,11 @@
   },
   "assets": {
     "baseUrl": "https://media-display-app.projecttechcycle.org:9082/assets",
-    "localPath": "api/assets"
+    "imageUpload": {
+      "localPath": "api/assets",
+      "maxFileSizeBytes": 8388608,
+      "allowedExtensions": [".jpg", ".jpeg", ".png", ".bmp", ".heic", ".heif"]
+    }
   },
   "database": {
     "host": "localhost",

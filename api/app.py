@@ -17,8 +17,8 @@ CORS(app, origins=Config.CORS_ORIGINS)
 auth_manager = AuthManager()
 email_re = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 ASSETS_DIR = Config.ASSETS_ROOT
-ALLOWED_IMAGE_EXT = {'.jpg', '.jpeg', '.png', '.bmp', '.heic', '.heif'}
-MAX_AVATAR_UPLOAD = 8 * 1024 * 1024  # 8MB
+ALLOWED_IMAGE_EXT = Config.ALLOWED_IMAGE_EXTENSIONS
+MAX_AVATAR_UPLOAD = Config.MAX_AVATAR_UPLOAD_BYTES
 
 
 def require_auth(f):

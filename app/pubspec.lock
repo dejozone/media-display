@@ -206,6 +206,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "6.0.0"
+  flutter_heic_to_jpg:
+    dependency: "direct main"
+    description:
+      name: flutter_heic_to_jpg
+      sha256: "98199617b68e5bbaa56be24665f241044e0480907fe4e063cd577e220aeb398a"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.0"
   flutter_lints:
     dependency: "direct dev"
     description:

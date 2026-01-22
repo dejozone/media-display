@@ -144,8 +144,13 @@ class Config:
     # ASSETS (from JSON config)
     # =============================================================================
     ASSETS_BASE_URL = CONFIG['assets']['baseUrl'].rstrip('/')
-    ASSETS_LOCAL_PATH = CONFIG['assets']['localPath']
+    _image_upload_cfg = CONFIG['assets'].get('imageUpload', {})
+    ASSETS_LOCAL_PATH = _image_upload_cfg.get('localPath', 'api/assets')
     ASSETS_ROOT = (ROOT_DIR / ASSETS_LOCAL_PATH).resolve()
+    
+    # Image Upload Settings
+    MAX_AVATAR_UPLOAD_BYTES = _image_upload_cfg.get('maxFileSizeBytes', 8388608)  # Default 8MB
+    ALLOWED_IMAGE_EXTENSIONS = set(_image_upload_cfg.get('allowedExtensions', ['.jpg', '.jpeg', '.png', '.bmp']))
 
     # =============================================================================
     # SSL/TLS (from JSON config)

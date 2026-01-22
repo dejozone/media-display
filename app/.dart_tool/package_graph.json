@@ -11,6 +11,7 @@
         "dio",
         "flutter",
         "flutter_dotenv",
+        "flutter_heic_to_jpg",
         "flutter_riverpod",
         "flutter_web_plugins",
         "go_router",
@@ -51,6 +52,14 @@
         "stream_channel",
         "test_api",
         "vector_math"
+      ]
+    },
+    {
+      "name": "flutter_heic_to_jpg",
+      "version": "1.0.0",
+      "dependencies": [
+        "flutter",
+        "plugin_platform_interface"
       ]
     },
     {
@@ -297,6 +306,13 @@
         "stream_channel",
         "string_scanner",
         "term_glyph"
+      ]
+    },
+    {
+      "name": "plugin_platform_interface",
+      "version": "2.1.8",
+      "dependencies": [
+        "meta"
       ]
     },
     {
@@ -642,13 +658,6 @@
         "ffi",
         "meta",
         "path"
-      ]
-    },
-    {
-      "name": "plugin_platform_interface",
-      "version": "2.1.8",
-      "dependencies": [
-        "meta"
       ]
     },
     {

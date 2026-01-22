@@ -7,6 +7,14 @@
   "frontend": {
     "baseUrl": "https://media-display-app.projecttechcycle.org"
   },
+  "assets": {
+    "baseUrl": "https://media-display-app.projecttechcycle.org/assets",
+    "imageUpload": {
+      "localPath": "api/assets",
+      "maxFileSizeBytes": 8388608,
+      "allowedExtensions": [".jpg", ".jpeg", ".png", ".bmp", ".heic", ".heif"]
+    }
+  },
   "database": {
     "host": "localhost",
     "port": 5432,
