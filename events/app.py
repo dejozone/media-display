@@ -618,6 +618,35 @@ async def media_events(ws: WebSocket) -> None:
     await ctx.channel.add(session_id, ws)
 
     async def _apply_config(msg: Dict[str, Any]) -> None:
+        need_token = msg.get("need_spotify_token") is True
+
+        # If need_spotify_token is True, enter token-only mode
+        if need_token:
+            ctx.token_mode = True
+            ctx.config_event.set()
+            if ctx.driver_task and not ctx.driver_task.done():
+                ctx.stop_event.set()
+                ctx.driver_task.cancel()
+                with contextlib.suppress(Exception):
+                    await ctx.driver_task
+                ACTIVE_TASKS.discard(ctx.driver_task)
+                ctx.driver_task = None
+
+            token_state = await _ensure_access_token(
+                ctx=ctx,
+                service="spotify",
+                subscribe_channel=ctx.channel,
+            )
+            if token_state:
+                await ctx.channel.send_json(
+                    {
+                        "type": "spotify_token",
+                        "access_token": token_state.get("access_token"),
+                        "expires_at": token_state.get("expires_at"),
+                    }
+                )
+            return
+
         # Switching to config mode exits token-only mode.
         if ctx.token_mode:
             ctx.token_mode = False
@@ -684,32 +713,6 @@ async def media_events(ws: WebSocket) -> None:
     try:
         while True:
             msg = await ws.receive_json()
-            if isinstance(msg, dict) and msg.get("is_spotify_token_needed") is True:
-                ctx.token_mode = True
-                ctx.config_event.set()
-                if ctx.driver_task and not ctx.driver_task.done():
-                    ctx.stop_event.set()
-                    ctx.driver_task.cancel()
-                    with contextlib.suppress(Exception):
-                        await ctx.driver_task
-                    ACTIVE_TASKS.discard(ctx.driver_task)
-                    ctx.driver_task = None
-
-                token_state = await _ensure_access_token(
-                    ctx=ctx,
-                    service="spotify",
-                    subscribe_channel=ctx.channel,
-                )
-                if token_state:
-                    await ctx.channel.send_json(
-                        {
-                            "type": "spotify_token",
-                            "access_token": token_state.get("access_token"),
-                            "expires_at": token_state.get("expires_at"),
-                        }
-                    )
-                continue
-
             if isinstance(msg, dict) and msg.get("type") == "config":
                 await _apply_config(msg)
     except asyncio.CancelledError:
