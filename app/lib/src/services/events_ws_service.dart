@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:media_display/src/config/env.dart';
@@ -9,14 +10,21 @@ import 'package:media_display/src/services/user_service.dart';
 import 'package:media_display/src/services/ws_retry_policy.dart';
 import 'package:media_display/src/services/ws_ssl_override.dart'
     if (dart.library.io) 'package:media_display/src/services/ws_ssl_override_io.dart';
+import 'package:media_display/src/services/spotify_direct_service.dart';
 
 class NowPlayingState {
-  const NowPlayingState(
-      {this.provider, this.payload, this.error, this.connected = false});
+  const NowPlayingState({
+    this.provider,
+    this.payload,
+    this.error,
+    this.connected = false,
+    this.mode = SpotifyPollingMode.idle,
+  });
   final String? provider;
   final Map<String, dynamic>? payload;
   final String? error;
   final bool connected;
+  final SpotifyPollingMode mode;
 }
 
 class EventsWsNotifier extends Notifier<NowPlayingState> {
@@ -26,6 +34,9 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   late final WsRetryPolicy _retryPolicy;
   bool _connecting = false;
   Map<String, dynamic>? _lastSettings;
+  bool _useDirectPolling = false;
+  bool _tokenRequested = false;
+  DateTime? _lastTokenRequestTime;
 
   @override
   NowPlayingState build() {
@@ -36,6 +47,11 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       cooldown: Duration(seconds: env.wsRetryCooldownSeconds),
       maxTotal: Duration(seconds: env.wsRetryMaxTotalSeconds),
     );
+
+    // Set up token refresh callback for spotify_direct_service
+    ref.read(spotifyTokenRefreshCallbackProvider).callback = () {
+      _requestTokenRefresh();
+    };
 
     ref.onDispose(() {
       _retryTimer?.cancel();
@@ -78,10 +94,12 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
         }, allowInsecure: !env.eventsWsSslVerify);
       } catch (e) {
         state = NowPlayingState(
-            error: 'WebSocket connect failed: $e',
-            connected: false,
-            provider: state.provider,
-            payload: state.payload);
+          error: 'WebSocket connect failed: $e',
+          connected: false,
+          provider: state.provider,
+          payload: state.payload,
+          mode: ref.read(spotifyDirectProvider).mode,
+        );
         _channel = null;
         _scheduleRetry();
         return;
@@ -93,6 +111,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
         payload: state.payload,
         connected: true,
         error: null,
+        mode: ref.read(spotifyDirectProvider).mode,
       );
 
       // Send current service enablement to the server.
@@ -104,31 +123,67 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
             final data = jsonDecode(message as String) as Map<String, dynamic>;
             final type = data['type'];
             if (type == 'now_playing') {
-              final provider = data['provider'] as String?;
-              final payload = (data['data'] as Map?)?.cast<String, dynamic>();
-              state = NowPlayingState(
-                  provider: provider, payload: payload, connected: true);
+              // Only use backend data if not in direct polling mode
+              if (!_useDirectPolling) {
+                final provider = data['provider'] as String?;
+                final payload = (data['data'] as Map?)?.cast<String, dynamic>();
+                final directMode = ref.read(spotifyDirectProvider).mode;
+                state = NowPlayingState(
+                  provider: provider,
+                  payload: payload,
+                  connected: true,
+                  mode: directMode,
+                );
+              }
+            } else if (type == 'spotify_token') {
+              final accessToken = data['access_token'] as String?;
+              final expiresAt = data['expires_at'];
+              if (accessToken != null && expiresAt != null) {
+                int expiresAtInt;
+                if (expiresAt is int) {
+                  expiresAtInt = expiresAt;
+                } else if (expiresAt is double) {
+                  expiresAtInt = expiresAt.toInt();
+                } else {
+                  expiresAtInt = int.tryParse(expiresAt.toString()) ?? 0;
+                }
+                debugPrint(
+                    '[SPOTIFY] Token received (expires at $expiresAtInt)');
+                ref.read(spotifyDirectProvider.notifier).updateToken(
+                      accessToken,
+                      expiresAtInt,
+                    );
+                _tokenRequested = false;
+              }
             } else if (type == 'ready') {
               // ready message ignored for now
             }
           } catch (e) {
-            state = NowPlayingState(error: 'Parse error: $e', connected: true);
+            state = NowPlayingState(
+              error: 'Parse error: $e',
+              connected: true,
+              mode: ref.read(spotifyDirectProvider).mode,
+            );
           }
         },
         onError: (err) {
           state = NowPlayingState(
-              error: 'WebSocket error: $err',
-              connected: false,
-              provider: state.provider,
-              payload: state.payload);
+            error: 'WebSocket error: $err',
+            connected: false,
+            provider: state.provider,
+            payload: state.payload,
+            mode: ref.read(spotifyDirectProvider).mode,
+          );
           _scheduleRetry();
         },
         onDone: () {
           state = NowPlayingState(
-              error: 'Connection closed',
-              connected: false,
-              provider: state.provider,
-              payload: state.payload);
+            error: 'Connection closed',
+            connected: false,
+            provider: state.provider,
+            payload: state.payload,
+            mode: ref.read(spotifyDirectProvider).mode,
+          );
           _scheduleRetry();
         },
         cancelOnError: true,
@@ -159,7 +214,11 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     _channel?.sink.close();
     _channel = null;
     state = NowPlayingState(
-        provider: state.provider, payload: state.payload, connected: false);
+      provider: state.provider,
+      payload: state.payload,
+      connected: false,
+      mode: ref.read(spotifyDirectProvider).mode,
+    );
     if (scheduleRetry) {
       _scheduleRetry();
     }
@@ -198,7 +257,15 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
               'sonos_enabled': false,
             };
       }
-      final hasService = _servicesEnabled(settings);
+
+      final spotifyEnabled = settings['spotify_enabled'] == true;
+      final sonosEnabled = settings['sonos_enabled'] == true;
+      final hasService = spotifyEnabled || sonosEnabled;
+
+      // Determine if we should use direct polling
+      final directMode = ref.read(spotifyDirectProvider).mode;
+      _useDirectPolling =
+          spotifyEnabled && directMode == SpotifyPollingMode.direct;
       final env = ref.read(envConfigProvider);
       int? asInt(dynamic v) {
         if (v is int) return v;
@@ -240,17 +307,46 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
           })() ??
           env.sonosPollIntervalSec;
 
+      // Request token if Spotify enabled and we don't have a valid token
+      // Check if we have a token that's not expired (with 60s buffer)
+      final directState = ref.read(spotifyDirectProvider);
+      final hasValidToken = directState.accessToken != null &&
+          directState.tokenExpiresAt != null &&
+          directState.tokenExpiresAt! >
+              (DateTime.now().millisecondsSinceEpoch ~/ 1000) + 60;
+
+      // Debounce token requests - don't request more than once per 5 seconds
+      final now = DateTime.now();
+      final tokenRequestDebounced = _lastTokenRequestTime != null &&
+          now.difference(_lastTokenRequestTime!).inSeconds < 5;
+
+      // Only request token if we don't have a valid one and not debounced
+      final needToken =
+          spotifyEnabled && !hasValidToken && !tokenRequestDebounced;
+
+      // Disable backend services when in direct polling mode
+      final backendSpotifyEnabled =
+          spotifyEnabled && directMode == SpotifyPollingMode.fallback;
+      final backendSonosEnabled = sonosEnabled &&
+          (directMode == SpotifyPollingMode.fallback || !spotifyEnabled);
+
       final payload = jsonEncode({
         'type': 'config',
+        if (needToken) 'need_spotify_token': true,
         'enabled': {
-          'spotify': settings['spotify_enabled'] == true,
-          'sonos': settings['sonos_enabled'] == true,
+          'spotify': backendSpotifyEnabled,
+          'sonos': backendSonosEnabled,
         },
         'poll': {
           'spotify': spotifyPoll,
           'sonos': sonosPoll,
         },
       });
+
+      if (needToken) {
+        _lastTokenRequestTime = DateTime.now();
+        debugPrint('[SPOTIFY] Requesting access token from backend');
+      }
       // If we currently have no socket (e.g., after navigation or a tab opened), establish it first.
       if (!hasService) {
         // Nothing to stream; close any existing channel without scheduling retries.
@@ -293,6 +389,13 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     } catch (_) {
       // If we can't read settings, wait for sendConfig retry path to decide; do not force connect to respect "no services" requirement.
     }
+  }
+
+  void _requestTokenRefresh() {
+    if (_tokenRequested) return;
+    _tokenRequested = true;
+    debugPrint('[SPOTIFY] Requesting token refresh');
+    sendConfig();
   }
 }
 

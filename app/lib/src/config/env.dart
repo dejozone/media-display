@@ -14,6 +14,10 @@ class EnvConfig {
     required this.wsRetryMaxTotalSeconds,
     required this.spotifyPollIntervalSec,
     required this.maxAvatarsPerUser,
+    required this.spotifyDirectPollIntervalSec,
+    required this.spotifyDirectRetryIntervalSec,
+    required this.spotifyDirectRetryWindowSec,
+    required this.spotifyDirectCooldownSec,
     this.sonosPollIntervalSec,
   });
 
@@ -29,6 +33,10 @@ class EnvConfig {
   final int spotifyPollIntervalSec;
   final int? sonosPollIntervalSec;
   final int maxAvatarsPerUser;
+  final int spotifyDirectPollIntervalSec;
+  final int spotifyDirectRetryIntervalSec;
+  final int spotifyDirectRetryWindowSec;
+  final int spotifyDirectCooldownSec;
 }
 
 final envConfigProvider = Provider<EnvConfig>((ref) {
@@ -53,6 +61,14 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
       int.tryParse(dotenv.env['SONOS_POLL_INTERVAL_SEC'] ?? '');
   final maxAvatarsPerUser =
       int.tryParse(dotenv.env['MAX_AVATARS_PER_USER'] ?? '') ?? 5;
+  final spotifyDirectPollIntervalSec =
+      int.tryParse(dotenv.env['SPOTIFY_DIRECT_POLL_INTERVAL_SEC'] ?? '') ?? 3;
+  final spotifyDirectRetryIntervalSec =
+      int.tryParse(dotenv.env['SPOTIFY_DIRECT_RETRY_INTERVAL_SEC'] ?? '') ?? 3;
+  final spotifyDirectRetryWindowSec =
+      int.tryParse(dotenv.env['SPOTIFY_DIRECT_RETRY_WINDOW_SEC'] ?? '') ?? 10;
+  final spotifyDirectCooldownSec =
+      int.tryParse(dotenv.env['SPOTIFY_DIRECT_COOLDOWN_SEC'] ?? '') ?? 30;
   return EnvConfig(
     apiBaseUrl: api,
     eventsWsUrl: ws,
@@ -66,6 +82,10 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
     spotifyPollIntervalSec: spotifyPollIntervalSec,
     sonosPollIntervalSec: sonosPollIntervalSec,
     maxAvatarsPerUser: maxAvatarsPerUser,
+    spotifyDirectPollIntervalSec: spotifyDirectPollIntervalSec,
+    spotifyDirectRetryIntervalSec: spotifyDirectRetryIntervalSec,
+    spotifyDirectRetryWindowSec: spotifyDirectRetryWindowSec,
+    spotifyDirectCooldownSec: spotifyDirectCooldownSec,
   );
 });
 

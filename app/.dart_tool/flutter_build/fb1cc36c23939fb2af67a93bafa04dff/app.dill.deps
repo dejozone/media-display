@@ -1387,6 +1387,8 @@ file:///Users/hthai00/Projects/media-display/app/lib/src/services/auth_state.dar
 file:///Users/hthai00/Projects/media-display/app/lib/src/services/avatar_service.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/services/events_ws_service.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/services/settings_service.dart
+file:///Users/hthai00/Projects/media-display/app/lib/src/services/spotify_api_client.dart
+file:///Users/hthai00/Projects/media-display/app/lib/src/services/spotify_direct_service.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/services/token_storage.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/services/user_service.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/services/ws_retry_policy.dart

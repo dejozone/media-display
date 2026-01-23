@@ -9,6 +9,7 @@ import 'package:media_display/src/services/auth_state.dart';
 import 'package:media_display/src/services/events_ws_service.dart';
 import 'package:media_display/src/services/settings_service.dart';
 import 'package:media_display/src/services/user_service.dart';
+import 'package:media_display/src/services/spotify_direct_service.dart';
 import 'package:media_display/src/widgets/app_header.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -136,6 +137,13 @@ class _HomePageState extends ConsumerState<HomePage> {
     }
 
     await _updateSettings({'spotify_enabled': enable});
+
+    // Start or stop direct polling based on toggle
+    if (enable) {
+      // Direct polling will start automatically when token is received
+    } else {
+      ref.read(spotifyDirectProvider.notifier).stopPolling();
+    }
   }
 
   Future<void> _handleSonosToggle(bool enable) async {
@@ -145,6 +153,21 @@ class _HomePageState extends ConsumerState<HomePage> {
   @override
   Widget build(BuildContext context) {
     final now = ref.watch(eventsWsProvider);
+    final directState = ref.watch(spotifyDirectProvider);
+
+    // Merge states: use direct polling data when in direct mode
+    final effectivePayload = directState.mode == SpotifyPollingMode.direct
+        ? directState.payload
+        : now.payload;
+    final effectiveProvider = directState.mode == SpotifyPollingMode.direct
+        ? 'spotify'
+        : now.provider;
+    final effectiveError = directState.mode == SpotifyPollingMode.direct
+        ? directState.error
+        : now.error;
+    final effectiveConnected = now.connected;
+    final effectiveMode = directState.mode;
+
     final scaffold = Scaffold(
       body: Container(
         decoration: const BoxDecoration(
@@ -200,7 +223,11 @@ class _HomePageState extends ConsumerState<HomePage> {
                   const SizedBox(height: 14),
                   _glassCard(
                     child: _NowPlayingSection(
-                      now: now,
+                      provider: effectiveProvider,
+                      payload: effectivePayload,
+                      error: effectiveError,
+                      connected: effectiveConnected,
+                      mode: effectiveMode,
                       settings: settings,
                     ),
                   ),
@@ -288,8 +315,19 @@ class _SettingsToggles extends StatelessWidget {
 }
 
 class _NowPlayingSection extends StatelessWidget {
-  const _NowPlayingSection({required this.now, required this.settings});
-  final NowPlayingState now;
+  const _NowPlayingSection({
+    required this.provider,
+    required this.payload,
+    required this.error,
+    required this.connected,
+    required this.mode,
+    required this.settings,
+  });
+  final String? provider;
+  final Map<String, dynamic>? payload;
+  final String? error;
+  final bool connected;
+  final SpotifyPollingMode mode;
   final Map<String, dynamic>? settings;
 
   @override
@@ -301,15 +339,14 @@ class _NowPlayingSection extends StatelessWidget {
           style: TextStyle(color: Color(0xFF9FB1D0)));
     }
 
-    final payload = _unwrapPayload(now.payload);
-    final provider = now.provider ?? 'spotify';
-    final artwork = _artworkUrl(payload, provider);
-    final title = _trackTitle(payload, provider);
-    final artist = _artistText(payload, provider);
-    final album = _albumText(payload, provider);
-    final deviceInfo = _deviceInfo(payload, provider);
+    final effectiveProvider = provider ?? 'spotify';
+    final artwork = _artworkUrl(payload, effectiveProvider);
+    final title = _trackTitle(payload, effectiveProvider);
+    final artist = _artistText(payload, effectiveProvider);
+    final album = _albumText(payload, effectiveProvider);
+    final deviceInfo = _deviceInfo(payload, effectiveProvider);
     final isPlaying = _isPlaying(payload);
-    final isConnected = now.connected && now.error == null;
+    final isConnected = connected && error == null;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -353,14 +390,15 @@ class _NowPlayingSection extends StatelessWidget {
             _EqualizerIndicator(
               isConnected: isConnected,
               isPlaying: isPlaying,
+              mode: mode,
             ),
           ],
         ),
         const SizedBox(height: 14),
-        if (!now.connected && now.error != null)
+        if (!connected && error != null)
           const _AnimatedSkeletonNowPlaying()
-        else if (now.error != null)
-          Text(now.error!, style: const TextStyle(color: Color(0xFFFF8C8C)))
+        else if (error != null)
+          Text(error!, style: const TextStyle(color: Color(0xFFFF8C8C)))
         else if (payload == null)
           _skeletonNowPlaying()
         else ...[
@@ -397,7 +435,7 @@ class _NowPlayingSection extends StatelessWidget {
                 bottom: 0,
                 right: 0,
                 child: Text(
-                  provider.toUpperCase(),
+                  effectiveProvider.toUpperCase(),
                   style: TextStyle(
                     fontSize: 12,
                     color: const Color(0xFF9FB1D0).withValues(alpha: 0.3),
@@ -481,10 +519,14 @@ class _AnimatedSkeletonNowPlayingState
 }
 
 class _EqualizerIndicator extends StatefulWidget {
-  const _EqualizerIndicator(
-      {required this.isConnected, required this.isPlaying});
+  const _EqualizerIndicator({
+    required this.isConnected,
+    required this.isPlaying,
+    required this.mode,
+  });
   final bool isConnected;
   final bool isPlaying;
+  final SpotifyPollingMode mode;
 
   @override
   State<_EqualizerIndicator> createState() => _EqualizerIndicatorState();
@@ -549,8 +591,20 @@ class _EqualizerIndicatorState extends State<_EqualizerIndicator>
 
   @override
   Widget build(BuildContext context) {
-    final color =
-        widget.isConnected ? const Color(0xFF22C55E) : const Color(0xFFEF4444);
+    // Color based on polling mode: Direct=green, Fallback=yellow, Offline/idle=red
+    final Color color;
+    switch (widget.mode) {
+      case SpotifyPollingMode.direct:
+        color = const Color(0xFF22C55E); // Green
+        break;
+      case SpotifyPollingMode.fallback:
+        color = const Color(0xFFFBBF24); // Yellow
+        break;
+      case SpotifyPollingMode.offline:
+      case SpotifyPollingMode.idle:
+        color = const Color(0xFFEF4444); // Red
+        break;
+    }
 
     return SizedBox(
       width: 32,
@@ -708,14 +762,6 @@ class _DeviceInfo {
   const _DeviceInfo({required this.primary, required this.rest});
   final String primary;
   final List<String> rest;
-}
-
-Map<String, dynamic>? _unwrapPayload(dynamic payload) {
-  if (payload is Map) {
-    // New normalized structure is already at top level
-    return payload as Map<String, dynamic>;
-  }
-  return null;
 }
 
 _DeviceInfo _deviceInfo(Map<String, dynamic>? payload, String provider) {
