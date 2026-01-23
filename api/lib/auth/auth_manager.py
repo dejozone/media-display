@@ -516,6 +516,43 @@ class AuthManager:
         logger.info(f"Refreshed Spotify token for user {user_id}; expires_at={refreshed['expires_at']}")
         return refreshed.get('access_token')
 
+    def get_spotify_access_token_with_expiry(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """Get Spotify access token and its expiry timestamp (epoch seconds)."""
+        tokens = self._get_db_spotify_tokens(user_id)
+        if not tokens:
+            logger.warning(f"No Spotify tokens cached for user {user_id}")
+            return None
+        spotify_id = tokens.get('spotify_id')
+        if not spotify_id:
+            logger.warning(f"Spotify tokens missing spotify_id for user {user_id}")
+            return None
+        now = int(time.time())
+        expires_at = tokens.get('token_expires_at', 0)
+        if expires_at > now + 30:
+            logger.debug(f"Using cached Spotify access token for user {user_id}")
+            return {
+                'access_token': tokens.get('access_token'),
+                'expires_at': expires_at,
+            }
+        refresh_token = tokens.get('refresh_token')
+        if not refresh_token:
+            logger.warning(f"No refresh token available for user {user_id}")
+            return None
+        logger.info(f"Refreshing Spotify token for user {user_id}")
+        refreshed = self.spotify_client.refresh_access_token(refresh_token)
+        if not refreshed or 'access_token' not in refreshed:
+            logger.warning(f"Refresh failed for user {user_id}")
+            return None
+        refreshed['expires_at'] = int(time.time()) + refreshed.get('expires_in', 3600)
+        if 'refresh_token' not in refreshed and refresh_token:
+            refreshed['refresh_token'] = refresh_token
+        self._save_spotify_tokens(user_id, spotify_id, refreshed)
+        logger.info(f"Refreshed Spotify token for user {user_id}; expires_at={refreshed['expires_at']}")
+        return {
+            'access_token': refreshed.get('access_token'),
+            'expires_at': refreshed['expires_at'],
+        }
+
     def get_spotify_currently_playing(self, user_id: str) -> Optional[Dict[str, Any]]:
         access_token = self._ensure_valid_spotify_access_token(user_id)
         if not access_token:

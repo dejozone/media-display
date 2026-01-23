@@ -17,7 +17,9 @@
     "requestTimeoutSec": 10,
     "retryIntervalSec": 2,
     "retryWindowSec": 20,
-    "cooldownSec": 30
+    "cooldownSec": 30,
+    "tokenRefreshLeadTimeSec": 300,
+    "tokenRefreshJitterSec": 30
   },
   "sonos": {
     "deviceDiscRetryIntervalSec": 2,

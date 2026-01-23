@@ -4,7 +4,7 @@ import time
 from typing import Any, Awaitable, Callable, Dict, Optional, Protocol
 
 import httpx
-from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
+from starlette.websockets import WebSocketDisconnect, WebSocketState
 
 from lib.payload_normalizer import normalize_payload
 

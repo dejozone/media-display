@@ -3,12 +3,14 @@ import contextlib
 import json
 import logging
 import os
-from typing import Any, Awaitable, Callable, Dict, Optional, Set
+import random
+import time
+from typing import Any, Awaitable, Callable, Dict, Optional, Set, Tuple
 
 import httpx
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, WebSocket, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.websockets import WebSocketState
 
@@ -32,6 +34,8 @@ API_BASE_URL = API_CFG.get("baseUrl", "http://localhost:5001")
 API_SSL_VERIFY = API_CFG.get("sslVerify", True)
 SONOS_CFG = CONFIG.get("sonos", {})
 SERVER_CFG = CONFIG.get("server", {})
+TOKEN_REFRESH_LEAD = int(SPOTIFY_CFG.get("tokenRefreshLeadTimeSec", 300) or 300)
+TOKEN_REFRESH_JITTER = int(SPOTIFY_CFG.get("tokenRefreshJitterSec", 30) or 30)
 
 SONOS_MANAGER = SonosManager(SONOS_CFG)
 SPOTIFY_MANAGER = SpotifyManager(SPOTIFY_CFG, API_BASE_URL)
@@ -42,6 +46,13 @@ logging.basicConfig(level=logging.INFO)
 HTTP_CLIENT: Optional[httpx.AsyncClient] = None
 STOP_EVENT: Optional[asyncio.Event] = None
 ACTIVE_TASKS: Set[asyncio.Task] = set()
+TOKEN_CACHE: Dict[Tuple[str, str], Dict[str, Any]] = {}
+TOKEN_TASKS: Dict[Tuple[str, str], asyncio.Task] = {}
+
+
+def _discard_task(task: Optional[asyncio.Task]) -> None:
+    if task is not None:
+        ACTIVE_TASKS.discard(task)
 
 
 class MultiSessionChannel:
@@ -110,6 +121,8 @@ class UserContext:
         }
         self.config_event = asyncio.Event()
         self.lock = asyncio.Lock()
+        self.token_mode = False
+        self.token_lock = asyncio.Lock()
 
     def enabled_any(self) -> bool:
         en = self.config.get("enabled", {})
@@ -139,6 +152,10 @@ async def lifespan(app: FastAPI):
             ctx.stop_event.set()
             await ctx.channel.close(code=1012, reason="Server shutting down")
         USER_CONTEXTS.clear()
+        for task in list(TOKEN_TASKS.values()):
+            task.cancel()
+        TOKEN_TASKS.clear()
+        TOKEN_CACHE.clear()
         for task in list(ACTIVE_TASKS):
             task.cancel()
         ACTIVE_TASKS.clear()
@@ -184,6 +201,136 @@ async def validate_token(token: str) -> Optional[Dict[str, Any]]:
 async def fetch_settings(token: str) -> Dict[str, Any]:
     """Deprecated: Settings are expected from the client via websocket config."""
     return {}
+
+
+async def _fetch_spotify_access_token(
+    *, user_id: str, user_token: str, http_client: httpx.AsyncClient
+) -> Optional[Dict[str, Any]]:
+    headers = {"Authorization": f"Bearer {user_token}"}
+    try:
+        resp = await http_client.get(
+            f"{API_BASE_URL}/api/users/{user_id}/services/spotify/access-token",
+            headers=headers,
+        )
+        if resp.status_code != 200:
+            logger.warning(
+                "spotify token fetch failed status=%s user=%s", resp.status_code, user_id
+            )
+            return None
+        data = resp.json() or {}
+        access_token = data.get("access_token")
+        expires_at = data.get("expires_at")
+        if not access_token or expires_at is None:
+            logger.warning("spotify token fetch missing fields user=%s", user_id)
+            return None
+        # expires_at expected as epoch seconds; best-effort parse
+        try:
+            expires_at_val = float(expires_at)
+        except Exception:
+            logger.warning("spotify token fetch invalid expires_at user=%s", user_id)
+            return None
+        return {"access_token": access_token, "expires_at": expires_at_val}
+    except httpx.HTTPError as exc:
+        logger.warning("spotify token fetch http error user=%s err=%s", user_id, exc)
+        return None
+
+
+async def _ensure_access_token(
+    *,
+    ctx: UserContext,
+    service: str,
+    subscribe_channel: Optional[MultiSessionChannel] = None,
+) -> Optional[Dict[str, Any]]:
+    assert HTTP_CLIENT is not None
+    cache_key = (ctx.user_id, service)
+    state = TOKEN_CACHE.get(cache_key)
+    now = time.time()
+
+    if state:
+        access_token = state.get("access_token")
+        expires_at = state.get("expires_at", 0)
+        if access_token and expires_at - TOKEN_REFRESH_LEAD > now:
+            return state
+
+    async with ctx.token_lock:
+        state = TOKEN_CACHE.get(cache_key)
+        now = time.time()
+        if state:
+            access_token = state.get("access_token")
+            expires_at = state.get("expires_at", 0)
+            if access_token and expires_at - TOKEN_REFRESH_LEAD > now:
+                return state
+
+        if service != "spotify":
+            return None
+
+        fetched = await _fetch_spotify_access_token(
+            user_id=ctx.user_id,
+            user_token=ctx.token,
+            http_client=HTTP_CLIENT,
+        )
+        if not fetched:
+            return None
+
+        TOKEN_CACHE[cache_key] = fetched
+
+        if subscribe_channel:
+            _schedule_token_refresh(ctx, service, subscribe_channel)
+        return fetched
+
+
+def _schedule_token_refresh(
+    ctx: UserContext,
+    service: str,
+    channel: MultiSessionChannel,
+) -> None:
+    cache_key = (ctx.user_id, service)
+
+    existing = TOKEN_TASKS.get(cache_key)
+    if existing and not existing.done():
+        return
+
+    async def _runner() -> None:
+        while channel.has_sessions() and not ctx.stop_event.is_set():
+            state = TOKEN_CACHE.get(cache_key)
+            if not state:
+                break
+            expires_at = state.get("expires_at", 0)
+            now = time.time()
+            refresh_in = max(0.0, expires_at - TOKEN_REFRESH_LEAD - now)
+            if TOKEN_REFRESH_JITTER:
+                refresh_in = max(0.0, refresh_in - random.uniform(0, TOKEN_REFRESH_JITTER))
+            try:
+                await asyncio.wait_for(asyncio.sleep(refresh_in), timeout=refresh_in + 1)
+            except asyncio.CancelledError:
+                break
+
+            new_state = await _ensure_access_token(
+                ctx=ctx,
+                service=service,
+                subscribe_channel=None,
+            )
+            if not new_state:
+                logger.warning("spotify token refresh failed user=%s", ctx.user_id)
+                continue
+            try:
+                await channel.send_json(
+                    {
+                        "type": "spotify_token",
+                        "access_token": new_state.get("access_token"),
+                        "expires_at": new_state.get("expires_at"),
+                    }
+                )
+            except Exception:
+                logger.warning("spotify token broadcast failed user=%s", ctx.user_id)
+                continue
+
+        _discard_task(asyncio.current_task())
+        TOKEN_TASKS.pop(cache_key, None)
+
+    task = asyncio.create_task(_runner())
+    TOKEN_TASKS[cache_key] = task
+    ACTIVE_TASKS.add(task)
 
 
 async def _spotify_fallback_loop(
@@ -290,6 +437,8 @@ async def _user_driver(ctx: UserContext) -> None:
 
     defer_sonos: bool = False
     while not ctx.stop_event.is_set():
+        if ctx.token_mode:
+            break
         config_wait = asyncio.create_task(ctx.config_event.wait())
         stop_wait = asyncio.create_task(ctx.stop_event.wait())
         done, pending = await asyncio.wait(
@@ -468,12 +617,16 @@ async def media_events(ws: WebSocket) -> None:
 
     await ctx.channel.add(session_id, ws)
 
-    if ctx.driver_task is None or ctx.driver_task.done():
-        ctx.stop_event.clear()
-        ctx.driver_task = asyncio.create_task(_user_driver(ctx))
-        ACTIVE_TASKS.add(ctx.driver_task)
-
     async def _apply_config(msg: Dict[str, Any]) -> None:
+        # Switching to config mode exits token-only mode.
+        if ctx.token_mode:
+            ctx.token_mode = False
+            cache_key = (ctx.user_id, "spotify")
+            ttask = TOKEN_TASKS.pop(cache_key, None)
+            if ttask:
+                ttask.cancel()
+            TOKEN_CACHE.pop(cache_key, None)
+
         enabled_cfg = msg.get("enabled") or {}
         poll_cfg = msg.get("poll") or {}
         enabled = {
@@ -514,7 +667,7 @@ async def media_events(ws: WebSocket) -> None:
             ctx.service_stop_event = asyncio.Event()
         ctx.config_event.set()
         logger.info(
-            "config updated user=%s enabled_spotify=%s enabled_sonos=%s poll_spotify=%s poll_sonos=%s sessions=%d (multi-session allowed)",
+            "config updated user=%s enable_spotify=%s enable_sonos=%s poll_spotify=%s poll_sonos=%s sessions=%d (multi-session allowed)",
             user_id,
             enabled["spotify"],
             enabled["sonos"],
@@ -523,9 +676,40 @@ async def media_events(ws: WebSocket) -> None:
             len(ctx.channel.sessions),
         )
 
+        if not ctx.token_mode and (ctx.driver_task is None or ctx.driver_task.done()):
+            ctx.stop_event.clear()
+            ctx.driver_task = asyncio.create_task(_user_driver(ctx))
+            ACTIVE_TASKS.add(ctx.driver_task)
+
     try:
         while True:
             msg = await ws.receive_json()
+            if isinstance(msg, dict) and msg.get("is_spotify_token_needed") is True:
+                ctx.token_mode = True
+                ctx.config_event.set()
+                if ctx.driver_task and not ctx.driver_task.done():
+                    ctx.stop_event.set()
+                    ctx.driver_task.cancel()
+                    with contextlib.suppress(Exception):
+                        await ctx.driver_task
+                    ACTIVE_TASKS.discard(ctx.driver_task)
+                    ctx.driver_task = None
+
+                token_state = await _ensure_access_token(
+                    ctx=ctx,
+                    service="spotify",
+                    subscribe_channel=ctx.channel,
+                )
+                if token_state:
+                    await ctx.channel.send_json(
+                        {
+                            "type": "spotify_token",
+                            "access_token": token_state.get("access_token"),
+                            "expires_at": token_state.get("expires_at"),
+                        }
+                    )
+                continue
+
             if isinstance(msg, dict) and msg.get("type") == "config":
                 await _apply_config(msg)
     except asyncio.CancelledError:
@@ -541,8 +725,13 @@ async def media_events(ws: WebSocket) -> None:
                 ctx.driver_task.cancel()
                 with contextlib.suppress(Exception):
                     await ctx.driver_task
-                ACTIVE_TASKS.discard(ctx.driver_task)
+                _discard_task(ctx.driver_task)
             USER_CONTEXTS.pop(user_id, None)
+            cache_key = (ctx.user_id, "spotify")
+            token_task = TOKEN_TASKS.pop(cache_key, None)
+            if token_task:
+                token_task.cancel()
+            TOKEN_CACHE.pop(cache_key, None)
         await _safe_close_ws(ws, code=1012, reason="Server shutting down")
 
 

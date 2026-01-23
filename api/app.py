@@ -369,6 +369,28 @@ def update_user(user_id: str):
     }), 200
 
 
+@app.route('/api/users/<user_id>/services/<service>/access-token', methods=['GET'])
+@require_auth
+def get_service_access_token(user_id: str, service: str):
+    # Enforce that the path user matches the JWT subject
+    if user_id != g.user_id:
+        return jsonify({'error': 'Forbidden'}), 403
+    
+    service = service.lower()
+    if service != 'spotify':
+        return jsonify({'error': 'Unsupported service'}), 400
+    
+    server_logger.debug(f"/api/users/{user_id}/services/{service}/access-token requested by user_id={g.user_id}")
+    token_data = auth_manager.get_spotify_access_token_with_expiry(g.user_id)
+    if not token_data:
+        server_logger.warning("Access token fetch failed: no tokens or refresh failure")
+        return jsonify({'error': 'spotify_not_connected_or_token_invalid', 'code': 'ERR_SPOTIFY_4001', 'message': 'Spotify token is missing or expired. Please reconnect Spotify.'}), 400
+    return jsonify({
+        'access_token': token_data.get('access_token'),
+        'expires_at': token_data.get('expires_at'),
+    }), 200
+
+
 @app.route('/api/users/<user_id>/services/<service>/now-playing', methods=['GET'])
 @require_auth
 def spotify_now_playing(user_id: str, service: str):
