@@ -223,7 +223,6 @@ class _UserSummary extends StatelessWidget {
   Widget build(BuildContext context) {
     final displayName = _displayName(user);
     final email = user?['email']?.toString() ?? '';
-    final provider = user?['provider']?.toString() ?? '';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -231,23 +230,10 @@ class _UserSummary extends StatelessWidget {
             style: TextStyle(color: Color(0xFF9FB1D0), letterSpacing: 0.4)),
         const SizedBox(height: 6),
         Text(displayName,
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
         if (email.isNotEmpty) ...[
           const SizedBox(height: 4),
           Text(email, style: const TextStyle(color: Color(0xFFC2CADC))),
-        ],
-        if (provider.isNotEmpty) ...[
-          const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: const Color(0xFF1A2333),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-            ),
-            child: Text('Signed in with $provider',
-                style: const TextStyle(color: Color(0xFF9FB1D0), fontSize: 13)),
-          ),
         ],
       ],
     );
@@ -277,7 +263,7 @@ class _SettingsToggles extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text('Services',
-            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18)),
         const SizedBox(height: 12),
         _toggleRow(
           label: 'Spotify',
@@ -322,7 +308,6 @@ class _NowPlayingSection extends StatelessWidget {
     final artist = _artistText(payload, provider);
     final album = _albumText(payload, provider);
     final deviceInfo = _deviceInfo(payload, provider);
-    final status = _statusLabel(payload, provider);
     final isPlaying = _isPlaying(payload);
     final isConnected = now.connected && now.error == null;
 
@@ -332,35 +317,35 @@ class _NowPlayingSection extends StatelessWidget {
         Row(
           children: [
             Expanded(
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                crossAxisAlignment: WrapCrossAlignment.center,
+              child: Row(
                 children: [
-                  Text('Now Playing',
+                  Flexible(
+                    child: Text(
+                      deviceInfo.primary.isNotEmpty
+                          ? '${isPlaying ? 'Now Playing' : 'Paused'} on ${deviceInfo.primary}${deviceInfo.rest.isNotEmpty ? ' +${deviceInfo.rest.length} more' : ''}'
+                          : isPlaying
+                              ? 'Now Playing'
+                              : 'Paused',
                       style: Theme.of(context)
                           .textTheme
                           .titleMedium
-                          ?.copyWith(fontWeight: FontWeight.w700)),
-                  _pill(provider.toUpperCase()),
-                  _pill(status),
-                  if (deviceInfo.primary.isNotEmpty)
-                    () {
-                      final label = deviceInfo.rest.isEmpty
-                          ? deviceInfo.primary
-                          : '${deviceInfo.primary} +${deviceInfo.rest.length} more';
-                      if (deviceInfo.rest.isEmpty) {
-                        return _pill(label);
-                      }
-                      final fullList =
-                          [deviceInfo.primary, ...deviceInfo.rest].join('\n');
-                      return Tooltip(
-                        message: fullList,
-                        preferBelow: false,
-                        child: _pill(label),
-                      );
-                    }(),
-                  _pill(isPlaying ? 'Live' : 'Paused'),
+                          ?.copyWith(fontSize: 18, fontWeight: FontWeight.w700),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (deviceInfo.rest.isNotEmpty) ...[
+                    const SizedBox(width: 4),
+                    Tooltip(
+                      message:
+                          [deviceInfo.primary, ...deviceInfo.rest].join('\n'),
+                      preferBelow: false,
+                      child: const Icon(
+                        Icons.info_outline,
+                        size: 16,
+                        color: Color(0xFF9FB1D0),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -379,29 +364,45 @@ class _NowPlayingSection extends StatelessWidget {
         else if (payload == null)
           _skeletonNowPlaying()
         else ...[
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          Stack(
             children: [
-              _Artwork(url: artwork),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(title.isNotEmpty ? title : 'Unknown Track',
-                        style: const TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.w700)),
-                    const SizedBox(height: 6),
-                    if (artist.isNotEmpty)
-                      Text(artist,
-                          style: const TextStyle(color: Color(0xFFC2CADC))),
-                    if (album.isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      Text(album,
-                          style: const TextStyle(
-                              color: Color(0xFF9FB1D0), fontSize: 13)),
-                    ],
-                  ],
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _Artwork(url: artwork),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(title.isNotEmpty ? title : 'Unknown Track',
+                            style: const TextStyle(
+                                fontSize: 16, fontWeight: FontWeight.w700)),
+                        const SizedBox(height: 6),
+                        if (artist.isNotEmpty)
+                          Text(artist,
+                              style: const TextStyle(color: Color(0xFFC2CADC))),
+                        if (album.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(album,
+                              style: const TextStyle(
+                                  color: Color(0xFF9FB1D0), fontSize: 13)),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              Positioned(
+                bottom: 0,
+                right: 0,
+                child: Text(
+                  provider.toUpperCase(),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: const Color(0xFF9FB1D0).withValues(alpha: 0.3),
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             ],
@@ -617,19 +618,6 @@ Widget _glassCard({required Widget child}) {
   );
 }
 
-Widget _pill(String text) {
-  return Container(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-    decoration: BoxDecoration(
-      color: const Color(0xFF1A2333),
-      borderRadius: BorderRadius.circular(10),
-      border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-    ),
-    child: Text(text,
-        style: const TextStyle(fontSize: 12, color: Color(0xFF9FB1D0))),
-  );
-}
-
 Widget _skeletonLine({double width = 140}) {
   return Container(
     width: width,
@@ -714,19 +702,6 @@ bool _isPlaying(Map<String, dynamic>? payload) {
     if (v is bool) return v;
   }
   return false;
-}
-
-String _statusLabel(Map<String, dynamic>? payload, String provider) {
-  if (payload == null) return 'Waiting';
-  final playback = payload['playback'];
-  if (playback is Map) {
-    final status = playback['status'];
-    if (status is String && status.isNotEmpty) {
-      // Capitalize first letter
-      return status[0].toUpperCase() + status.substring(1);
-    }
-  }
-  return 'Idle';
 }
 
 class _DeviceInfo {

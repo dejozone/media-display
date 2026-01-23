@@ -371,7 +371,7 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
                             const SizedBox(height: 12),
                             _field('Username', _usernameController),
                             const SizedBox(height: 12),
-                            _field('Display name', _displayNameController),
+                            _field('Display Name', _displayNameController),
                             const SizedBox(height: 14),
                             Row(
                               children: [

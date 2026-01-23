@@ -54,33 +54,49 @@ class AppHeader extends ConsumerWidget {
         const Spacer(),
         const SizedBox(width: 8),
         if (onHome != null)
-          IconButton(
-            tooltip: 'Home',
-            onPressed: onHome,
-            icon: const Icon(Icons.home_outlined),
-          ),
-        if (onLogout != null)
-          IconButton(
-            tooltip: 'Logout',
-            onPressed: onLogout,
-            icon: const Icon(Icons.logout),
-          ),
-        InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: onAccount,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          Container(
             decoration: BoxDecoration(
               color: const Color(0xFF1A2333),
-              borderRadius: BorderRadius.circular(12),
+              shape: BoxShape.circle,
               border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
             ),
-            child: Row(
-              children: [
-                Text(displayName,
-                    style: const TextStyle(fontWeight: FontWeight.w600)),
-                const SizedBox(width: 10),
-                CircleAvatar(
+            child: IconButton(
+              tooltip: 'Home',
+              onPressed: onHome,
+              icon: const Icon(Icons.home_outlined),
+            ),
+          ),
+        if (onLogout != null) ...[
+          const SizedBox(width: 8),
+          Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFF1A2333),
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+            ),
+            child: IconButton(
+              tooltip: 'Logout',
+              onPressed: onLogout,
+              icon: const Icon(Icons.logout),
+            ),
+          ),
+        ],
+        const SizedBox(width: 8),
+        Tooltip(
+          message: displayName,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(24),
+            onTap: onAccount,
+            child: Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: const Color(0xFF1A2333),
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+              ),
+              child: Center(
+                child: CircleAvatar(
                   radius: 16,
                   backgroundColor: const Color(0xFF1F2A44),
                   backgroundImage:
@@ -92,7 +108,7 @@ class AppHeader extends ConsumerWidget {
                               fontWeight: FontWeight.w700))
                       : null,
                 ),
-              ],
+              ),
             ),
           ),
         ),
