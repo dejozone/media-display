@@ -33,6 +33,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   Timer? _configRetryTimer;
   late final WsRetryPolicy _retryPolicy;
   bool _connecting = false;
+  bool _connectionConfirmed = false;
   Map<String, dynamic>? _lastSettings;
   bool _useDirectPolling = false;
   bool _tokenRequested = false;
@@ -88,13 +89,21 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       final env = ref.read(envConfigProvider);
       _retryTimer?.cancel();
       final uri = Uri.parse('${env.eventsWsUrl}?token=${auth.token}');
+      
+      WebSocketChannel? channel;
       try {
         await withInsecureWs(() async {
-          _channel = WebSocketChannel.connect(uri);
+          channel = WebSocketChannel.connect(uri);
         }, allowInsecure: !env.eventsWsSslVerify);
+        
+        // Wait for the WebSocket connection to be established
+        // This throws if connection fails
+        await channel!.ready;
+        _channel = channel;
       } catch (e) {
+        debugPrint('[WS] Unable to connect to server, will retry...');
         state = NowPlayingState(
-          error: 'WebSocket connect failed: $e',
+          error: 'Unable to connect to server',
           connected: false,
           provider: state.provider,
           payload: state.payload,
@@ -105,14 +114,8 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
         return;
       }
 
-      _retryPolicy.reset();
-      state = NowPlayingState(
-        provider: state.provider,
-        payload: state.payload,
-        connected: true,
-        error: null,
-        mode: ref.read(spotifyDirectProvider).mode,
-      );
+      // Don't reset retry policy or mark connected yet - wait for 'ready' message
+      _connectionConfirmed = false;
 
       // Send current service enablement to the server.
       await sendConfig();
@@ -147,8 +150,6 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
                 } else {
                   expiresAtInt = int.tryParse(expiresAt.toString()) ?? 0;
                 }
-                debugPrint(
-                    '[SPOTIFY] Token received (expires at $expiresAtInt)');
                 ref.read(spotifyDirectProvider.notifier).updateToken(
                       accessToken,
                       expiresAtInt,
@@ -156,7 +157,18 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
                 _tokenRequested = false;
               }
             } else if (type == 'ready') {
-              // ready message ignored for now
+              // Connection is truly established - reset retry policy now
+              if (!_connectionConfirmed) {
+                _connectionConfirmed = true;
+                _retryPolicy.reset();
+                state = NowPlayingState(
+                  provider: state.provider,
+                  payload: state.payload,
+                  connected: true,
+                  error: null,
+                  mode: ref.read(spotifyDirectProvider).mode,
+                );
+              }
             }
           } catch (e) {
             state = NowPlayingState(
@@ -198,6 +210,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     _retryTimer?.cancel();
     final delay = _retryPolicy.nextDelay();
     if (delay == null) {
+      debugPrint('[WS] Connection failed after maximum retry time');
       return; // Exhausted retry window
     }
     _retryTimer = Timer(delay, () async {
@@ -213,6 +226,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     _retryTimer?.cancel();
     _channel?.sink.close();
     _channel = null;
+    _connectionConfirmed = false;
     state = NowPlayingState(
       provider: state.provider,
       payload: state.payload,
@@ -345,7 +359,6 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
 
       if (needToken) {
         _lastTokenRequestTime = DateTime.now();
-        debugPrint('[SPOTIFY] Requesting access token from backend');
       }
       // If we currently have no socket (e.g., after navigation or a tab opened), establish it first.
       if (!hasService) {
@@ -357,6 +370,10 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       if (_channel == null || state.connected == false) {
         final auth = ref.read(authStateProvider);
         if (!auth.isAuthenticated || _connecting) return;
+        // Don't bypass retry policy - if we're in a retry cycle, let it handle reconnection
+        if (_retryPolicy.isRetrying) {
+          return;
+        }
         await _connect(auth);
         return; // _connect will call sendConfig again once connected
       }

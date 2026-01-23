@@ -20,24 +20,45 @@ class WsRetryPolicy {
 
   DateTime? _sessionStart;
   DateTime? _cycleStart;
+  bool _inCooldown = false;
+  int _retryCount = 0;
+
+  /// Whether we're currently in the retry/cooldown cycle
+  bool get isRetrying => _sessionStart != null;
+
+  /// Whether we're currently in cooldown period
+  bool get inCooldown => _inCooldown;
+
+  /// Number of retries attempted in current session
+  int get retryCount => _retryCount;
 
   /// Returns the delay until the next retry, or null if retries are exhausted.
   Duration? nextDelay() {
     final now = DateTime.now();
     _sessionStart ??= now;
-    if (now.difference(_sessionStart!) >= maxTotal) {
+
+    final sessionElapsed = now.difference(_sessionStart!);
+    if (sessionElapsed >= maxTotal) {
       return null;
     }
 
     _cycleStart ??= now;
     final cycleElapsed = now.difference(_cycleStart!);
 
-    if (cycleElapsed >= activeWindow) {
+    if (cycleElapsed >= activeWindow && !_inCooldown) {
       // Enter cooldown, then restart a fresh cycle after the cooldown elapses.
-      _cycleStart = now.add(cooldown);
+      _inCooldown = true;
       return cooldown;
     }
 
+    if (_inCooldown) {
+      // Cooldown just ended, start fresh cycle
+      _inCooldown = false;
+      _cycleStart = now;
+      _retryCount = 0;
+    }
+
+    _retryCount++;
     return interval;
   }
 
@@ -45,6 +66,8 @@ class WsRetryPolicy {
   void reset() {
     _sessionStart = null;
     _cycleStart = null;
+    _inCooldown = false;
+    _retryCount = 0;
   }
 
   @visibleForTesting

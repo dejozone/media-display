@@ -48,11 +48,11 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
   final wsSslVerify =
       (dotenv.env['EVENTS_WS_SSL_VERIFY'] ?? 'true').toLowerCase() == 'true';
   final wsRetryIntervalMs =
-      int.tryParse(dotenv.env['WS_RETRY_INTERVAL_MS'] ?? '') ?? 2000;
+      int.tryParse(dotenv.env['WS_RETRY_INTERVAL_MS'] ?? '') ?? 3000;
   final wsRetryActiveSeconds =
       int.tryParse(dotenv.env['WS_RETRY_ACTIVE_SECONDS'] ?? '') ?? 60;
   final wsRetryCooldownSeconds =
-      int.tryParse(dotenv.env['WS_RETRY_COOLDOWN_SECONDS'] ?? '') ?? 180;
+      int.tryParse(dotenv.env['WS_RETRY_COOLDOWN_SECONDS'] ?? '') ?? 60;
   final wsRetryMaxTotalSeconds =
       int.tryParse(dotenv.env['WS_RETRY_MAX_TOTAL_SECONDS'] ?? '') ?? 1800;
   final spotifyPollIntervalSec =
