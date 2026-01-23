@@ -11,7 +11,7 @@ import 'package:media_display/src/services/settings_service.dart';
 import 'package:media_display/src/services/user_service.dart';
 import 'package:media_display/src/services/ws_retry_policy.dart';
 import 'package:media_display/src/services/ws_ssl_override.dart'
-    if (dart.library.io) 'package:media_display/src/services/ws_ssl_override_io.dart';
+if (dart.library.io) 'package:media_display/src/services/ws_ssl_override_io.dart';
 import 'package:media_display/src/services/spotify_direct_service.dart';
 
 class NowPlayingState {
@@ -40,7 +40,8 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   bool _useDirectPolling = false;
   bool _tokenRequested = false;
   DateTime? _lastTokenRequestTime;
-  bool _wsTokenReceived = false; // Track if WS has sent a token (prefer WS over REST)
+  bool _wsTokenReceived =
+      false; // Track if WS has sent a token (prefer WS over REST)
 
   @override
   NowPlayingState build() {
@@ -164,7 +165,8 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
                       expiresAtInt,
                     );
                 _tokenRequested = false;
-                _wsTokenReceived = true; // WS is working, prefer it for future tokens
+                _wsTokenReceived =
+                    true; // WS is working, prefer it for future tokens
                 // Note: updateToken() already starts direct polling internally
               }
             } else if (type == 'ready') {
