@@ -229,6 +229,8 @@ class _HomePageState extends ConsumerState<HomePage> {
                       connected: effectiveConnected,
                       mode: effectiveMode,
                       settings: settings,
+                      wsRetrying: now.wsRetrying,
+                      wsInCooldown: now.wsInCooldown,
                     ),
                   ),
                 ],
@@ -322,6 +324,8 @@ class _NowPlayingSection extends StatelessWidget {
     required this.connected,
     required this.mode,
     required this.settings,
+    required this.wsRetrying,
+    required this.wsInCooldown,
   });
   final String? provider;
   final Map<String, dynamic>? payload;
@@ -329,6 +333,8 @@ class _NowPlayingSection extends StatelessWidget {
   final bool connected;
   final SpotifyPollingMode mode;
   final Map<String, dynamic>? settings;
+  final bool wsRetrying;
+  final bool wsInCooldown;
 
   @override
   Widget build(BuildContext context) {
@@ -391,6 +397,8 @@ class _NowPlayingSection extends StatelessWidget {
               isConnected: isConnected,
               isPlaying: isPlaying,
               mode: mode,
+              wsRetrying: wsRetrying,
+              wsInCooldown: wsInCooldown,
             ),
           ],
         ),
@@ -523,10 +531,14 @@ class _EqualizerIndicator extends StatefulWidget {
     required this.isConnected,
     required this.isPlaying,
     required this.mode,
+    required this.wsRetrying,
+    required this.wsInCooldown,
   });
   final bool isConnected;
   final bool isPlaying;
   final SpotifyPollingMode mode;
+  final bool wsRetrying;
+  final bool wsInCooldown;
 
   @override
   State<_EqualizerIndicator> createState() => _EqualizerIndicatorState();
@@ -591,19 +603,51 @@ class _EqualizerIndicatorState extends State<_EqualizerIndicator>
 
   @override
   Widget build(BuildContext context) {
-    // Color based on polling mode: Direct=green, Fallback=yellow, Offline/idle=red
+    // Determine color based on connection state:
+    // - WS retrying (not cooldown) → blink green
+    // - WS in cooldown → blink red
+    // - Connected + direct mode → solid green (animated if playing)
+    // - Connected + fallback mode → solid yellow (animated if playing)
+    // - Offline/idle → solid red (animated if playing)
     final Color color;
-    switch (widget.mode) {
-      case SpotifyPollingMode.direct:
-        color = const Color(0xFF22C55E); // Green
-        break;
-      case SpotifyPollingMode.fallback:
-        color = const Color(0xFFFBBF24); // Yellow
-        break;
-      case SpotifyPollingMode.offline:
-      case SpotifyPollingMode.idle:
+    final bool shouldBlink;
+
+    if (!widget.isConnected) {
+      // Not connected - check retry state
+      if (widget.wsInCooldown) {
+        // In cooldown - blink red
         color = const Color(0xFFEF4444); // Red
-        break;
+        shouldBlink = true;
+      } else if (widget.wsRetrying) {
+        // Actively retrying - color depends on playback state
+        if (widget.isPlaying) {
+          color =
+              const Color(0xFF22C55E); // Green - music playing while retrying
+        } else {
+          color =
+              const Color.fromARGB(255, 163, 92, 211); // Purple - not playing while retrying
+        }
+        shouldBlink = true;
+      } else {
+        // Not retrying at all (exhausted or initial) - blink red
+        color = const Color(0xFFEF4444); // Red
+        shouldBlink = true;
+      }
+    } else {
+      // Connected - use mode-based colors, no blinking unless paused
+      switch (widget.mode) {
+        case SpotifyPollingMode.direct:
+          color = const Color(0xFF22C55E); // Green
+          break;
+        case SpotifyPollingMode.fallback:
+          color = const Color(0xFFFBBF24); // Yellow
+          break;
+        case SpotifyPollingMode.offline:
+        case SpotifyPollingMode.idle:
+          color = const Color(0xFFEF4444); // Red
+          break;
+      }
+      shouldBlink = !widget.isPlaying;
     }
 
     return SizedBox(
@@ -613,7 +657,7 @@ class _EqualizerIndicatorState extends State<_EqualizerIndicator>
         animation: Listenable.merge([_controller, _blinkController]),
         builder: (context, _) {
           final t = _controller.value;
-          final blinking = !widget.isConnected || !widget.isPlaying;
+          final blinking = shouldBlink;
           final opacity = blinking ? _blink.value : 1.0;
           return Opacity(
             opacity: opacity,

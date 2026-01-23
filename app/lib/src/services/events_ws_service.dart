@@ -11,7 +11,7 @@ import 'package:media_display/src/services/settings_service.dart';
 import 'package:media_display/src/services/user_service.dart';
 import 'package:media_display/src/services/ws_retry_policy.dart';
 import 'package:media_display/src/services/ws_ssl_override.dart'
-if (dart.library.io) 'package:media_display/src/services/ws_ssl_override_io.dart';
+    if (dart.library.io) 'package:media_display/src/services/ws_ssl_override_io.dart';
 import 'package:media_display/src/services/spotify_direct_service.dart';
 
 class NowPlayingState {
@@ -21,12 +21,16 @@ class NowPlayingState {
     this.error,
     this.connected = false,
     this.mode = SpotifyPollingMode.idle,
+    this.wsRetrying = false,
+    this.wsInCooldown = false,
   });
   final String? provider;
   final Map<String, dynamic>? payload;
   final String? error;
   final bool connected;
   final SpotifyPollingMode mode;
+  final bool wsRetrying;
+  final bool wsInCooldown;
 }
 
 class EventsWsNotifier extends Notifier<NowPlayingState> {
@@ -112,6 +116,8 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
           provider: state.provider,
           payload: state.payload,
           mode: ref.read(spotifyDirectProvider).mode,
+          wsRetrying: _retryPolicy.isRetrying,
+          wsInCooldown: _retryPolicy.inCooldown,
         );
         _channel = null;
         _scheduleRetry();
@@ -146,6 +152,8 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
                   payload: payload,
                   connected: true,
                   mode: directMode,
+                  wsRetrying: false,
+                  wsInCooldown: false,
                 );
               }
             } else if (type == 'spotify_token') {
@@ -181,6 +189,8 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
                   connected: true,
                   error: null,
                   mode: ref.read(spotifyDirectProvider).mode,
+                  wsRetrying: false,
+                  wsInCooldown: false,
                 );
               }
             }
@@ -189,6 +199,8 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
               error: 'Parse error: $e',
               connected: true,
               mode: ref.read(spotifyDirectProvider).mode,
+              wsRetrying: false,
+              wsInCooldown: false,
             );
           }
         },
@@ -199,6 +211,8 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
             provider: state.provider,
             payload: state.payload,
             mode: ref.read(spotifyDirectProvider).mode,
+            wsRetrying: true,
+            wsInCooldown: false,
           );
           _scheduleRetry();
         },
@@ -209,6 +223,8 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
             provider: state.provider,
             payload: state.payload,
             mode: ref.read(spotifyDirectProvider).mode,
+            wsRetrying: true,
+            wsInCooldown: false,
           );
           _scheduleRetry();
         },
@@ -225,8 +241,30 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     final delay = _retryPolicy.nextDelay();
     if (delay == null) {
       debugPrint('[WS] Connection failed after maximum retry time');
+      // Update state to show exhausted (not retrying anymore)
+      state = NowPlayingState(
+        error: state.error,
+        connected: false,
+        provider: state.provider,
+        payload: state.payload,
+        mode: ref.read(spotifyDirectProvider).mode,
+        wsRetrying: false,
+        wsInCooldown: false,
+      );
       return; // Exhausted retry window
     }
+
+    // Update state to reflect current retry/cooldown status
+    state = NowPlayingState(
+      error: state.error,
+      connected: false,
+      provider: state.provider,
+      payload: state.payload,
+      mode: ref.read(spotifyDirectProvider).mode,
+      wsRetrying: _retryPolicy.isRetrying,
+      wsInCooldown: _retryPolicy.inCooldown,
+    );
+
     _retryTimer = Timer(delay, () async {
       final auth = ref.read(authStateProvider);
       if (!auth.isAuthenticated) return;
@@ -247,6 +285,8 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       payload: state.payload,
       connected: false,
       mode: ref.read(spotifyDirectProvider).mode,
+      wsRetrying: _retryPolicy.isRetrying,
+      wsInCooldown: _retryPolicy.inCooldown,
     );
     if (scheduleRetry) {
       _scheduleRetry();
