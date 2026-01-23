@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:media_display/src/config/env.dart';
+import 'package:media_display/src/services/api_client.dart';
 import 'package:media_display/src/services/auth_state.dart';
 import 'package:media_display/src/services/settings_service.dart';
 import 'package:media_display/src/services/user_service.dart';
@@ -38,6 +40,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   bool _useDirectPolling = false;
   bool _tokenRequested = false;
   DateTime? _lastTokenRequestTime;
+  bool _wsTokenReceived = false; // Track if WS has sent a token (prefer WS over REST)
 
   @override
   NowPlayingState build() {
@@ -89,19 +92,19 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       final env = ref.read(envConfigProvider);
       _retryTimer?.cancel();
       final uri = Uri.parse('${env.eventsWsUrl}?token=${auth.token}');
-      
+
       WebSocketChannel? channel;
       try {
         await withInsecureWs(() async {
           channel = WebSocketChannel.connect(uri);
         }, allowInsecure: !env.eventsWsSslVerify);
-        
+
         // Wait for the WebSocket connection to be established
         // This throws if connection fails
         await channel!.ready;
         _channel = channel;
       } catch (e) {
-        debugPrint('[WS] Unable to connect to server, will retry...');
+        // debugPrint('[WS] Unable to connect to server, will retry...');
         state = NowPlayingState(
           error: 'Unable to connect to server',
           connected: false,
@@ -111,6 +114,12 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
         );
         _channel = null;
         _scheduleRetry();
+
+        // Try to start direct polling - either with cached token or fetch via REST API
+        final spotifyEnabled = _lastSettings?['spotify_enabled'] == true;
+        if (spotifyEnabled) {
+          await _tryStartDirectPollingWithFallback();
+        }
         return;
       }
 
@@ -155,12 +164,15 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
                       expiresAtInt,
                     );
                 _tokenRequested = false;
+                _wsTokenReceived = true; // WS is working, prefer it for future tokens
+                // Note: updateToken() already starts direct polling internally
               }
             } else if (type == 'ready') {
               // Connection is truly established - reset retry policy now
               if (!_connectionConfirmed) {
                 _connectionConfirmed = true;
                 _retryPolicy.reset();
+                debugPrint('[WS] Connected successfully');
                 state = NowPlayingState(
                   provider: state.provider,
                   payload: state.payload,
@@ -227,6 +239,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     _channel?.sink.close();
     _channel = null;
     _connectionConfirmed = false;
+    _wsTokenReceived = false; // Reset so REST API can be used as fallback
     state = NowPlayingState(
       provider: state.provider,
       payload: state.payload,
@@ -367,17 +380,36 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
         return;
       }
 
-      if (_channel == null || state.connected == false) {
+      // If no channel exists, we need to connect first
+      if (_channel == null) {
         final auth = ref.read(authStateProvider);
         if (!auth.isAuthenticated || _connecting) return;
         // Don't bypass retry policy - if we're in a retry cycle, let it handle reconnection
+        // But direct polling should still work with existing valid token
         if (_retryPolicy.isRetrying) {
+          // If we have a valid token and direct polling isn't running, start it
+          final directState = ref.read(spotifyDirectProvider);
+          if (spotifyEnabled &&
+              directState.accessToken != null &&
+              directState.mode == SpotifyPollingMode.idle) {
+            ref.read(spotifyDirectProvider.notifier).startDirectPolling();
+          }
           return;
         }
         await _connect(auth);
         return; // _connect will call sendConfig again once connected
       }
+      // Channel exists - send the config (even if not yet "connected" state-wise,
+      // the channel is ready after awaiting channel.ready in _connect)
       _channel?.sink.add(payload);
+
+      // Start direct polling if we have a valid token and Spotify is enabled
+      if (spotifyEnabled && hasValidToken) {
+        final currentMode = ref.read(spotifyDirectProvider).mode;
+        if (currentMode == SpotifyPollingMode.idle) {
+          ref.read(spotifyDirectProvider.notifier).startDirectPolling();
+        }
+      }
     } catch (_) {
       // best-effort
     }
@@ -412,7 +444,86 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     if (_tokenRequested) return;
     _tokenRequested = true;
     debugPrint('[SPOTIFY] Requesting token refresh');
-    sendConfig();
+
+    // If WS is connected and has sent tokens before, use WS
+    if (_channel != null && _wsTokenReceived) {
+      sendConfig();
+    } else {
+      // WS not available, use REST API
+      _fetchTokenViaRestApi();
+    }
+  }
+
+  /// Fetch Spotify token via REST API (fallback when WS is unavailable)
+  Future<void> _fetchTokenViaRestApi() async {
+    try {
+      final user = await ref.read(userServiceProvider).fetchMe();
+      final userId = user['id']?.toString() ?? '';
+      if (userId.isEmpty) {
+        debugPrint('[SPOTIFY] Cannot fetch token: no user ID');
+        _tokenRequested = false;
+        return;
+      }
+
+      final dio = ref.read(dioProvider);
+      final response = await dio.get<Map<String, dynamic>>(
+        '/api/users/$userId/services/spotify/access-token',
+      );
+
+      final data = response.data;
+      if (data == null) {
+        debugPrint('[SPOTIFY] REST API returned no data');
+        _tokenRequested = false;
+        return;
+      }
+
+      final accessToken = data['access_token'] as String?;
+      final expiresAt = data['expires_at'];
+
+      if (accessToken != null && expiresAt != null) {
+        int expiresAtInt;
+        if (expiresAt is int) {
+          expiresAtInt = expiresAt;
+        } else if (expiresAt is double) {
+          expiresAtInt = expiresAt.toInt();
+        } else {
+          expiresAtInt = int.tryParse(expiresAt.toString()) ?? 0;
+        }
+
+        debugPrint('[SPOTIFY] Token fetched via REST API');
+        ref.read(spotifyDirectProvider.notifier).updateToken(
+              accessToken,
+              expiresAtInt,
+            );
+        // Note: updateToken() already starts direct polling internally
+      }
+    } on DioException catch (e) {
+      debugPrint('[SPOTIFY] REST API token fetch failed: ${e.message}');
+    } catch (e) {
+      debugPrint('[SPOTIFY] REST API token fetch error: $e');
+    } finally {
+      _tokenRequested = false;
+    }
+  }
+
+  /// Try to start direct polling - use cached token or fetch via REST API
+  Future<void> _tryStartDirectPollingWithFallback() async {
+    final directState = ref.read(spotifyDirectProvider);
+    final hasValidToken = directState.accessToken != null &&
+        directState.tokenExpiresAt != null &&
+        directState.tokenExpiresAt! >
+            (DateTime.now().millisecondsSinceEpoch ~/ 1000) + 60;
+
+    if (hasValidToken) {
+      // We have a valid cached token, start polling
+      if (directState.mode == SpotifyPollingMode.idle) {
+        ref.read(spotifyDirectProvider.notifier).startDirectPolling();
+      }
+    } else {
+      // No valid token, try REST API
+      debugPrint('[SPOTIFY] No valid token, fetching via REST API...');
+      await _fetchTokenViaRestApi();
+    }
   }
 }
 
