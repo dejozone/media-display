@@ -5,10 +5,15 @@ import 'package:http/io_client.dart';
 
 /// Client for Spotify Web API
 class SpotifyApiClient {
-  SpotifyApiClient({http.Client? httpClient, bool sslVerify = true})
-      : _client = httpClient ?? _createClient(sslVerify);
+  SpotifyApiClient({
+    http.Client? httpClient,
+    bool sslVerify = true,
+    String baseUrl = 'https://api.spotify.com/v1',
+  })  : _client = httpClient ?? _createClient(sslVerify),
+        _baseUrl = baseUrl;
 
   final http.Client _client;
+  final String _baseUrl;
 
   static http.Client _createClient(bool sslVerify) {
     if (sslVerify) {
@@ -22,7 +27,7 @@ class SpotifyApiClient {
   /// Fetches the current user's playback state from Spotify Web API
   /// Returns null if no active playback, throws on errors
   Future<Map<String, dynamic>?> getCurrentPlayback(String accessToken) async {
-    final uri = Uri.parse('https://api.spotify.com/v1/me/player');
+    final uri = Uri.parse('$_baseUrl/me/player');
     final response = await _client.get(
       uri,
       headers: {

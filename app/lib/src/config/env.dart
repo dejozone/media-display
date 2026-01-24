@@ -20,6 +20,7 @@ class EnvConfig {
     required this.spotifyDirectCooldownSec,
     required this.wsForceReconnIdleSec,
     required this.spotifyDirectApiSslVerify,
+    required this.spotifyDirectApiBaseUrl,
     this.sonosPollIntervalSec,
   });
 
@@ -41,6 +42,7 @@ class EnvConfig {
   final int spotifyDirectCooldownSec;
   final int wsForceReconnIdleSec;
   final bool spotifyDirectApiSslVerify;
+  final String spotifyDirectApiBaseUrl;
 }
 
 final envConfigProvider = Provider<EnvConfig>((ref) {
@@ -78,6 +80,8 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
   final spotifyDirectApiSslVerify =
       (dotenv.env['SPOTIFY_DIRECT_API_SSL_VERIFY'] ?? 'true').toLowerCase() ==
           'true';
+  final spotifyDirectApiBaseUrl =
+      dotenv.env['SPOTIFY_DIRECT_API_BASE_URL'] ?? 'https://api.spotify.com/v1';
   return EnvConfig(
     apiBaseUrl: api,
     eventsWsUrl: ws,
@@ -97,6 +101,7 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
     spotifyDirectCooldownSec: spotifyDirectCooldownSec,
     wsForceReconnIdleSec: wsForceReconnIdleSec,
     spotifyDirectApiSslVerify: spotifyDirectApiSslVerify,
+    spotifyDirectApiBaseUrl: spotifyDirectApiBaseUrl,
   );
 });
 

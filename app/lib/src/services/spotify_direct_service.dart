@@ -62,7 +62,10 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
   @override
   SpotifyDirectState build() {
     final env = ref.read(envConfigProvider);
-    _apiClient = SpotifyApiClient(sslVerify: env.spotifyDirectApiSslVerify);
+    _apiClient = SpotifyApiClient(
+      sslVerify: env.spotifyDirectApiSslVerify,
+      baseUrl: env.spotifyDirectApiBaseUrl,
+    );
 
     ref.onDispose(() {
       _pollTimer?.cancel();
