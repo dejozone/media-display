@@ -29896,7 +29896,7 @@ akO:function akO(a){this.a=a},
 aLm(){var s=0,r=A.B(t.H)
 var $async$aLm=A.x(function(a,b){if(a===1)return A.y(b,r)
 for(;;)switch(s){case 0:s=2
-return A.u($.f2().Aa("assets/env/.env"),$async$aLm)
+return A.u($.f2().Aa("assets/conf/.env"),$async$aLm)
 case 2:return A.z(null,r)}})
 return A.A($async$aLm,r)},
 xo:function xo(a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r){var _=this

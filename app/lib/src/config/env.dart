@@ -106,5 +106,5 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
 });
 
 Future<void> loadEnv() async {
-  await dotenv.load(fileName: 'assets/env/.env');
+  await dotenv.load(fileName: 'assets/conf/.env');
 }
