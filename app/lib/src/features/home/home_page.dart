@@ -442,6 +442,7 @@ class _NowPlayingSection extends StatelessWidget {
               isConnected: isConnected,
               isPlaying: isPlaying,
               mode: mode,
+              provider: effectiveProvider,
               wsRetrying: wsRetrying,
               wsInCooldown: wsInCooldown,
             ),
@@ -576,12 +577,14 @@ class _EqualizerIndicator extends StatefulWidget {
     required this.isConnected,
     required this.isPlaying,
     required this.mode,
+    required this.provider,
     required this.wsRetrying,
     required this.wsInCooldown,
   });
   final bool isConnected;
   final bool isPlaying;
   final SpotifyPollingMode mode;
+  final String? provider;
   final bool wsRetrying;
   final bool wsInCooldown;
 
@@ -679,18 +682,25 @@ class _EqualizerIndicatorState extends State<_EqualizerIndicator>
         shouldBlink = true;
       }
     } else {
-      // Connected - use mode-based colors, no blinking unless paused
-      switch (widget.mode) {
-        case SpotifyPollingMode.direct:
-          color = const Color(0xFF22C55E); // Green
-          break;
-        case SpotifyPollingMode.fallback:
-          color = const Color(0xFFFBBF24); // Yellow
-          break;
-        case SpotifyPollingMode.offline:
-        case SpotifyPollingMode.idle:
-          color = const Color(0xFFEF4444); // Red
-          break;
+      // Connected - determine color based on playback state and mode
+      // When we have an active provider (Sonos or Spotify fallback), use green/yellow
+      // regardless of SpotifyPollingMode (which only tracks direct Spotify polling)
+      final hasActiveProvider =
+          widget.provider != null && widget.provider!.isNotEmpty;
+
+      if (widget.mode == SpotifyPollingMode.direct) {
+        // Spotify direct polling active
+        color = const Color(0xFF22C55E); // Green
+      } else if (hasActiveProvider ||
+          widget.mode == SpotifyPollingMode.fallback) {
+        // Sonos active or Spotify fallback mode
+        // Green if playing, yellow if paused
+        color = widget.isPlaying
+            ? const Color(0xFF22C55E) // Green
+            : const Color(0xFFFBBF24); // Yellow
+      } else {
+        // No active service (offline/idle with no provider)
+        color = const Color(0xFFEF4444); // Red
       }
       shouldBlink = !widget.isPlaying;
     }
