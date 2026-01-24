@@ -134,6 +134,8 @@ class _HomePageState extends ConsumerState<HomePage>
   }
 
   Future<void> _logout(BuildContext context) async {
+    // Stop direct polling before logout
+    ref.read(spotifyDirectProvider.notifier).stopPolling();
     await ref.read(authServiceProvider).logout();
     await ref.read(authStateProvider.notifier).clear();
     if (mounted) context.go('/login');

@@ -74,6 +74,8 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
         _refreshAndMaybeConnect(next);
       }
       if (!next.isAuthenticated) {
+        // Stop direct polling on logout
+        ref.read(spotifyDirectProvider.notifier).stopPolling();
         _disconnect();
       }
     });
@@ -281,6 +283,13 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     _channel = null;
     _connectionConfirmed = false;
     _wsTokenReceived = false; // Reset so REST API can be used as fallback
+
+    // If not scheduling retry (intentional disconnect), reset retry policy
+    // so future manual reconnection attempts can proceed
+    if (!scheduleRetry) {
+      _retryPolicy.reset();
+    }
+
     state = NowPlayingState(
       provider: state.provider,
       payload: state.payload,
