@@ -1,12 +1,23 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart';
 
 /// Client for Spotify Web API
 class SpotifyApiClient {
-  SpotifyApiClient({http.Client? httpClient})
-      : _client = httpClient ?? http.Client();
+  SpotifyApiClient({http.Client? httpClient, bool sslVerify = true})
+      : _client = httpClient ?? _createClient(sslVerify);
 
   final http.Client _client;
+
+  static http.Client _createClient(bool sslVerify) {
+    if (sslVerify) {
+      return http.Client();
+    }
+    final httpClient = HttpClient()
+      ..badCertificateCallback = (cert, host, port) => true;
+    return IOClient(httpClient);
+  }
 
   /// Fetches the current user's playback state from Spotify Web API
   /// Returns null if no active playback, throws on errors

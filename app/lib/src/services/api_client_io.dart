@@ -15,7 +15,7 @@ final dioProvider = Provider<Dio>((ref) {
     ),
   );
 
-  if (!env.sslVerify) {
+  if (!env.apiSslVerify) {
     final adapter = dio.httpClientAdapter as IOHttpClientAdapter;
     adapter.createHttpClient = () {
       final client = HttpClient();

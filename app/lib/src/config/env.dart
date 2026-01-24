@@ -6,7 +6,7 @@ class EnvConfig {
     required this.apiBaseUrl,
     required this.eventsWsUrl,
     required this.flavor,
-    required this.sslVerify,
+    required this.apiSslVerify,
     required this.eventsWsSslVerify,
     required this.wsRetryIntervalMs,
     required this.wsRetryActiveSeconds,
@@ -19,13 +19,14 @@ class EnvConfig {
     required this.spotifyDirectRetryWindowSec,
     required this.spotifyDirectCooldownSec,
     required this.wsForceReconnIdleSec,
+    required this.spotifyDirectApiSslVerify,
     this.sonosPollIntervalSec,
   });
 
   final String apiBaseUrl;
   final String eventsWsUrl;
   final String flavor;
-  final bool sslVerify;
+  final bool apiSslVerify;
   final bool eventsWsSslVerify;
   final int wsRetryIntervalMs;
   final int wsRetryActiveSeconds;
@@ -39,14 +40,15 @@ class EnvConfig {
   final int spotifyDirectRetryWindowSec;
   final int spotifyDirectCooldownSec;
   final int wsForceReconnIdleSec;
+  final bool spotifyDirectApiSslVerify;
 }
 
 final envConfigProvider = Provider<EnvConfig>((ref) {
   final api = dotenv.env['API_BASE_URL'] ?? 'http://localhost:5001';
   final ws = dotenv.env['EVENTS_WS_URL'] ?? 'ws://localhost:5002/events/media';
   final flavor = dotenv.env['FLAVOR'] ?? 'dev';
-  final sslVerify =
-      (dotenv.env['SSL_VERIFY'] ?? 'true').toLowerCase() == 'true';
+  final apiSslVerify =
+      (dotenv.env['API_SSL_VERIFY'] ?? 'true').toLowerCase() == 'true';
   final wsSslVerify =
       (dotenv.env['EVENTS_WS_SSL_VERIFY'] ?? 'true').toLowerCase() == 'true';
   final wsRetryIntervalMs =
@@ -73,11 +75,14 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
       int.tryParse(dotenv.env['SPOTIFY_DIRECT_COOLDOWN_SEC'] ?? '') ?? 30;
   final wsForceReconnIdleSec =
       int.tryParse(dotenv.env['WS_FORCE_RECONN_IDLE_SEC'] ?? '') ?? 30;
+  final spotifyDirectApiSslVerify =
+      (dotenv.env['SPOTIFY_DIRECT_API_SSL_VERIFY'] ?? 'true').toLowerCase() ==
+          'true';
   return EnvConfig(
     apiBaseUrl: api,
     eventsWsUrl: ws,
     flavor: flavor,
-    sslVerify: sslVerify,
+    apiSslVerify: apiSslVerify,
     eventsWsSslVerify: wsSslVerify,
     wsRetryIntervalMs: wsRetryIntervalMs,
     wsRetryActiveSeconds: wsRetryActiveSeconds,
@@ -91,6 +96,7 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
     spotifyDirectRetryWindowSec: spotifyDirectRetryWindowSec,
     spotifyDirectCooldownSec: spotifyDirectCooldownSec,
     wsForceReconnIdleSec: wsForceReconnIdleSec,
+    spotifyDirectApiSslVerify: spotifyDirectApiSslVerify,
   );
 });
 
