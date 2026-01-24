@@ -10,6 +10,7 @@ import 'package:media_display/src/services/events_ws_service.dart';
 import 'package:media_display/src/services/settings_service.dart';
 import 'package:media_display/src/services/user_service.dart';
 import 'package:media_display/src/services/spotify_direct_service.dart';
+import 'package:media_display/src/config/env.dart';
 import 'package:media_display/src/widgets/app_header.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -20,22 +21,66 @@ class HomePage extends ConsumerStatefulWidget {
   ConsumerState<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends ConsumerState<HomePage> {
+class _HomePageState extends ConsumerState<HomePage>
+    with WidgetsBindingObserver {
   Map<String, dynamic>? user;
   Map<String, dynamic>? settings;
   String? error;
   bool loading = true;
   bool savingSettings = false;
   bool launchingSpotify = false;
+  DateTime? _lastPauseTime;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     // Ensure websocket kicks off as soon as Home loads after login.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(eventsWsProvider.notifier).connect();
     });
     _loadData();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
+      _lastPauseTime = DateTime.now();
+    } else if (state == AppLifecycleState.resumed) {
+      _handleResume();
+    }
+  }
+
+  void _handleResume() {
+    if (_lastPauseTime == null) return;
+
+    final pauseDuration = DateTime.now().difference(_lastPauseTime!);
+    _lastPauseTime = null;
+
+    // Ignore very short pauses (< 5 seconds) - likely just tab switching
+    if (pauseDuration.inSeconds < 5) {
+      return;
+    }
+
+    debugPrint('[HOME] Resumed after ${pauseDuration.inSeconds}s pause');
+
+    // If paused for more than threshold, force reconnect
+    final env = ref.read(envConfigProvider);
+    if (pauseDuration.inSeconds > env.wsForceReconnIdleSec) {
+      debugPrint('[HOME] Long pause detected - forcing reconnect');
+      ref.read(eventsWsProvider.notifier).reconnect();
+    }
+    // For medium pauses (5-30s), the WebSocket should still be connected
+    // and will handle token refresh automatically - no action needed
   }
 
   Future<void> _loadData() async {
@@ -624,8 +669,8 @@ class _EqualizerIndicatorState extends State<_EqualizerIndicator>
           color =
               const Color(0xFF22C55E); // Green - music playing while retrying
         } else {
-          color =
-              const Color.fromARGB(255, 163, 92, 211); // Purple - not playing while retrying
+          color = const Color.fromARGB(
+              255, 163, 92, 211); // Purple - not playing while retrying
         }
         shouldBlink = true;
       } else {

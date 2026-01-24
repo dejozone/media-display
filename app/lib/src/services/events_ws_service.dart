@@ -168,6 +168,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
                 } else {
                   expiresAtInt = int.tryParse(expiresAt.toString()) ?? 0;
                 }
+                debugPrint('[SPOTIFY] Token received via WebSocket');
                 ref.read(spotifyDirectProvider.notifier).updateToken(
                       accessToken,
                       expiresAtInt,
@@ -301,7 +302,22 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     }
   }
 
-  Future<void> sendConfig() async {
+  /// Force reconnect - disconnect and reconnect immediately
+  /// Useful for recovering from sleep/wake scenarios
+  void reconnect() {
+    debugPrint('[WS] Force reconnect requested');
+    _retryPolicy.reset();
+    _disconnect(scheduleRetry: false);
+    connect();
+  }
+
+  /// Public method to refresh token via REST API
+  /// Useful when WebSocket is unavailable
+  Future<void> refreshTokenViaRestApi() async {
+    await _fetchTokenViaRestApi();
+  }
+
+  Future<void> sendConfig({bool forceTokenRequest = false}) async {
     try {
       Map<String, dynamic>? settings;
       try {
@@ -390,8 +406,9 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
           now.difference(_lastTokenRequestTime!).inSeconds < 5;
 
       // Only request token if we don't have a valid one and not debounced
-      final needToken =
-          spotifyEnabled && !hasValidToken && !tokenRequestDebounced;
+      // OR if this is a forced refresh request (proactive refresh before expiry)
+      final needToken = spotifyEnabled &&
+          (forceTokenRequest || (!hasValidToken && !tokenRequestDebounced));
 
       // Disable backend services when in direct polling mode
       final backendSpotifyEnabled =
@@ -489,7 +506,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
 
     // If WS is connected and has sent tokens before, use WS
     if (_channel != null && _wsTokenReceived) {
-      sendConfig();
+      sendConfig(forceTokenRequest: true);
     } else {
       // WS not available, use REST API
       _fetchTokenViaRestApi();

@@ -18,6 +18,7 @@ class EnvConfig {
     required this.spotifyDirectRetryIntervalSec,
     required this.spotifyDirectRetryWindowSec,
     required this.spotifyDirectCooldownSec,
+    required this.wsForceReconnIdleSec,
     this.sonosPollIntervalSec,
   });
 
@@ -37,6 +38,7 @@ class EnvConfig {
   final int spotifyDirectRetryIntervalSec;
   final int spotifyDirectRetryWindowSec;
   final int spotifyDirectCooldownSec;
+  final int wsForceReconnIdleSec;
 }
 
 final envConfigProvider = Provider<EnvConfig>((ref) {
@@ -69,6 +71,8 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
       int.tryParse(dotenv.env['SPOTIFY_DIRECT_RETRY_WINDOW_SEC'] ?? '') ?? 10;
   final spotifyDirectCooldownSec =
       int.tryParse(dotenv.env['SPOTIFY_DIRECT_COOLDOWN_SEC'] ?? '') ?? 30;
+  final wsForceReconnIdleSec =
+      int.tryParse(dotenv.env['WS_FORCE_RECONN_IDLE_SEC'] ?? '') ?? 30;
   return EnvConfig(
     apiBaseUrl: api,
     eventsWsUrl: ws,
@@ -86,6 +90,7 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
     spotifyDirectRetryIntervalSec: spotifyDirectRetryIntervalSec,
     spotifyDirectRetryWindowSec: spotifyDirectRetryWindowSec,
     spotifyDirectCooldownSec: spotifyDirectCooldownSec,
+    wsForceReconnIdleSec: wsForceReconnIdleSec,
   );
 });
 

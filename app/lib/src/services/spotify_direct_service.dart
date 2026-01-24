@@ -51,10 +51,13 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
   Timer? _pollTimer;
   Timer? _tokenCheckTimer;
   Timer? _retryTimer;
+  Timer? _tokenRefreshTimer;
   DateTime? _fallbackStartTime;
   DateTime? _lastCooldownTime;
   SpotifyApiClient? _apiClient;
   int _consecutiveFailures = 0;
+  int _consecutive401Errors = 0;
+  static const int _max401BeforeStop = 3;
 
   @override
   SpotifyDirectState build() {
@@ -64,6 +67,7 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
       _pollTimer?.cancel();
       _tokenCheckTimer?.cancel();
       _retryTimer?.cancel();
+      _tokenRefreshTimer?.cancel();
       _apiClient?.dispose();
     });
 
@@ -84,12 +88,50 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
       lastTokenRefreshTime: DateTime.now(),
     );
 
+    // Reset 401 error counter on fresh token
+    _consecutive401Errors = 0;
+
+    // Schedule proactive token refresh before expiry
+    _scheduleTokenRefresh(expiresAt);
+
     // Start direct polling if idle, or retry if in fallback/offline mode
     if (state.mode == SpotifyPollingMode.idle ||
         state.mode == SpotifyPollingMode.fallback ||
         state.mode == SpotifyPollingMode.offline) {
       _startDirectPolling();
+    } else if (state.mode == SpotifyPollingMode.direct && _pollTimer == null) {
+      // Poll timer was cancelled (e.g., due to 401), restart it
+      debugPrint('[SPOTIFY] Restarting poll after token update');
+      _poll();
     }
+  }
+
+  /// Schedule proactive token refresh before it expires
+  void _scheduleTokenRefresh(int expiresAt) {
+    _tokenRefreshTimer?.cancel();
+
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    // Refresh 2 minutes before expiry to have buffer
+    final refreshInSec = (expiresAt - now) - 120;
+
+    if (refreshInSec > 0) {
+      debugPrint('[SPOTIFY] Scheduling token refresh in ${refreshInSec}s');
+      _tokenRefreshTimer = Timer(
+        Duration(seconds: refreshInSec),
+        () {
+          debugPrint('[SPOTIFY] Proactive token refresh triggered');
+          _requestTokenRefresh();
+        },
+      );
+    }
+  }
+
+  /// Check if token is expired or about to expire
+  bool _isTokenExpired() {
+    final expiresAt = state.tokenExpiresAt;
+    if (expiresAt == null) return true;
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    return now >= expiresAt - 30; // 30s buffer
   }
 
   /// Starts direct Spotify API polling
@@ -139,6 +181,16 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
       return;
     }
 
+    // Check if token is expired before making request
+    if (_isTokenExpired()) {
+      debugPrint('[SPOTIFY] Token expired before poll - requesting refresh');
+      _requestTokenRefresh();
+      // Schedule retry after short delay (token refresh should arrive)
+      _pollTimer?.cancel();
+      _pollTimer = Timer(const Duration(seconds: 5), _poll);
+      return;
+    }
+
     try {
       final response = await _apiClient!.getCurrentPlayback(token);
 
@@ -158,6 +210,9 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
         _consecutiveFailures = 0;
       }
 
+      // Reset 401 counter on success
+      _consecutive401Errors = 0;
+
       // Schedule next poll
       final env = ref.read(envConfigProvider);
       _pollTimer = Timer(
@@ -166,9 +221,28 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
       );
     } on SpotifyApiException catch (e) {
       if (e.isAuthError) {
-        debugPrint('[SPOTIFY] Direct poll failed: 401 (requesting refresh)');
-        // Request token refresh and retry once
+        _consecutive401Errors++;
+        debugPrint(
+            '[SPOTIFY] Direct poll failed: 401 ($_consecutive401Errors/$_max401BeforeStop)');
+
+        // Request token refresh
         _requestTokenRefresh();
+
+        // If too many consecutive 401s, enter fallback mode
+        if (_consecutive401Errors >= _max401BeforeStop) {
+          debugPrint('[SPOTIFY] Too many 401 errors - entering fallback mode');
+          _consecutive401Errors = 0;
+          _enterFallbackMode('Authentication failed repeatedly');
+          return;
+        }
+
+        // Keep trying with retry interval (don't stop completely)
+        _pollTimer?.cancel();
+        final env = ref.read(envConfigProvider);
+        _pollTimer = Timer(
+          Duration(seconds: env.spotifyDirectRetryIntervalSec),
+          _poll,
+        );
         return;
       }
 

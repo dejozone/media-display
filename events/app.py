@@ -297,13 +297,28 @@ def _schedule_token_refresh(
                 break
             expires_at = state.get("expires_at", 0)
             now = time.time()
-            refresh_in = max(0.0, expires_at - TOKEN_REFRESH_LEAD - now)
-            if TOKEN_REFRESH_JITTER:
-                refresh_in = max(0.0, refresh_in - random.uniform(0, TOKEN_REFRESH_JITTER))
-            try:
-                await asyncio.wait_for(asyncio.sleep(refresh_in), timeout=refresh_in + 1)
-            except asyncio.CancelledError:
-                break
+            time_until_expiry = expires_at - now
+
+            # If token is already expired or expiring very soon, fetch immediately
+            if time_until_expiry < 60:
+                refresh_in = 0.0
+            # If token has less time than TOKEN_REFRESH_LEAD, wait until closer to expiry
+            elif time_until_expiry < TOKEN_REFRESH_LEAD:
+                # Wait until 60 seconds before expiry
+                refresh_in = max(10.0, time_until_expiry - 60)
+            else:
+                # Normal case: refresh TOKEN_REFRESH_LEAD seconds before expiry
+                refresh_in = time_until_expiry - TOKEN_REFRESH_LEAD
+                if TOKEN_REFRESH_JITTER:
+                    refresh_in = max(0.0, refresh_in - random.uniform(0, TOKEN_REFRESH_JITTER))
+                # Ensure minimum sleep time
+                refresh_in = max(10.0, refresh_in)
+
+            if refresh_in > 0:
+                try:
+                    await asyncio.wait_for(asyncio.sleep(refresh_in), timeout=refresh_in + 1)
+                except asyncio.CancelledError:
+                    break
 
             new_state = await _ensure_access_token(
                 ctx=ctx,
@@ -312,8 +327,27 @@ def _schedule_token_refresh(
             )
             if not new_state:
                 logger.warning("spotify token refresh failed user=%s", ctx.user_id)
+                # Wait before retrying to avoid tight loop
+                try:
+                    await asyncio.sleep(30)
+                except asyncio.CancelledError:
+                    break
                 continue
+            
+            # Check if this is actually a new token (different expiry time)
+            old_expires = state.get("expires_at", 0)
+            new_expires = new_state.get("expires_at", 0)
+            if new_expires <= old_expires:
+                # Token hasn't been refreshed yet (same or older), wait longer
+                logger.info("spotify token not refreshed yet user=%s, waiting", ctx.user_id)
+                try:
+                    await asyncio.sleep(30)
+                except asyncio.CancelledError:
+                    break
+                continue
+
             try:
+                logger.info("emitting spotify_token via scheduled refresh user=%s", ctx.user_id)
                 await channel.send_json(
                     {
                         "type": "spotify_token",
@@ -650,6 +684,7 @@ async def media_events(ws: WebSocket) -> None:
                 subscribe_channel=ctx.channel,
             )
             if token_state:
+                logger.info("emitting spotify_token via client request user=%s", user_id)
                 await ctx.channel.send_json(
                     {
                         "type": "spotify_token",
