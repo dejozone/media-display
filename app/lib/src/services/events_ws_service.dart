@@ -88,10 +88,29 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     return const NowPlayingState();
   }
 
-  Future<void> _connect(AuthState auth) async {
+  Future<void> _connect(AuthState auth, {String caller = 'unknown'}) async {
     if (!auth.isAuthenticated) return;
-    if (_connecting) return;
+
+    // CRITICAL: Set _connecting FIRST to prevent race conditions
+    // Check and set atomically using a local flag
+    if (_connecting) {
+      debugPrint(
+          '[WS] _connect skipped - already connecting (caller: $caller)');
+      return;
+    }
     _connecting = true;
+
+    // If already connected, don't reconnect - just send config
+    if (_channel != null && _connectionConfirmed) {
+      debugPrint(
+          '[WS] _connect skipped - already connected, sending config (caller: $caller)');
+      _connecting = false; // Reset since we're not actually connecting
+      await sendConfig();
+      return;
+    }
+    // Log caller to help debug
+    debugPrint(
+        '[WS] _connect started (channel=${_channel != null}, confirmed=$_connectionConfirmed, caller: $caller)');
 
     try {
       // Ensure we don't stack multiple channels; close any existing one first.
@@ -208,6 +227,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
           }
         },
         onError: (err) {
+          debugPrint('[WS] onError: $err');
           state = NowPlayingState(
             error: 'WebSocket error: $err',
             connected: false,
@@ -220,6 +240,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
           _scheduleRetry();
         },
         onDone: () {
+          debugPrint('[WS] onDone: Connection closed by server');
           state = NowPlayingState(
             error: 'Connection closed',
             connected: false,
@@ -240,6 +261,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
 
   void _scheduleRetry() {
     _channel = null;
+    _connectionConfirmed = false; // Reset to match channel state
     _retryTimer?.cancel();
     final delay = _retryPolicy.nextDelay();
     if (delay == null) {
@@ -268,12 +290,20 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       wsInCooldown: _retryPolicy.inCooldown,
     );
 
+    debugPrint('[WS] Scheduling retry in ${delay.inMilliseconds}ms');
     _retryTimer = Timer(delay, () async {
+      debugPrint(
+          '[WS] Retry timer fired (channel=${_channel != null}, confirmed=$_connectionConfirmed)');
+      // If channel already exists, skip retry - another connection succeeded
+      if (_channel != null) {
+        debugPrint('[WS] Retry skipped - channel already exists');
+        return;
+      }
       final auth = ref.read(authStateProvider);
       if (!auth.isAuthenticated) return;
       // Only retry if services are (or were) enabled.
       if (!_servicesEnabled(_lastSettings)) return;
-      _connect(auth);
+      _connect(auth, caller: 'retryTimer');
     });
   }
 
@@ -283,6 +313,8 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     _channel = null;
     _connectionConfirmed = false;
     _wsTokenReceived = false; // Reset so REST API can be used as fallback
+    _lastTokenRequestTime =
+        null; // Reset debounce - any pending token request was lost
 
     // If not scheduling retry (intentional disconnect), reset retry policy
     // so future manual reconnection attempts can proceed
@@ -305,6 +337,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
 
   // Public trigger to (re)connect on demand from UI actions.
   void connect() {
+    debugPrint('[WS] connect() called');
     final auth = ref.read(authStateProvider);
     if (auth.isAuthenticated) {
       _refreshAndMaybeConnect(auth);
@@ -382,7 +415,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
           ) ??
           // If only ms is provided, convert down where possible.
           (() {
-            final ms = asInt(settings?['spotify_poll_interval_ms'] ?? 0);
+            final ms = asInt(settings?['spotify_poll_interval_ms']);
             return ms != null ? (ms / 1000).round() : null;
           })() ??
           env.spotifyPollIntervalSec;
@@ -419,6 +452,9 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       final needToken = spotifyEnabled &&
           (forceTokenRequest || (!hasValidToken && !tokenRequestDebounced));
 
+      debugPrint(
+          '[WS] sendConfig check: spotifyEnabled=$spotifyEnabled, hasValidToken=$hasValidToken, debounced=$tokenRequestDebounced, forceRefresh=$forceTokenRequest => needToken=$needToken');
+
       // Disable backend services when in direct polling mode
       final backendSpotifyEnabled =
           spotifyEnabled && directMode == SpotifyPollingMode.fallback;
@@ -438,9 +474,6 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
         },
       });
 
-      if (needToken) {
-        _lastTokenRequestTime = DateTime.now();
-      }
       // If we currently have no socket (e.g., after navigation or a tab opened), establish it first.
       if (!hasService) {
         // Nothing to stream; close any existing channel without scheduling retries.
@@ -464,11 +497,22 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
           }
           return;
         }
-        await _connect(auth);
+        await _connect(auth, caller: 'sendConfig');
         return; // _connect will call sendConfig again once connected
       }
+
+      // Only update debounce timestamp when we actually send the request
+      if (needToken) {
+        _lastTokenRequestTime = DateTime.now();
+      }
+
+      // Cancel any pending retry timer since we have a valid channel
+      _retryTimer?.cancel();
+
       // Channel exists - send the config (even if not yet "connected" state-wise,
       // the channel is ready after awaiting channel.ready in _connect)
+      debugPrint(
+          '[WS] sendConfig: needToken=$needToken, spotify=$backendSpotifyEnabled, sonos=$backendSonosEnabled');
       _channel?.sink.add(payload);
 
       // Start direct polling if we have a valid token and Spotify is enabled
@@ -490,6 +534,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   }
 
   Future<void> _refreshAndMaybeConnect(AuthState auth) async {
+    debugPrint('[WS] _refreshAndMaybeConnect called');
     try {
       final user = await ref.read(userServiceProvider).fetchMe();
       final userId = user['id']?.toString() ?? '';
@@ -499,7 +544,13 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       _lastSettings = settings;
       _configRetryTimer?.cancel();
       if (_servicesEnabled(settings)) {
-        await _connect(auth);
+        // Only connect if not already connected - don't disrupt existing connection
+        if (_channel == null && !_connecting) {
+          await _connect(auth, caller: 'refreshAndMaybeConnect');
+        } else {
+          debugPrint(
+              '[WS] _refreshAndMaybeConnect skipped - already connected');
+        }
       } else {
         _disconnect(scheduleRetry: false);
       }

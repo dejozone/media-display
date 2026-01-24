@@ -622,11 +622,14 @@ async def _user_driver(ctx: UserContext) -> None:
     except asyncio.CancelledError:
         logger.info("user driver cancelled user=%s", ctx.user_id)
     finally:
-        await ctx.channel.close(code=1012, reason="User stop")
+        # Only close the channel if we're not in token-only mode
+        # (entering token mode cancels the driver but keeps the connection alive)
+        if not ctx.token_mode:
+            await ctx.channel.close(code=1012, reason="User stop")
         current = asyncio.current_task()
         if current:
             ACTIVE_TASKS.discard(current)
-        logger.info("user driver stopped user=%s", ctx.user_id)
+        logger.info("user driver stopped user=%s (token_mode=%s)", ctx.user_id, ctx.token_mode)
 
 
 @app.websocket(WS_CFG.get("path", "/events/media"))
