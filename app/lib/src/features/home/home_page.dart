@@ -399,7 +399,19 @@ class _NowPlayingSection extends StatelessWidget {
     final album = _albumText(payload, effectiveProvider);
     final deviceInfo = _deviceInfo(payload, effectiveProvider);
     final isPlaying = _isPlaying(payload);
+    final isStopped = _isStopped(payload);
     final isConnected = connected && error == null;
+
+    // Determine status text
+    String statusText;
+    if (isStopped) {
+      statusText = 'Stopped';
+    } else if (deviceInfo.primary.isNotEmpty) {
+      statusText =
+          '${isPlaying ? 'Now Playing' : 'Paused'} on ${deviceInfo.primary}${deviceInfo.rest.isNotEmpty ? ' +${deviceInfo.rest.length} more' : ''}';
+    } else {
+      statusText = isPlaying ? 'Now Playing' : 'Paused';
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -411,11 +423,7 @@ class _NowPlayingSection extends StatelessWidget {
                 children: [
                   Flexible(
                     child: Text(
-                      deviceInfo.primary.isNotEmpty
-                          ? '${isPlaying ? 'Now Playing' : 'Paused'} on ${deviceInfo.primary}${deviceInfo.rest.isNotEmpty ? ' +${deviceInfo.rest.length} more' : ''}'
-                          : isPlaying
-                              ? 'Now Playing'
-                              : 'Paused',
+                      statusText,
                       style: Theme.of(context)
                           .textTheme
                           .titleMedium
@@ -457,6 +465,38 @@ class _NowPlayingSection extends StatelessWidget {
           Text(error!, style: const TextStyle(color: Color(0xFFFF8C8C)))
         else if (payload == null)
           _skeletonNowPlaying()
+        else if (isStopped)
+          // Stopped state - show minimal UI with just the music icon
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _Artwork(url: ''),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'No active playback',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                        color: const Color(0xFF9FB1D0).withValues(alpha: 0.7),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Start playing on Spotify to see what\'s playing',
+                      style: TextStyle(
+                        color: const Color(0xFF9FB1D0).withValues(alpha: 0.5),
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          )
         else ...[
           Stack(
             children: [
@@ -855,6 +895,15 @@ bool _isPlaying(Map<String, dynamic>? payload) {
   if (playback is Map) {
     final v = playback['is_playing'];
     if (v is bool) return v;
+  }
+  return false;
+}
+
+bool _isStopped(Map<String, dynamic>? payload) {
+  if (payload == null) return false;
+  final playback = payload['playback'];
+  if (playback is Map) {
+    return playback['status'] == 'stopped';
   }
   return false;
 }

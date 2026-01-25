@@ -199,9 +199,9 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
       final response = await _apiClient!.getCurrentPlayback(token);
 
       if (response == null) {
-        // No active playback
+        // No active playback (204 response) - set a "stopped" payload
         state = state.copyWith(
-          payload: null,
+          payload: _createStoppedPayload(),
           error: null,
         );
       } else {
@@ -395,6 +395,31 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
     // This will be handled by events_ws_service sending a config message
     // The callback is set up when the service is initialized
     ref.read(spotifyTokenRefreshCallbackProvider).callback?.call();
+  }
+
+  /// Creates a payload representing "stopped" state (no active playback)
+  Map<String, dynamic> _createStoppedPayload() {
+    return {
+      'track': {
+        'title': '',
+        'artist': '',
+        'album': '',
+        'artwork_url': '',
+        'duration_ms': 0,
+      },
+      'playback': {
+        'is_playing': false,
+        'progress_ms': 0,
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+        'status': 'stopped',
+      },
+      'device': {
+        'name': '',
+        'type': '',
+        'group_devices': <Map<String, dynamic>>[],
+      },
+      'provider': 'spotify',
+    };
   }
 
   Map<String, dynamic> _normalizeSpotifyResponse(
