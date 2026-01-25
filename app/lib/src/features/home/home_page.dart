@@ -71,12 +71,9 @@ class _HomePageState extends ConsumerState<HomePage>
       return;
     }
 
-    debugPrint('[HOME] Resumed after ${pauseDuration.inSeconds}s pause');
-
     // If paused for more than threshold, force reconnect
     final env = ref.read(envConfigProvider);
     if (pauseDuration.inSeconds > env.wsForceReconnIdleSec) {
-      debugPrint('[HOME] Long pause detected - forcing reconnect');
       ref.read(eventsWsProvider.notifier).reconnect();
     }
     // For medium pauses (5-30s), the WebSocket should still be connected
