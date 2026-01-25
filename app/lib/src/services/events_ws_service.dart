@@ -352,7 +352,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     try {
       final wsConfig = service.webSocketConfig;
       final env = ref.read(envConfigProvider);
-      
+
       // Get poll intervals from settings or defaults
       Map<String, dynamic>? settings = _lastSettings;
       if (settings == null) {
@@ -360,7 +360,9 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
           final user = await ref.read(userServiceProvider).fetchMe();
           final userId = user['id']?.toString() ?? '';
           if (userId.isNotEmpty) {
-            settings = await ref.read(settingsServiceProvider).fetchSettingsForUser(userId);
+            settings = await ref
+                .read(settingsServiceProvider)
+                .fetchSettingsForUser(userId);
             _lastSettings = settings;
           }
         } catch (_) {
@@ -375,24 +377,28 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
         return null;
       }
 
-      final spotifyPoll = asInt(settings?['spotify_poll_interval_sec']) ?? env.spotifyPollIntervalSec;
-      final sonosPoll = asInt(settings?['sonos_poll_interval_sec']) ?? env.sonosPollIntervalSec;
+      final spotifyPoll = asInt(settings?['spotify_poll_interval_sec']) ??
+          env.spotifyPollIntervalSec;
+      final sonosPoll = asInt(settings?['sonos_poll_interval_sec']) ??
+          env.sonosPollIntervalSec;
 
       // Determine if we need a token
       // Token is needed for direct_spotify (client polls) and cloud_spotify (backend polls)
       final needToken = service.requiresSpotify;
-      
+
       // Check if we should request token
       final directState = ref.read(spotifyDirectProvider);
       final hasValidToken = directState.accessToken != null &&
           directState.tokenExpiresAt != null &&
-          directState.tokenExpiresAt! > (DateTime.now().millisecondsSinceEpoch ~/ 1000) + 60;
-      
+          directState.tokenExpiresAt! >
+              (DateTime.now().millisecondsSinceEpoch ~/ 1000) + 60;
+
       final now = DateTime.now();
       final tokenRequestDebounced = _lastTokenRequestTime != null &&
           now.difference(_lastTokenRequestTime!).inSeconds < 5;
-      
-      final shouldRequestToken = needToken && (!hasValidToken && !tokenRequestDebounced);
+
+      final shouldRequestToken =
+          needToken && (!hasValidToken && !tokenRequestDebounced);
 
       debugPrint('[WS] sendConfigForService: service=$service, '
           'wsConfig=(spotify=${wsConfig.spotify}, sonos=${wsConfig.sonos}), '

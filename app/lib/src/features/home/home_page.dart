@@ -130,9 +130,9 @@ class _HomePageState extends ConsumerState<HomePage>
       final spotifyEnabled = next['spotify_enabled'] == true;
       final sonosEnabled = next['sonos_enabled'] == true;
       ref.read(serviceOrchestratorProvider.notifier).updateServicesEnabled(
-        spotifyEnabled: spotifyEnabled,
-        sonosEnabled: sonosEnabled,
-      );
+            spotifyEnabled: spotifyEnabled,
+            sonosEnabled: sonosEnabled,
+          );
 
       // Also send config to WebSocket for backward compatibility
       final ws = ref.read(eventsWsProvider.notifier);
@@ -205,7 +205,7 @@ class _HomePageState extends ConsumerState<HomePage>
   Widget build(BuildContext context) {
     // Watch unified playback state from orchestrator
     final unifiedState = ref.watch(serviceOrchestratorProvider);
-    
+
     // Also watch individual services for backward compatibility / fallback
     final now = ref.watch(eventsWsProvider);
     final directState = ref.watch(spotifyDirectProvider);
@@ -751,11 +751,12 @@ class _EqualizerIndicatorState extends State<_EqualizerIndicator>
     final bool shouldBlink;
 
     // Color definitions
-    const greenColor = Color(0xFF22C55E);  // Direct Spotify
-    const lightBlueColor = Color(0xFF38BDF8);  // Cloud Spotify
-    const cyanColor = Color(0xFF06B6D4);  // Cloud Sonos
-    const redColor = Color(0xFFEF4444);  // Disconnected/Error
-    const purpleColor = Color.fromARGB(255, 163, 92, 211);  // Retrying without playback
+    const greenColor = Color(0xFF22C55E); // Direct Spotify
+    const lightBlueColor = Color(0xFF38BDF8); // Cloud Spotify
+    const cyanColor = Color(0xFF06B6D4); // Cloud Sonos
+    const redColor = Color(0xFFEF4444); // Disconnected/Error
+    const purpleColor =
+        Color.fromARGB(255, 163, 92, 211); // Retrying without playback
 
     /// Get color for a service type
     Color getServiceColor(ServiceType? service) {

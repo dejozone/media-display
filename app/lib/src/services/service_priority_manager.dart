@@ -114,7 +114,8 @@ class ServicePriorityState {
 
     // Check if we've exceeded the max retry window
     if (retryWindowStart != null) {
-      final windowElapsed = DateTime.now().difference(retryWindowStart).inSeconds;
+      final windowElapsed =
+          DateTime.now().difference(retryWindowStart).inSeconds;
       if (windowElapsed > fallbackConfig.retryMaxWindowSec) {
         return false; // Exceeded retry window
       }
@@ -130,7 +131,8 @@ class ServicePriorityState {
     return true; // No previous retry, can retry now
   }
 
-  ServiceFallbackConfig _getFallbackConfig(ServiceType service, EnvConfig config) {
+  ServiceFallbackConfig _getFallbackConfig(
+      ServiceType service, EnvConfig config) {
     // Use the centralized helper method from EnvConfig
     return config.getFallbackConfig(service);
   }
@@ -156,16 +158,22 @@ class ServicePriorityState {
     return ServicePriorityState(
       configuredOrder: configuredOrder ?? this.configuredOrder,
       enabledServices: enabledServices ?? this.enabledServices,
-      currentService: clearCurrentService ? null : (currentService ?? this.currentService),
-      previousService: clearPreviousService ? null : (previousService ?? this.previousService),
+      currentService:
+          clearCurrentService ? null : (currentService ?? this.currentService),
+      previousService: clearPreviousService
+          ? null
+          : (previousService ?? this.previousService),
       serviceStatuses: serviceStatuses ?? this.serviceStatuses,
       errorCounts: errorCounts ?? this.errorCounts,
       cooldownEnds: cooldownEnds ?? this.cooldownEnds,
       lastRetryAttempts: lastRetryAttempts ?? this.lastRetryAttempts,
       retryWindowStarts: retryWindowStarts ?? this.retryWindowStarts,
       isTransitioning: isTransitioning ?? this.isTransitioning,
-      transitionStartTime: clearTransitionStartTime ? null : (transitionStartTime ?? this.transitionStartTime),
-      lastDataTime: clearLastDataTime ? null : (lastDataTime ?? this.lastDataTime),
+      transitionStartTime: clearTransitionStartTime
+          ? null
+          : (transitionStartTime ?? this.transitionStartTime),
+      lastDataTime:
+          clearLastDataTime ? null : (lastDataTime ?? this.lastDataTime),
     );
   }
 
@@ -255,7 +263,7 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       // Check if service requirements are met
       final requiresSpotify = service.requiresSpotify;
       final requiresSonos = service.requiresSonos;
-      
+
       // Service is enabled if its requirements are satisfied
       if (requiresSpotify && spotifyEnabled) {
         enabled.add(service);
@@ -265,7 +273,8 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     }
 
     // Update statuses for disabled services
-    final newStatuses = Map<ServiceType, ServiceStatus>.from(state.serviceStatuses);
+    final newStatuses =
+        Map<ServiceType, ServiceStatus>.from(state.serviceStatuses);
     for (final service in ServiceType.values) {
       if (!enabled.contains(service)) {
         newStatuses[service] = ServiceStatus.disabled;
@@ -279,20 +288,24 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       serviceStatuses: newStatuses,
     );
 
-    debugPrint('[ServicePriority] Updated enabled services: $enabled (spotify=$spotifyEnabled, sonos=$sonosEnabled)');
+    debugPrint(
+        '[ServicePriority] Updated enabled services: $enabled (spotify=$spotifyEnabled, sonos=$sonosEnabled)');
 
     // If current service is now disabled, switch to next available
     final currentService = state.currentService;
-    debugPrint('[ServicePriority] Checking if current service needs switch: currentService=$currentService, isInEnabled=${currentService != null ? enabled.contains(currentService) : 'n/a'}');
-    
+    debugPrint(
+        '[ServicePriority] Checking if current service needs switch: currentService=$currentService, isInEnabled=${currentService != null ? enabled.contains(currentService) : 'n/a'}');
+
     if (currentService != null && !enabled.contains(currentService)) {
-      debugPrint('[ServicePriority] Current service $currentService is disabled, finding next available');
+      debugPrint(
+          '[ServicePriority] Current service $currentService is disabled, finding next available');
       final next = state.getNextAvailableService();
       debugPrint('[ServicePriority] Next available service: $next');
       if (next != null) {
         activateService(next);
       } else {
-        debugPrint('[ServicePriority] No next service available, clearing current');
+        debugPrint(
+            '[ServicePriority] No next service available, clearing current');
         state = state.copyWith(clearCurrentService: true);
       }
     }
@@ -301,11 +314,13 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
   /// Activate a specific service
   void activateService(ServiceType service) {
     if (!state.enabledServices.contains(service)) {
-      debugPrint('[ServicePriority] Cannot activate disabled service: $service');
+      debugPrint(
+          '[ServicePriority] Cannot activate disabled service: $service');
       return;
     }
 
-    final newStatuses = Map<ServiceType, ServiceStatus>.from(state.serviceStatuses);
+    final newStatuses =
+        Map<ServiceType, ServiceStatus>.from(state.serviceStatuses);
 
     // Deactivate current service
     if (state.currentService != null && state.currentService != service) {
@@ -351,7 +366,8 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     newErrors[service] = 0;
 
     // Clear retry window if we were recovering
-    final newRetryWindows = Map<ServiceType, DateTime?>.from(state.retryWindowStarts);
+    final newRetryWindows =
+        Map<ServiceType, DateTime?>.from(state.retryWindowStarts);
     newRetryWindows[service] = null;
 
     state = state.copyWith(
@@ -365,7 +381,8 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
   void reportError(ServiceType service, {bool is401 = false}) {
     // 401 errors should trigger token refresh, not fallback
     if (is401) {
-      debugPrint('[ServicePriority] 401 error on $service - triggering token refresh, not fallback');
+      debugPrint(
+          '[ServicePriority] 401 error on $service - triggering token refresh, not fallback');
       return;
     }
 
@@ -380,13 +397,16 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     final currentCount = newErrors[service] ?? 0;
     newErrors[service] = currentCount + 1;
 
-    debugPrint('[ServicePriority] Error on $service (${newErrors[service]}/${fallbackConfig.errorThreshold})');
+    debugPrint(
+        '[ServicePriority] Error on $service (${newErrors[service]}/${fallbackConfig.errorThreshold})');
 
-    final newStatuses = Map<ServiceType, ServiceStatus>.from(state.serviceStatuses);
+    final newStatuses =
+        Map<ServiceType, ServiceStatus>.from(state.serviceStatuses);
 
     if (newErrors[service]! >= fallbackConfig.errorThreshold) {
       // Threshold reached - enter cooldown and trigger fallback
-      debugPrint('[ServicePriority] Error threshold reached for $service - entering cooldown');
+      debugPrint(
+          '[ServicePriority] Error threshold reached for $service - entering cooldown');
 
       newStatuses[service] = ServiceStatus.cooldown;
 
@@ -396,7 +416,8 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       );
 
       // Start retry window if not already started
-      final newRetryWindows = Map<ServiceType, DateTime?>.from(state.retryWindowStarts);
+      final newRetryWindows =
+          Map<ServiceType, DateTime?>.from(state.retryWindowStarts);
       if (newRetryWindows[service] == null) {
         newRetryWindows[service] = DateTime.now();
       }
@@ -457,14 +478,15 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     // Don't switch away from a service that's still working (active status with low error count)
     final currentStatus = state.serviceStatuses[state.currentService];
     final currentErrors = state.errorCounts[state.currentService] ?? 0;
-    final currentFallbackConfig = state.currentService != null 
+    final currentFallbackConfig = state.currentService != null
         ? _config.getFallbackConfig(state.currentService!)
         : _config.spotifyDirectFallback;
-    
+
     // If current service is active and hasn't reached error threshold, don't retry others
-    if (currentStatus == ServiceStatus.active && 
+    if (currentStatus == ServiceStatus.active &&
         currentErrors < currentFallbackConfig.errorThreshold) {
-      debugPrint('[ServicePriority] Skipping retry - current service ${state.currentService} is active with $currentErrors/${currentFallbackConfig.errorThreshold} errors');
+      debugPrint(
+          '[ServicePriority] Skipping retry - current service ${state.currentService} is active with $currentErrors/${currentFallbackConfig.errorThreshold} errors');
       return;
     }
 
@@ -476,11 +498,13 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
         debugPrint('[ServicePriority] Attempting retry of $service');
 
         // Update last retry attempt
-        final newRetries = Map<ServiceType, DateTime?>.from(state.lastRetryAttempts);
+        final newRetries =
+            Map<ServiceType, DateTime?>.from(state.lastRetryAttempts);
         newRetries[service] = DateTime.now();
 
         // Move from cooldown to standby for retry attempt
-        final newStatuses = Map<ServiceType, ServiceStatus>.from(state.serviceStatuses);
+        final newStatuses =
+            Map<ServiceType, ServiceStatus>.from(state.serviceStatuses);
         newStatuses[service] = ServiceStatus.standby;
 
         // Reset error count for retry

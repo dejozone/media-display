@@ -208,8 +208,8 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
       dotenv.env['SPOTIFY_DIRECT_API_BASE_URL'] ?? 'https://api.spotify.com/v1';
 
   // Parse service priority order
-  final priorityOrderString =
-      dotenv.env['PRIORITY_ORDER_OF_SERVICES'] ?? 'direct_spotify,cloud_spotify,cloud_sonos';
+  final priorityOrderString = dotenv.env['PRIORITY_ORDER_OF_SERVICES'] ??
+      'direct_spotify,cloud_spotify,cloud_sonos';
   final priorityOrderOfServices = priorityOrderString
       .split(',')
       .map((s) => ServiceType.fromString(s))
@@ -217,39 +217,77 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
       .toList();
   // Ensure we have at least one service
   if (priorityOrderOfServices.isEmpty) {
-    priorityOrderOfServices.addAll([ServiceType.directSpotify, ServiceType.cloudSpotify, ServiceType.cloudSonos]);
+    priorityOrderOfServices.addAll([
+      ServiceType.directSpotify,
+      ServiceType.cloudSpotify,
+      ServiceType.cloudSonos
+    ]);
   }
 
   // Parse Spotify Direct fallback config
   final spotifyDirectFallback = ServiceFallbackConfig(
-    timeoutSec: int.tryParse(dotenv.env['SPOTIFY_DIRECT_FALLBACK_TIMEOUT_SEC'] ?? '') ?? 5,
-    onError: (dotenv.env['SPOTIFY_DIRECT_FALLBACK_ON_ERROR'] ?? 'true').toLowerCase() == 'true',
-    errorThreshold: int.tryParse(dotenv.env['SPOTIFY_DIRECT_FALLBACK_ERROR_THRESHOLD'] ?? '') ?? 3,
-    retryIntervalSec: int.tryParse(dotenv.env['SPOTIFY_DIRECT_RETRY_INTERVAL_SEC'] ?? '') ?? 10,
-    retryCooldownSec: int.tryParse(dotenv.env['SPOTIFY_DIRECT_RETRY_COOLDOWN_SEC'] ?? '') ?? 30,
-    retryMaxWindowSec: int.tryParse(dotenv.env['SPOTIFY_DIRECT_RETRY_MAX_WINDOW_SEC'] ?? '') ?? 300,
+    timeoutSec:
+        int.tryParse(dotenv.env['SPOTIFY_DIRECT_FALLBACK_TIMEOUT_SEC'] ?? '') ??
+            5,
+    onError: (dotenv.env['SPOTIFY_DIRECT_FALLBACK_ON_ERROR'] ?? 'true')
+            .toLowerCase() ==
+        'true',
+    errorThreshold: int.tryParse(
+            dotenv.env['SPOTIFY_DIRECT_FALLBACK_ERROR_THRESHOLD'] ?? '') ??
+        3,
+    retryIntervalSec:
+        int.tryParse(dotenv.env['SPOTIFY_DIRECT_RETRY_INTERVAL_SEC'] ?? '') ??
+            10,
+    retryCooldownSec:
+        int.tryParse(dotenv.env['SPOTIFY_DIRECT_RETRY_COOLDOWN_SEC'] ?? '') ??
+            30,
+    retryMaxWindowSec:
+        int.tryParse(dotenv.env['SPOTIFY_DIRECT_RETRY_MAX_WINDOW_SEC'] ?? '') ??
+            300,
   );
 
   // Parse Cloud Spotify fallback config
   final cloudSpotifyFallback = ServiceFallbackConfig(
-    timeoutSec: int.tryParse(dotenv.env['CLOUD_SPOTIFY_FALLBACK_TIMEOUT_SEC'] ?? '') ?? 5,
-    onError: (dotenv.env['CLOUD_SPOTIFY_FALLBACK_ON_ERROR'] ?? 'true').toLowerCase() == 'true',
-    errorThreshold: int.tryParse(dotenv.env['CLOUD_SPOTIFY_FALLBACK_ERROR_THRESHOLD'] ?? '') ?? 3,
-    retryIntervalSec: int.tryParse(dotenv.env['CLOUD_SPOTIFY_RETRY_INTERVAL_SEC'] ?? '') ?? 10,
-    retryCooldownSec: int.tryParse(dotenv.env['CLOUD_SPOTIFY_RETRY_COOLDOWN_SEC'] ?? '') ?? 30,
-    retryMaxWindowSec: int.tryParse(dotenv.env['CLOUD_SPOTIFY_RETRY_MAX_WINDOW_SEC'] ?? '') ?? 300,
+    timeoutSec:
+        int.tryParse(dotenv.env['CLOUD_SPOTIFY_FALLBACK_TIMEOUT_SEC'] ?? '') ??
+            5,
+    onError: (dotenv.env['CLOUD_SPOTIFY_FALLBACK_ON_ERROR'] ?? 'true')
+            .toLowerCase() ==
+        'true',
+    errorThreshold: int.tryParse(
+            dotenv.env['CLOUD_SPOTIFY_FALLBACK_ERROR_THRESHOLD'] ?? '') ??
+        3,
+    retryIntervalSec:
+        int.tryParse(dotenv.env['CLOUD_SPOTIFY_RETRY_INTERVAL_SEC'] ?? '') ??
+            10,
+    retryCooldownSec:
+        int.tryParse(dotenv.env['CLOUD_SPOTIFY_RETRY_COOLDOWN_SEC'] ?? '') ??
+            30,
+    retryMaxWindowSec:
+        int.tryParse(dotenv.env['CLOUD_SPOTIFY_RETRY_MAX_WINDOW_SEC'] ?? '') ??
+            300,
   );
 
   // Parse Cloud Sonos fallback config
   // NOTE: Sonos is event-driven (only emits on state change), so timeout is disabled by default (0)
   // Fallback for Sonos relies on WebSocket connection state, not data timeout
   final cloudSonosFallback = ServiceFallbackConfig(
-    timeoutSec: int.tryParse(dotenv.env['CLOUD_SONOS_FALLBACK_TIMEOUT_SEC'] ?? '') ?? 0,  // 0 = disabled (event-driven)
-    onError: (dotenv.env['CLOUD_SONOS_FALLBACK_ON_ERROR'] ?? 'true').toLowerCase() == 'true',
-    errorThreshold: int.tryParse(dotenv.env['CLOUD_SONOS_FALLBACK_ERROR_THRESHOLD'] ?? '') ?? 3,
-    retryIntervalSec: int.tryParse(dotenv.env['CLOUD_SONOS_RETRY_INTERVAL_SEC'] ?? '') ?? 10,
-    retryCooldownSec: int.tryParse(dotenv.env['CLOUD_SONOS_RETRY_COOLDOWN_SEC'] ?? '') ?? 30,
-    retryMaxWindowSec: int.tryParse(dotenv.env['CLOUD_SONOS_RETRY_MAX_WINDOW_SEC'] ?? '') ?? 300,
+    timeoutSec:
+        int.tryParse(dotenv.env['CLOUD_SONOS_FALLBACK_TIMEOUT_SEC'] ?? '') ??
+            0, // 0 = disabled (event-driven)
+    onError:
+        (dotenv.env['CLOUD_SONOS_FALLBACK_ON_ERROR'] ?? 'true').toLowerCase() ==
+            'true',
+    errorThreshold: int.tryParse(
+            dotenv.env['CLOUD_SONOS_FALLBACK_ERROR_THRESHOLD'] ?? '') ??
+        3,
+    retryIntervalSec:
+        int.tryParse(dotenv.env['CLOUD_SONOS_RETRY_INTERVAL_SEC'] ?? '') ?? 10,
+    retryCooldownSec:
+        int.tryParse(dotenv.env['CLOUD_SONOS_RETRY_COOLDOWN_SEC'] ?? '') ?? 30,
+    retryMaxWindowSec:
+        int.tryParse(dotenv.env['CLOUD_SONOS_RETRY_MAX_WINDOW_SEC'] ?? '') ??
+            300,
   );
 
   // Parse global service settings
