@@ -55,7 +55,6 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
   DateTime? _fallbackStartTime;
   DateTime? _lastCooldownTime;
   SpotifyApiClient? _apiClient;
-  int _consecutiveFailures = 0;
   int _consecutive401Errors = 0;
   static const int _max401BeforeStop = 3;
 
@@ -123,7 +122,7 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
       _tokenRefreshTimer = Timer(
         Duration(seconds: refreshInSec),
         () {
-            // debugPrint('[SPOTIFY] Proactive token refresh triggered');
+          // debugPrint('[SPOTIFY] Proactive token refresh triggered');
           _requestTokenRefresh();
         },
       );
@@ -155,7 +154,6 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
       mode: SpotifyPollingMode.idle,
       error: null,
     );
-    _consecutiveFailures = 0;
     _fallbackStartTime = null;
     debugPrint('[SPOTIFY] Polling stopped');
   }
@@ -163,7 +161,6 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
   void _startDirectPolling() {
     _pollTimer?.cancel();
     _retryTimer?.cancel();
-    _consecutiveFailures = 0;
     _fallbackStartTime = null;
 
     state = state.copyWith(
@@ -211,7 +208,6 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
           payload: normalized,
           error: null,
         );
-        _consecutiveFailures = 0;
       }
 
       // Reset 401 counter on success
@@ -257,7 +253,6 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
   }
 
   void _handlePollFailure(String errorMessage) {
-    _consecutiveFailures++;
     final env = ref.read(envConfigProvider);
     final now = DateTime.now();
 
@@ -335,7 +330,6 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
       // Success! Switch back to direct mode
       // debugPrint(
       //     '[SPOTIFY] Background retry succeeded - switching to direct mode');
-      _consecutiveFailures = 0;
       _fallbackStartTime = null;
       _retryTimer?.cancel();
 
@@ -356,8 +350,6 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
 
       _poll(); // Start regular polling
     } catch (e) {
-      _consecutiveFailures++;
-
       // If retry window exceeded, trigger cooldown
       if (_fallbackStartTime != null) {
         final failureDuration = now.difference(_fallbackStartTime!);
@@ -366,7 +358,6 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
           //     '[SPOTIFY] Retry window exhausted - entering cooldown (${env.spotifyDirectCooldownSec}s)');
           _lastCooldownTime = now;
           _fallbackStartTime = now; // Reset for next window
-          _consecutiveFailures = 0;
         }
       }
     }
