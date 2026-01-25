@@ -1,6 +1,104 @@
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+/// Service types for priority-based service selection
+enum ServiceType {
+  directSpotify,
+  cloudSpotify,
+  cloudSonos;
+
+  static ServiceType? fromString(String value) {
+    switch (value.toLowerCase().trim()) {
+      case 'direct_spotify':
+        return ServiceType.directSpotify;
+      case 'cloud_spotify':
+        return ServiceType.cloudSpotify;
+      case 'cloud_sonos':
+        return ServiceType.cloudSonos;
+      default:
+        return null;
+    }
+  }
+
+  String toConfigString() {
+    switch (this) {
+      case ServiceType.directSpotify:
+        return 'direct_spotify';
+      case ServiceType.cloudSpotify:
+        return 'cloud_spotify';
+      case ServiceType.cloudSonos:
+        return 'cloud_sonos';
+    }
+  }
+
+  /// Whether this service requires Spotify to be enabled in user settings
+  bool get requiresSpotify {
+    switch (this) {
+      case ServiceType.directSpotify:
+      case ServiceType.cloudSpotify:
+        return true;
+      case ServiceType.cloudSonos:
+        return false;
+    }
+  }
+
+  /// Whether this service requires Sonos to be enabled in user settings
+  bool get requiresSonos {
+    switch (this) {
+      case ServiceType.directSpotify:
+      case ServiceType.cloudSpotify:
+        return false;
+      case ServiceType.cloudSonos:
+        return true;
+    }
+  }
+
+  /// Whether this service uses the client to poll directly (vs backend)
+  bool get isDirectPolling {
+    return this == ServiceType.directSpotify;
+  }
+
+  /// Whether this service uses WebSocket/cloud backend
+  bool get isCloudService {
+    return this == ServiceType.cloudSpotify || this == ServiceType.cloudSonos;
+  }
+
+  /// Get WebSocket config payload for this service
+  /// Returns {spotify: bool, sonos: bool} for backend polling config
+  ({bool spotify, bool sonos}) get webSocketConfig {
+    switch (this) {
+      case ServiceType.directSpotify:
+        // Client polls directly, backend doesn't need to poll
+        return (spotify: false, sonos: false);
+      case ServiceType.cloudSpotify:
+        // Backend polls Spotify
+        return (spotify: true, sonos: false);
+      case ServiceType.cloudSonos:
+        // Backend polls Sonos
+        return (spotify: false, sonos: true);
+    }
+  }
+}
+
+/// Fallback configuration for a service
+class ServiceFallbackConfig {
+  const ServiceFallbackConfig({
+    required this.timeoutSec,
+    required this.onError,
+    required this.errorThreshold,
+    required this.retryIntervalSec,
+    required this.retryCooldownSec,
+    required this.retryMaxWindowSec,
+  });
+
+  final int timeoutSec;
+  final bool onError;
+  final int errorThreshold;
+  final int retryIntervalSec;
+  final int retryCooldownSec;
+  final int retryMaxWindowSec;
+}
+
 class EnvConfig {
   EnvConfig({
     required this.apiBaseUrl,
@@ -21,6 +119,12 @@ class EnvConfig {
     required this.wsForceReconnIdleSec,
     required this.spotifyDirectApiSslVerify,
     required this.spotifyDirectApiBaseUrl,
+    required this.priorityOrderOfServices,
+    required this.spotifyDirectFallback,
+    required this.cloudSpotifyFallback,
+    required this.cloudSonosFallback,
+    required this.serviceTransitionGraceSec,
+    required this.tokenWaitTimeoutSec,
     this.sonosPollIntervalSec,
   });
 
@@ -43,6 +147,26 @@ class EnvConfig {
   final int wsForceReconnIdleSec;
   final bool spotifyDirectApiSslVerify;
   final String spotifyDirectApiBaseUrl;
+
+  // Service priority configuration
+  final List<ServiceType> priorityOrderOfServices;
+  final ServiceFallbackConfig spotifyDirectFallback;
+  final ServiceFallbackConfig cloudSpotifyFallback;
+  final ServiceFallbackConfig cloudSonosFallback;
+  final int serviceTransitionGraceSec;
+  final int tokenWaitTimeoutSec;
+
+  /// Get the fallback config for a specific service type
+  ServiceFallbackConfig getFallbackConfig(ServiceType service) {
+    switch (service) {
+      case ServiceType.directSpotify:
+        return spotifyDirectFallback;
+      case ServiceType.cloudSpotify:
+        return cloudSpotifyFallback;
+      case ServiceType.cloudSonos:
+        return cloudSonosFallback;
+    }
+  }
 }
 
 final envConfigProvider = Provider<EnvConfig>((ref) {
@@ -82,6 +206,58 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
           'true';
   final spotifyDirectApiBaseUrl =
       dotenv.env['SPOTIFY_DIRECT_API_BASE_URL'] ?? 'https://api.spotify.com/v1';
+
+  // Parse service priority order
+  final priorityOrderString =
+      dotenv.env['PRIORITY_ORDER_OF_SERVICES'] ?? 'direct_spotify,cloud_spotify,cloud_sonos';
+  final priorityOrderOfServices = priorityOrderString
+      .split(',')
+      .map((s) => ServiceType.fromString(s))
+      .whereType<ServiceType>()
+      .toList();
+  // Ensure we have at least one service
+  if (priorityOrderOfServices.isEmpty) {
+    priorityOrderOfServices.addAll([ServiceType.directSpotify, ServiceType.cloudSpotify, ServiceType.cloudSonos]);
+  }
+
+  // Parse Spotify Direct fallback config
+  final spotifyDirectFallback = ServiceFallbackConfig(
+    timeoutSec: int.tryParse(dotenv.env['SPOTIFY_DIRECT_FALLBACK_TIMEOUT_SEC'] ?? '') ?? 5,
+    onError: (dotenv.env['SPOTIFY_DIRECT_FALLBACK_ON_ERROR'] ?? 'true').toLowerCase() == 'true',
+    errorThreshold: int.tryParse(dotenv.env['SPOTIFY_DIRECT_FALLBACK_ERROR_THRESHOLD'] ?? '') ?? 3,
+    retryIntervalSec: int.tryParse(dotenv.env['SPOTIFY_DIRECT_RETRY_INTERVAL_SEC'] ?? '') ?? 10,
+    retryCooldownSec: int.tryParse(dotenv.env['SPOTIFY_DIRECT_RETRY_COOLDOWN_SEC'] ?? '') ?? 30,
+    retryMaxWindowSec: int.tryParse(dotenv.env['SPOTIFY_DIRECT_RETRY_MAX_WINDOW_SEC'] ?? '') ?? 300,
+  );
+
+  // Parse Cloud Spotify fallback config
+  final cloudSpotifyFallback = ServiceFallbackConfig(
+    timeoutSec: int.tryParse(dotenv.env['CLOUD_SPOTIFY_FALLBACK_TIMEOUT_SEC'] ?? '') ?? 5,
+    onError: (dotenv.env['CLOUD_SPOTIFY_FALLBACK_ON_ERROR'] ?? 'true').toLowerCase() == 'true',
+    errorThreshold: int.tryParse(dotenv.env['CLOUD_SPOTIFY_FALLBACK_ERROR_THRESHOLD'] ?? '') ?? 3,
+    retryIntervalSec: int.tryParse(dotenv.env['CLOUD_SPOTIFY_RETRY_INTERVAL_SEC'] ?? '') ?? 10,
+    retryCooldownSec: int.tryParse(dotenv.env['CLOUD_SPOTIFY_RETRY_COOLDOWN_SEC'] ?? '') ?? 30,
+    retryMaxWindowSec: int.tryParse(dotenv.env['CLOUD_SPOTIFY_RETRY_MAX_WINDOW_SEC'] ?? '') ?? 300,
+  );
+
+  // Parse Cloud Sonos fallback config
+  // NOTE: Sonos is event-driven (only emits on state change), so timeout is disabled by default (0)
+  // Fallback for Sonos relies on WebSocket connection state, not data timeout
+  final cloudSonosFallback = ServiceFallbackConfig(
+    timeoutSec: int.tryParse(dotenv.env['CLOUD_SONOS_FALLBACK_TIMEOUT_SEC'] ?? '') ?? 0,  // 0 = disabled (event-driven)
+    onError: (dotenv.env['CLOUD_SONOS_FALLBACK_ON_ERROR'] ?? 'true').toLowerCase() == 'true',
+    errorThreshold: int.tryParse(dotenv.env['CLOUD_SONOS_FALLBACK_ERROR_THRESHOLD'] ?? '') ?? 3,
+    retryIntervalSec: int.tryParse(dotenv.env['CLOUD_SONOS_RETRY_INTERVAL_SEC'] ?? '') ?? 10,
+    retryCooldownSec: int.tryParse(dotenv.env['CLOUD_SONOS_RETRY_COOLDOWN_SEC'] ?? '') ?? 30,
+    retryMaxWindowSec: int.tryParse(dotenv.env['CLOUD_SONOS_RETRY_MAX_WINDOW_SEC'] ?? '') ?? 300,
+  );
+
+  // Parse global service settings
+  final serviceTransitionGraceSec =
+      int.tryParse(dotenv.env['SERVICE_TRANSITION_GRACE_SEC'] ?? '') ?? 2;
+  final tokenWaitTimeoutSec =
+      int.tryParse(dotenv.env['TOKEN_WAIT_TIMEOUT_SEC'] ?? '') ?? 10;
+
   return EnvConfig(
     apiBaseUrl: api,
     eventsWsUrl: ws,
@@ -102,6 +278,12 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
     wsForceReconnIdleSec: wsForceReconnIdleSec,
     spotifyDirectApiSslVerify: spotifyDirectApiSslVerify,
     spotifyDirectApiBaseUrl: spotifyDirectApiBaseUrl,
+    priorityOrderOfServices: priorityOrderOfServices,
+    spotifyDirectFallback: spotifyDirectFallback,
+    cloudSpotifyFallback: cloudSpotifyFallback,
+    cloudSonosFallback: cloudSonosFallback,
+    serviceTransitionGraceSec: serviceTransitionGraceSec,
+    tokenWaitTimeoutSec: tokenWaitTimeoutSec,
   );
 });
 

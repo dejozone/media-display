@@ -10,6 +10,7 @@ import 'package:media_display/src/services/events_ws_service.dart';
 import 'package:media_display/src/services/settings_service.dart';
 import 'package:media_display/src/services/user_service.dart';
 import 'package:media_display/src/services/spotify_direct_service.dart';
+import 'package:media_display/src/services/service_orchestrator.dart';
 import 'package:media_display/src/config/env.dart';
 import 'package:media_display/src/widgets/app_header.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -35,8 +36,11 @@ class _HomePageState extends ConsumerState<HomePage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    // Ensure websocket kicks off as soon as Home loads after login.
+    // Initialize the service orchestrator which handles both direct Spotify and cloud service
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      // Touch the orchestrator to initialize it
+      ref.read(serviceOrchestratorProvider);
+      // Also ensure websocket kicks off for backward compatibility
       ref.read(eventsWsProvider.notifier).connect();
     });
     _loadData();
@@ -71,12 +75,12 @@ class _HomePageState extends ConsumerState<HomePage>
       return;
     }
 
-    // If paused for more than threshold, force reconnect
+    // If paused for more than threshold, force reconnect via orchestrator
     final env = ref.read(envConfigProvider);
     if (pauseDuration.inSeconds > env.wsForceReconnIdleSec) {
-      ref.read(eventsWsProvider.notifier).reconnect();
+      ref.read(serviceOrchestratorProvider.notifier).reconnect();
     }
-    // For medium pauses (5-30s), the WebSocket should still be connected
+    // For medium pauses (5-30s), the services should still be connected
     // and will handle token refresh automatically - no action needed
   }
 
@@ -121,6 +125,16 @@ class _HomePageState extends ConsumerState<HomePage>
           .updateSettingsForUser(userId, partial);
       if (!mounted) return;
       setState(() => settings = next);
+
+      // Update the orchestrator with new service settings
+      final spotifyEnabled = next['spotify_enabled'] == true;
+      final sonosEnabled = next['sonos_enabled'] == true;
+      ref.read(serviceOrchestratorProvider.notifier).updateServicesEnabled(
+        spotifyEnabled: spotifyEnabled,
+        sonosEnabled: sonosEnabled,
+      );
+
+      // Also send config to WebSocket for backward compatibility
       final ws = ref.read(eventsWsProvider.notifier);
       await ws.sendConfig();
     } catch (e) {
@@ -180,13 +194,7 @@ class _HomePageState extends ConsumerState<HomePage>
     }
 
     await _updateSettings({'spotify_enabled': enable});
-
-    // Start or stop direct polling based on toggle
-    if (enable) {
-      // Direct polling will start automatically when token is received
-    } else {
-      ref.read(spotifyDirectProvider.notifier).stopPolling();
-    }
+    // Service orchestrator handles starting/stopping services automatically
   }
 
   Future<void> _handleSonosToggle(bool enable) async {
@@ -195,21 +203,58 @@ class _HomePageState extends ConsumerState<HomePage>
 
   @override
   Widget build(BuildContext context) {
+    // Watch unified playback state from orchestrator
+    final unifiedState = ref.watch(serviceOrchestratorProvider);
+    
+    // Also watch individual services for backward compatibility / fallback
     final now = ref.watch(eventsWsProvider);
     final directState = ref.watch(spotifyDirectProvider);
 
-    // Merge states: use direct polling data when in direct mode
-    final effectivePayload = directState.mode == SpotifyPollingMode.direct
-        ? directState.payload
-        : now.payload;
-    final effectiveProvider = directState.mode == SpotifyPollingMode.direct
-        ? 'spotify'
-        : now.provider;
-    final effectiveError = directState.mode == SpotifyPollingMode.direct
-        ? directState.error
-        : now.error;
-    final effectiveConnected = now.connected;
-    final effectiveMode = directState.mode;
+    // Use unified state from orchestrator if available, otherwise fall back to old logic
+    final Map<String, dynamic>? effectivePayload;
+    final String? effectiveProvider;
+    final String? effectiveError;
+    final bool effectiveConnected;
+    final SpotifyPollingMode effectiveMode;
+    final ServiceType? activeService;
+
+    if (unifiedState.hasData || unifiedState.isLoading) {
+      // Use orchestrator's unified state
+      effectivePayload = unifiedState.track != null
+          ? {
+              'track': unifiedState.track,
+              'playback': unifiedState.playback,
+              'device': unifiedState.device,
+              'provider': unifiedState.provider,
+            }
+          : null;
+      effectiveProvider = unifiedState.provider;
+      effectiveError = unifiedState.error;
+      effectiveConnected = unifiedState.isConnected;
+      activeService = unifiedState.activeService;
+      // Map ServiceType to SpotifyPollingMode for backward compatibility
+      effectiveMode = activeService == ServiceType.directSpotify
+          ? SpotifyPollingMode.direct
+          : (activeService?.isCloudService == true
+              ? SpotifyPollingMode.fallback
+              : SpotifyPollingMode.idle);
+    } else {
+      // Fall back to old logic during transition
+      effectivePayload = directState.mode == SpotifyPollingMode.direct
+          ? directState.payload
+          : now.payload;
+      effectiveProvider = directState.mode == SpotifyPollingMode.direct
+          ? 'spotify'
+          : now.provider;
+      effectiveError = directState.mode == SpotifyPollingMode.direct
+          ? directState.error
+          : now.error;
+      effectiveConnected = now.connected;
+      effectiveMode = directState.mode;
+      activeService = directState.mode == SpotifyPollingMode.direct
+          ? ServiceType.directSpotify
+          : (now.connected ? ServiceType.cloudSpotify : null);
+    }
 
     final scaffold = Scaffold(
       body: Container(
@@ -274,6 +319,7 @@ class _HomePageState extends ConsumerState<HomePage>
                       settings: settings,
                       wsRetrying: now.wsRetrying,
                       wsInCooldown: now.wsInCooldown,
+                      activeService: activeService,
                     ),
                   ),
                 ],
@@ -369,6 +415,7 @@ class _NowPlayingSection extends StatelessWidget {
     required this.settings,
     required this.wsRetrying,
     required this.wsInCooldown,
+    this.activeService,
   });
   final String? provider;
   final Map<String, dynamic>? payload;
@@ -378,6 +425,7 @@ class _NowPlayingSection extends StatelessWidget {
   final Map<String, dynamic>? settings;
   final bool wsRetrying;
   final bool wsInCooldown;
+  final ServiceType? activeService;
 
   @override
   Widget build(BuildContext context) {
@@ -451,6 +499,7 @@ class _NowPlayingSection extends StatelessWidget {
               provider: effectiveProvider,
               wsRetrying: wsRetrying,
               wsInCooldown: wsInCooldown,
+              activeService: activeService,
             ),
           ],
         ),
@@ -618,6 +667,7 @@ class _EqualizerIndicator extends StatefulWidget {
     required this.provider,
     required this.wsRetrying,
     required this.wsInCooldown,
+    this.activeService,
   });
   final bool isConnected;
   final bool isPlaying;
@@ -625,6 +675,7 @@ class _EqualizerIndicator extends StatefulWidget {
   final String? provider;
   final bool wsRetrying;
   final bool wsInCooldown;
+  final ServiceType? activeService;
 
   @override
   State<_EqualizerIndicator> createState() => _EqualizerIndicatorState();
@@ -689,56 +740,74 @@ class _EqualizerIndicatorState extends State<_EqualizerIndicator>
 
   @override
   Widget build(BuildContext context) {
-    // Determine color based on connection state:
-    // - WS retrying (not cooldown) → blink green
-    // - WS in cooldown → blink red
-    // - Connected + direct mode → solid green (animated if playing)
-    // - Connected + fallback mode → solid yellow (animated if playing)
-    // - Offline/idle → solid red (animated if playing)
+    // Determine color based on active service and connection state:
+    // - direct_spotify active → Green (#22C55E)
+    // - cloud_spotify active → Light Blue (#38BDF8)
+    // - cloud_sonos active → Cyan (#06B6D4)
+    // - Not connected / retrying → blink appropriate color
+    // - In cooldown → blink red
+    // - No active service → red
     final Color color;
     final bool shouldBlink;
+
+    // Color definitions
+    const greenColor = Color(0xFF22C55E);  // Direct Spotify
+    const lightBlueColor = Color(0xFF38BDF8);  // Cloud Spotify
+    const cyanColor = Color(0xFF06B6D4);  // Cloud Sonos
+    const redColor = Color(0xFFEF4444);  // Disconnected/Error
+    const purpleColor = Color.fromARGB(255, 163, 92, 211);  // Retrying without playback
+
+    /// Get color for a service type
+    Color getServiceColor(ServiceType? service) {
+      switch (service) {
+        case ServiceType.directSpotify:
+          return greenColor;
+        case ServiceType.cloudSpotify:
+          return lightBlueColor;
+        case ServiceType.cloudSonos:
+          return cyanColor;
+        case null:
+          return redColor;
+      }
+    }
 
     if (!widget.isConnected) {
       // Not connected - check retry state
       if (widget.wsInCooldown) {
         // In cooldown - blink red
-        color = const Color(0xFFEF4444); // Red
+        color = redColor;
         shouldBlink = true;
       } else if (widget.wsRetrying) {
         // Actively retrying - color depends on playback state
         if (widget.isPlaying) {
-          color =
-              const Color(0xFF22C55E); // Green - music playing while retrying
+          // Use the active service color while retrying
+          color = getServiceColor(widget.activeService);
         } else {
-          color = const Color.fromARGB(
-              255, 163, 92, 211); // Purple - not playing while retrying
+          color = purpleColor; // Not playing while retrying
         }
         shouldBlink = true;
       } else {
         // Not retrying at all (exhausted or initial) - blink red
-        color = const Color(0xFFEF4444); // Red
+        color = redColor;
         shouldBlink = true;
       }
     } else {
-      // Connected - determine color based on playback state and mode
-      // When we have an active provider (Sonos or Spotify fallback), use green/yellow
-      // regardless of SpotifyPollingMode (which only tracks direct Spotify polling)
-      final hasActiveProvider =
-          widget.provider != null && widget.provider!.isNotEmpty;
-
-      if (widget.mode == SpotifyPollingMode.direct) {
-        // Spotify direct polling active
-        color = const Color(0xFF22C55E); // Green
-      } else if (hasActiveProvider ||
-          widget.mode == SpotifyPollingMode.fallback) {
-        // Sonos active or Spotify fallback mode
-        // Green if playing, yellow if paused
-        color = widget.isPlaying
-            ? const Color(0xFF22C55E) // Green
-            : const Color(0xFFFBBF24); // Yellow
+      // Connected - determine color based on active service
+      if (widget.activeService != null) {
+        color = getServiceColor(widget.activeService);
       } else {
-        // No active service (offline/idle with no provider)
-        color = const Color(0xFFEF4444); // Red
+        // Fallback to old logic for backward compatibility
+        final hasActiveProvider =
+            widget.provider != null && widget.provider!.isNotEmpty;
+
+        if (widget.mode == SpotifyPollingMode.direct) {
+          color = greenColor;
+        } else if (hasActiveProvider ||
+            widget.mode == SpotifyPollingMode.fallback) {
+          color = lightBlueColor;
+        } else {
+          color = redColor;
+        }
       }
       shouldBlink = !widget.isPlaying;
     }

@@ -184,17 +184,23 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
     _startDirectPolling();
   }
 
-  /// Stops all polling
+  /// Stops all polling and cancels all timers
   void stopPolling() {
     _pollTimer?.cancel();
+    _pollTimer = null;
     _retryTimer?.cancel();
+    _retryTimer = null;
+    _tokenCheckTimer?.cancel();
+    _tokenCheckTimer = null;
+    _tokenRefreshTimer?.cancel();
+    _tokenRefreshTimer = null;
     _tokenRequestPending = false;
     state = state.copyWith(
       mode: SpotifyPollingMode.idle,
       error: null,
     );
     _fallbackStartTime = null;
-    debugPrint('[SPOTIFY] Polling stopped');
+    debugPrint('[SPOTIFY] Polling stopped (all timers cancelled)');
   }
 
   void _startDirectPolling() {

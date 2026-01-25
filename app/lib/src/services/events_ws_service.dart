@@ -346,6 +346,103 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     connect();
   }
 
+  /// Send WebSocket config for a specific service type
+  /// This is called by the ServiceOrchestrator when switching services
+  Future<void> sendConfigForService(ServiceType service) async {
+    try {
+      final wsConfig = service.webSocketConfig;
+      final env = ref.read(envConfigProvider);
+      
+      // Get poll intervals from settings or defaults
+      Map<String, dynamic>? settings = _lastSettings;
+      if (settings == null) {
+        try {
+          final user = await ref.read(userServiceProvider).fetchMe();
+          final userId = user['id']?.toString() ?? '';
+          if (userId.isNotEmpty) {
+            settings = await ref.read(settingsServiceProvider).fetchSettingsForUser(userId);
+            _lastSettings = settings;
+          }
+        } catch (_) {
+          // Use defaults
+        }
+      }
+
+      int? asInt(dynamic v) {
+        if (v is int) return v;
+        if (v is double) return v.toInt();
+        if (v is String) return int.tryParse(v);
+        return null;
+      }
+
+      final spotifyPoll = asInt(settings?['spotify_poll_interval_sec']) ?? env.spotifyPollIntervalSec;
+      final sonosPoll = asInt(settings?['sonos_poll_interval_sec']) ?? env.sonosPollIntervalSec;
+
+      // Determine if we need a token
+      // Token is needed for direct_spotify (client polls) and cloud_spotify (backend polls)
+      final needToken = service.requiresSpotify;
+      
+      // Check if we should request token
+      final directState = ref.read(spotifyDirectProvider);
+      final hasValidToken = directState.accessToken != null &&
+          directState.tokenExpiresAt != null &&
+          directState.tokenExpiresAt! > (DateTime.now().millisecondsSinceEpoch ~/ 1000) + 60;
+      
+      final now = DateTime.now();
+      final tokenRequestDebounced = _lastTokenRequestTime != null &&
+          now.difference(_lastTokenRequestTime!).inSeconds < 5;
+      
+      final shouldRequestToken = needToken && (!hasValidToken && !tokenRequestDebounced);
+
+      debugPrint('[WS] sendConfigForService: service=$service, '
+          'wsConfig=(spotify=${wsConfig.spotify}, sonos=${wsConfig.sonos}), '
+          'needToken=$needToken, hasValidToken=$hasValidToken, '
+          'shouldRequestToken=$shouldRequestToken');
+
+      final payload = jsonEncode({
+        'type': 'config',
+        if (shouldRequestToken) 'need_spotify_token': true,
+        'enabled': {
+          'spotify': wsConfig.spotify,
+          'sonos': wsConfig.sonos,
+        },
+        'poll': {
+          'spotify': spotifyPoll,
+          'sonos': sonosPoll ?? env.spotifyPollIntervalSec,
+        },
+      });
+
+      // If no channel, try to connect first
+      if (_channel == null) {
+        final auth = ref.read(authStateProvider);
+        if (!auth.isAuthenticated || _connecting) return;
+        await _connect(auth, caller: 'sendConfigForService');
+        // After connect, send config again
+        if (_channel != null) {
+          if (shouldRequestToken) {
+            _lastTokenRequestTime = DateTime.now();
+          }
+          _channel?.sink.add(payload);
+          _initialConfigSent = true;
+        }
+        return;
+      }
+
+      // Update debounce timestamp
+      if (shouldRequestToken) {
+        _lastTokenRequestTime = DateTime.now();
+      }
+
+      // Mark initial config as sent
+      _initialConfigSent = true;
+
+      // Send the config
+      _channel?.sink.add(payload);
+    } catch (e) {
+      debugPrint('[WS] sendConfigForService error: $e');
+    }
+  }
+
   /// Public method to refresh token via REST API
   /// Useful when WebSocket is unavailable
   Future<void> refreshTokenViaRestApi() async {
