@@ -10,7 +10,7 @@ from typing import Any, Awaitable, Callable, Dict, Optional, Set, Tuple
 import httpx
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, HTTPException, Request
+from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.websockets import WebSocketState
 
@@ -680,6 +680,9 @@ async def media_events(ws: WebSocket) -> None:
                     await ctx.driver_task
                 ACTIVE_TASKS.discard(ctx.driver_task)
                 ctx.driver_task = None
+
+            # Reset stop_event so the token refresh runner can continue
+            ctx.stop_event.clear()
 
             token_state = await _ensure_access_token(
                 ctx=ctx,

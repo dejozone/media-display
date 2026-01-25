@@ -40,12 +40,14 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   late final WsRetryPolicy _retryPolicy;
   bool _connecting = false;
   bool _connectionConfirmed = false;
+  bool _initialConfigSent = false; // Track if initial config sent after connect
   Map<String, dynamic>? _lastSettings;
   bool _useDirectPolling = false;
   bool _tokenRequested = false;
   DateTime? _lastTokenRequestTime;
   bool _wsTokenReceived =
       false; // Track if WS has sent a token (prefer WS over REST)
+  bool _lastSpotifyEnabled = false; // Track previous Spotify enabled state
 
   @override
   NowPlayingState build() {
@@ -302,9 +304,11 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     _channel?.sink.close();
     _channel = null;
     _connectionConfirmed = false;
+    _initialConfigSent = false; // Reset so next connect requests token
     _wsTokenReceived = false; // Reset so REST API can be used as fallback
     _lastTokenRequestTime =
         null; // Reset debounce - any pending token request was lost
+    _lastSpotifyEnabled = false; // Reset so next enable triggers token request
 
     // If not scheduling retry (intentional disconnect), reset retry policy
     // so future manual reconnection attempts can proceed
@@ -378,6 +382,10 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       final sonosEnabled = settings['sonos_enabled'] == true;
       final hasService = spotifyEnabled || sonosEnabled;
 
+      // Detect if Spotify was just toggled ON
+      final spotifyJustEnabled = spotifyEnabled && !_lastSpotifyEnabled;
+      _lastSpotifyEnabled = spotifyEnabled; // Update tracking
+
       // Determine if we should use direct polling
       final directMode = ref.read(spotifyDirectProvider).mode;
       _useDirectPolling =
@@ -436,10 +444,28 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       final tokenRequestDebounced = _lastTokenRequestTime != null &&
           now.difference(_lastTokenRequestTime!).inSeconds < 5;
 
-      // Only request token if we don't have a valid one and not debounced
-      // OR if this is a forced refresh request (proactive refresh before expiry)
+      // Track if this is the first config after a fresh connection
+      final isInitialConfig = !_initialConfigSent;
+
+      // Request token if:
+      // 1. This is initial config after connect (server needs to start token refresh scheduler)
+      // 2. OR Spotify was just toggled ON (server needs to restart token refresh scheduler)
+      // 3. OR forced refresh request (proactive refresh before expiry)
+      // 4. OR we don't have a valid token and not debounced
       final needToken = spotifyEnabled &&
-          (forceTokenRequest || (!hasValidToken && !tokenRequestDebounced));
+          (isInitialConfig ||
+              spotifyJustEnabled ||
+              forceTokenRequest ||
+              (!hasValidToken && !tokenRequestDebounced));
+
+      // Debug logging to understand token request decisions
+      debugPrint('[WS] sendConfig decision: spotifyEnabled=$spotifyEnabled, '
+          'isInitialConfig=$isInitialConfig, '
+          'spotifyJustEnabled=$spotifyJustEnabled, '
+          'hasValidToken=$hasValidToken (token=${directState.accessToken != null}, '
+          'expiresAt=${directState.tokenExpiresAt}), '
+          'debounced=$tokenRequestDebounced (lastReq=$_lastTokenRequestTime), '
+          'forceRefresh=$forceTokenRequest => needToken=$needToken');
 
       // Disable backend services when in direct polling mode
       final backendSpotifyEnabled =
@@ -492,6 +518,9 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
         _lastTokenRequestTime = DateTime.now();
       }
 
+      // Mark initial config as sent
+      _initialConfigSent = true;
+
       // Cancel any pending retry timer since we have a valid channel
       _retryTimer?.cancel();
 
@@ -530,9 +559,9 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
         // Only connect if not already connected - don't disrupt existing connection
         if (_channel == null && !_connecting) {
           await _connect(auth, caller: 'refreshAndMaybeConnect');
-        // } else {
-        //   debugPrint(
-        //       '[WS] _refreshAndMaybeConnect skipped - already connected');
+          // } else {
+          //   debugPrint(
+          //       '[WS] _refreshAndMaybeConnect skipped - already connected');
         }
       } else {
         _disconnect(scheduleRetry: false);
@@ -590,7 +619,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
           expiresAtInt = int.tryParse(expiresAt.toString()) ?? 0;
         }
 
-          // debugPrint('[SPOTIFY] Token fetched via REST API');
+        // debugPrint('[SPOTIFY] Token fetched via REST API');
         ref.read(spotifyDirectProvider.notifier).updateToken(
               accessToken,
               expiresAtInt,

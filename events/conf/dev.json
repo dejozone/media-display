@@ -20,7 +20,7 @@
     "retryIntervalSec": 2,
     "retryWindowSec": 20,
     "cooldownSec": 30,
-    "tokenRefreshLeadTimeSec": 300,
+    "tokenRefreshLeadTimeSec": 3540,
     "tokenRefreshJitterSec": 30
   },
   "sonos": {
