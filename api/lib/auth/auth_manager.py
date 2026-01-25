@@ -516,8 +516,13 @@ class AuthManager:
         logger.info(f"Refreshed Spotify token for user {user_id}; expires_at={refreshed['expires_at']}")
         return refreshed.get('access_token')
 
-    def get_spotify_access_token_with_expiry(self, user_id: str) -> Optional[Dict[str, Any]]:
-        """Get Spotify access token and its expiry timestamp (epoch seconds)."""
+    def get_spotify_access_token_with_expiry(self, user_id: str, force_refresh: bool = False) -> Optional[Dict[str, Any]]:
+        """Get Spotify access token and its expiry timestamp (epoch seconds).
+        
+        Args:
+            user_id: The user ID to get token for
+            force_refresh: If True, bypass cache check and refresh token from Spotify
+        """
         tokens = self._get_db_spotify_tokens(user_id)
         if not tokens:
             logger.warning(f"No Spotify tokens cached for user {user_id}")
@@ -528,12 +533,15 @@ class AuthManager:
             return None
         now = int(time.time())
         expires_at = tokens.get('token_expires_at', 0)
-        if expires_at > now + 30:
+        # Return cached token if valid and not forcing refresh
+        if not force_refresh and expires_at > now + 30:
             logger.debug(f"Using cached Spotify access token for user {user_id}")
             return {
                 'access_token': tokens.get('access_token'),
                 'expires_at': expires_at,
             }
+        if force_refresh:
+            logger.info(f"Force refreshing Spotify token for user {user_id}")
         refresh_token = tokens.get('refresh_token')
         if not refresh_token:
             logger.warning(f"No refresh token available for user {user_id}")

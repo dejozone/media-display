@@ -380,8 +380,11 @@ def get_service_access_token(user_id: str, service: str):
     if service != 'spotify':
         return jsonify({'error': 'Unsupported service'}), 400
     
-    server_logger.debug(f"/api/users/{user_id}/services/{service}/access-token requested by user_id={g.user_id}")
-    token_data = auth_manager.get_spotify_access_token_with_expiry(g.user_id)
+    # Check for force_refresh parameter - bypasses cache and forces token refresh from Spotify
+    force_refresh = request.args.get('force_refresh', '').lower() in ('true', '1', 'yes')
+    
+    server_logger.debug(f"/api/users/{user_id}/services/{service}/access-token requested by user_id={g.user_id} force_refresh={force_refresh}")
+    token_data = auth_manager.get_spotify_access_token_with_expiry(g.user_id, force_refresh=force_refresh)
     if not token_data:
         server_logger.warning("Access token fetch failed: no tokens or refresh failure")
         return jsonify({'error': 'spotify_not_connected_or_token_invalid', 'code': 'ERR_SPOTIFY_4001', 'message': 'Spotify token is missing or expired. Please reconnect Spotify.'}), 400

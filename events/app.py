@@ -204,17 +204,19 @@ async def fetch_settings(token: str) -> Dict[str, Any]:
 
 
 async def _fetch_spotify_access_token(
-    *, user_id: str, user_token: str, http_client: httpx.AsyncClient
+    *, user_id: str, user_token: str, http_client: httpx.AsyncClient, force_refresh: bool = False
 ) -> Optional[Dict[str, Any]]:
     headers = {"Authorization": f"Bearer {user_token}"}
+    params = {"force_refresh": "true"} if force_refresh else {}
     try:
         resp = await http_client.get(
             f"{API_BASE_URL}/api/users/{user_id}/services/spotify/access-token",
             headers=headers,
+            params=params,
         )
         if resp.status_code != 200:
             logger.warning(
-                "spotify token fetch failed status=%s user=%s", resp.status_code, user_id
+                "spotify token fetch failed status=%s user=%s force_refresh=%s", resp.status_code, user_id, force_refresh
             )
             return None
         data = resp.json() or {}
@@ -240,13 +242,15 @@ async def _ensure_access_token(
     ctx: UserContext,
     service: str,
     subscribe_channel: Optional[MultiSessionChannel] = None,
+    force_refresh: bool = False,
 ) -> Optional[Dict[str, Any]]:
     assert HTTP_CLIENT is not None
     cache_key = (ctx.user_id, service)
     state = TOKEN_CACHE.get(cache_key)
     now = time.time()
 
-    if state:
+    # Skip cache if force_refresh is requested
+    if not force_refresh and state:
         access_token = state.get("access_token")
         expires_at = state.get("expires_at", 0)
         if access_token and expires_at - TOKEN_REFRESH_LEAD > now:
@@ -255,7 +259,8 @@ async def _ensure_access_token(
     async with ctx.token_lock:
         state = TOKEN_CACHE.get(cache_key)
         now = time.time()
-        if state:
+        # Skip cache if force_refresh is requested
+        if not force_refresh and state:
             access_token = state.get("access_token")
             expires_at = state.get("expires_at", 0)
             if access_token and expires_at - TOKEN_REFRESH_LEAD > now:
@@ -268,6 +273,7 @@ async def _ensure_access_token(
             user_id=ctx.user_id,
             user_token=ctx.token,
             http_client=HTTP_CLIENT,
+            force_refresh=force_refresh,
         )
         if not fetched:
             return None
@@ -288,12 +294,17 @@ def _schedule_token_refresh(
 
     existing = TOKEN_TASKS.get(cache_key)
     if existing and not existing.done():
+        logger.info("token refresh task already running user=%s", ctx.user_id)
         return
 
+    logger.info("scheduling token refresh task user=%s", ctx.user_id)
+
     async def _runner() -> None:
+        logger.info("token refresh runner started user=%s", ctx.user_id)
         while channel.has_sessions() and not ctx.stop_event.is_set():
             state = TOKEN_CACHE.get(cache_key)
             if not state:
+                logger.warning("token refresh runner: no cached state, exiting user=%s", ctx.user_id)
                 break
             expires_at = state.get("expires_at", 0)
             now = time.time()
@@ -302,10 +313,11 @@ def _schedule_token_refresh(
             # If token is already expired or expiring very soon, fetch immediately
             if time_until_expiry < 60:
                 refresh_in = 0.0
-            # If token has less time than TOKEN_REFRESH_LEAD, wait until closer to expiry
+            # If token has less time than TOKEN_REFRESH_LEAD, we're already past the
+            # intended refresh point - refresh soon with a small delay + jitter
             elif time_until_expiry < TOKEN_REFRESH_LEAD:
-                # Wait until 60 seconds before expiry
-                refresh_in = max(10.0, time_until_expiry - 60)
+                # Already past refresh point, refresh within 10-40 seconds
+                refresh_in = 10.0 + random.uniform(0, TOKEN_REFRESH_JITTER)
             else:
                 # Normal case: refresh TOKEN_REFRESH_LEAD seconds before expiry
                 refresh_in = time_until_expiry - TOKEN_REFRESH_LEAD
@@ -314,11 +326,25 @@ def _schedule_token_refresh(
                 # Ensure minimum sleep time
                 refresh_in = max(10.0, refresh_in)
 
+            logger.info(
+                "token refresh runner: time_until_expiry=%.1fs, TOKEN_REFRESH_LEAD=%ds, refresh_in=%.1fs user=%s",
+                time_until_expiry, TOKEN_REFRESH_LEAD, refresh_in, ctx.user_id
+            )
+
             if refresh_in > 0:
                 try:
                     await asyncio.wait_for(asyncio.sleep(refresh_in), timeout=refresh_in + 1)
                 except asyncio.CancelledError:
+                    logger.info("token refresh runner: cancelled during sleep user=%s", ctx.user_id)
                     break
+
+            # Check conditions again after sleep
+            if not channel.has_sessions():
+                logger.info("token refresh runner: no sessions after sleep, exiting user=%s", ctx.user_id)
+                break
+            if ctx.stop_event.is_set():
+                logger.info("token refresh runner: stop_event set after sleep, exiting user=%s", ctx.user_id)
+                break
 
             new_state = await _ensure_access_token(
                 ctx=ctx,
@@ -338,13 +364,43 @@ def _schedule_token_refresh(
             old_expires = state.get("expires_at", 0)
             new_expires = new_state.get("expires_at", 0)
             if new_expires <= old_expires:
-                # Token hasn't been refreshed yet (same or older), wait longer
-                logger.info("spotify token not refreshed yet user=%s, waiting", ctx.user_id)
-                try:
-                    await asyncio.sleep(30)
-                except asyncio.CancelledError:
-                    break
-                continue
+                # Token hasn't been refreshed yet (same or older)
+                # Try again with force_refresh to get a new token from Spotify
+                logger.info("spotify token same as before user=%s, retrying with force_refresh", ctx.user_id)
+                new_state = await _ensure_access_token(
+                    ctx=ctx,
+                    service=service,
+                    subscribe_channel=None,
+                    force_refresh=True,
+                )
+                if not new_state:
+                    logger.warning("spotify token force refresh failed user=%s", ctx.user_id)
+                    try:
+                        await asyncio.sleep(30)
+                    except asyncio.CancelledError:
+                        break
+                    continue
+                
+                new_expires = new_state.get("expires_at", 0)
+                if new_expires <= old_expires:
+                    # Still the same token even after force refresh
+                    # This means the token hasn't actually expired yet at Spotify's end
+                    # Wait until closer to actual expiry
+                    time_until_expiry = old_expires - time.time()
+                    if time_until_expiry > 120:
+                        wait_time = time_until_expiry - 60  # Try again 1 minute before expiry
+                        logger.info(
+                            "spotify token still not refreshed user=%s, waiting %.1fs until closer to expiry",
+                            ctx.user_id, wait_time
+                        )
+                    else:
+                        wait_time = 30.0
+                        logger.info("spotify token still not refreshed user=%s, waiting %.1fs", ctx.user_id, wait_time)
+                    try:
+                        await asyncio.sleep(wait_time)
+                    except asyncio.CancelledError:
+                        break
+                    continue
 
             try:
                 logger.info("emitting spotify_token via scheduled refresh user=%s", ctx.user_id)
@@ -359,12 +415,14 @@ def _schedule_token_refresh(
                 logger.warning("spotify token broadcast failed user=%s", ctx.user_id)
                 continue
 
+        logger.info("token refresh runner exited user=%s", ctx.user_id)
         _discard_task(asyncio.current_task())
         TOKEN_TASKS.pop(cache_key, None)
 
     task = asyncio.create_task(_runner())
     TOKEN_TASKS[cache_key] = task
     ACTIVE_TASKS.add(task)
+    logger.info("token refresh task created user=%s task_id=%s", ctx.user_id, id(task))
 
 
 async def _spotify_fallback_loop(
