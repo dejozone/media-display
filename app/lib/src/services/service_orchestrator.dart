@@ -202,7 +202,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       debugPrint(
           '[Orchestrator] Active service changed: $prevService -> $currentService');
 
-      // Update state with new service
+      // Update state with new service - preserve existing track data
       state = state.copyWith(
         activeService: currentService,
         isLoading: next.isTransitioning,
@@ -377,63 +377,128 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
         debugPrint(
             '[Orchestrator] Primary service $dataSource resumed playing!');
         _handlePrimaryServiceResumed();
-        return;
+        // Don't return - continue to process the payload below
       }
     }
 
-    // Only process if a cloud service (cloud_spotify or local_sonos) is active
-    if (currentService == null || !currentService.isCloudService) return;
+    // Check if this data source is enabled
+    final isDataSourceEnabled =
+        dataSource != null && priority.enabledServices.contains(dataSource);
+
+    // Process if:
+    // 1. A cloud service is currently active and this data is from that service, OR
+    // 2. The data source is enabled (even if not currently active - for multi-source awareness)
+    final isCurrentCloudService = currentService != null &&
+        currentService.isCloudService &&
+        (dataSource == currentService || dataSource == null);
+
+    // If this is Sonos data and Sonos is enabled, always process it
+    // This allows Sonos to be monitored even when Spotify Direct is active
+    final shouldProcessSonosData =
+        dataSource == ServiceType.localSonos && isDataSourceEnabled;
+
+    if (!isCurrentCloudService && !shouldProcessSonosData) {
+      return;
+    }
 
     // Check connection status
     if (!wsState.connected) {
-      // Check if we're in retry/cooldown or completely disconnected
-      if (wsState.error != null && !wsState.wsRetrying) {
+      // Only report errors if this is the current service
+      if (isCurrentCloudService &&
+          wsState.error != null &&
+          !wsState.wsRetrying) {
         debugPrint(
             '[Orchestrator] Cloud service disconnected: ${wsState.error}');
-        ref.read(servicePriorityProvider.notifier).reportError(currentService);
+        ref.read(servicePriorityProvider.notifier).reportError(currentService!);
       }
       return;
     }
 
+    // Determine which service to attribute this data to
+    final effectiveService = dataSource ?? currentService;
+    if (effectiveService == null) return;
+
     // Process payload if available
     if (wsState.payload != null) {
+      final track = wsState.payload!['track'] as Map<String, dynamic>?;
       final playback = wsState.payload!['playback'] as Map<String, dynamic>?;
       final isPlaying = playback?['is_playing'] as bool? ?? false;
-      final wasPlaying = _lastIsPlaying[currentService] ?? false;
-      _lastIsPlaying[currentService] = isPlaying;
+      final wasPlaying = _lastIsPlaying[effectiveService] ?? false;
+      _lastIsPlaying[effectiveService] = isPlaying;
+      final hasTrackInfo = _hasValidTrackInfo(track);
+
+      // Check if this data source is different from current active service
+      final isFromDifferentService = effectiveService != currentService;
+
+      // Check if current service is playing (to decide on switching)
+      final currentServicePlaying =
+          currentService != null && (_lastIsPlaying[currentService] ?? false);
 
       if (isPlaying) {
         // Playing - cancel pause timer
         _cancelPauseTimer();
 
+        // If Sonos starts playing but we're on a different service, switch to Sonos
+        if (isFromDifferentService &&
+            effectiveService == ServiceType.localSonos) {
+          debugPrint(
+              '[Orchestrator] Sonos started playing while on $currentService - switching to Sonos');
+          ref
+              .read(servicePriorityProvider.notifier)
+              .switchToService(effectiveService);
+        }
+
         // Only reset cycling state if this IS the primary service we're waiting for
         // If we're on a fallback service and it's playing, keep waiting for primary
         if (!_waitingForPrimaryResume ||
-            _originalPrimaryService == currentService) {
+            _originalPrimaryService == effectiveService) {
           _resetCyclingState();
         }
-      } else if (_config.enableServiceCycling) {
+      } else if (isFromDifferentService &&
+          effectiveService == ServiceType.localSonos &&
+          hasTrackInfo &&
+          !currentServicePlaying) {
+        // Sonos is paused with valid track info, and current service is also not playing
+        // This means user switched their playback device to Sonos (even while paused)
+        // Switch to show Sonos data
+        debugPrint(
+            '[Orchestrator] Sonos has track data while $currentService is not playing - switching to Sonos');
+        ref
+            .read(servicePriorityProvider.notifier)
+            .switchToService(effectiveService);
+      } else if (_config.enableServiceCycling && !isFromDifferentService) {
         // Not playing - check if we should cycle based on status
+        // Only handle cycling logic for the CURRENT service, not background services
         // Only start cycling if we're NOT already waiting for primary to resume
         if (!_waitingForPrimaryResume) {
           final status = playback?['status'] as String?;
-          
+
           // Only log on state transition (from playing to not playing)
           if (wasPlaying) {
             debugPrint(
-                '[Orchestrator] $currentService not playing - status: $status');
+                '[Orchestrator] $effectiveService not playing - status: $status, hasTrackInfo: $hasTrackInfo');
           }
-          
-          // Use status-based logic for Sonos
-          if (currentService == ServiceType.localSonos) {
-            _handleSonosPausedWithStatus(status);
+
+          // Use status-based logic for Sonos (with track info awareness)
+          if (effectiveService == ServiceType.localSonos) {
+            _handleSonosPausedWithStatus(status, hasTrackInfo: hasTrackInfo);
           } else {
-            _handleServicePaused(currentService);
+            _handleServicePaused(effectiveService);
           }
         }
       }
 
-      _processPayload(wsState.payload!, currentService);
+      // Update state/UI if:
+      // 1. This is for the current active service, OR
+      // 2. This service is playing, OR
+      // 3. This service has valid track data and current service is not playing
+      final shouldUpdateUI = !isFromDifferentService ||
+          isPlaying ||
+          (hasTrackInfo && !currentServicePlaying);
+
+      if (shouldUpdateUI) {
+        _processPayload(wsState.payload!, effectiveService);
+      }
     }
   }
 
@@ -495,7 +560,8 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
     // 0 means disabled - don't cycle for this service
     if (waitSec <= 0) {
-      debugPrint('[Orchestrator] $service not playing - cycling disabled (waitSec=0)');
+      debugPrint(
+          '[Orchestrator] $service not playing - cycling disabled (waitSec=0)');
       return;
     }
 
@@ -508,47 +574,70 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     });
   }
 
+  /// Check if track info is present and valid (not empty)
+  bool _hasValidTrackInfo(Map<String, dynamic>? track) {
+    if (track == null) return false;
+    final title = track['title'] as String?;
+    return title != null && title.isNotEmpty;
+  }
+
   /// Handle Sonos pause/stop with status-based wait times
   /// Different wait times based on transport state:
-  /// - paused: usually 0 (disabled) - user likely to resume
+  /// - paused (with track): usually 0 (disabled) - user likely to resume
+  /// - paused (no track): treat as idle - user switched away
   /// - stopped: longer wait (e.g., 30s) - queue might have ended
   /// - idle/no_media: quick switch (e.g., 3s) - nothing to play
-  void _handleSonosPausedWithStatus(String? status) {
+  void _handleSonosPausedWithStatus(String? status,
+      {bool hasTrackInfo = true}) {
     // Skip if we already have a pause timer running for Sonos
-    if (_pausedService == ServiceType.localSonos && _servicePausedTimer != null) return;
+    if (_pausedService == ServiceType.localSonos &&
+        _servicePausedTimer != null) {
+      return;
+    }
 
     // Cancel any existing timer
     _cancelPauseTimer();
 
-    // Determine wait time based on Sonos status
+    // Determine wait time based on Sonos status and track info
     final int waitSec;
     final normalizedStatus = (status ?? 'idle').toLowerCase();
-    
-    switch (normalizedStatus) {
-      case 'paused':
-        waitSec = _config.localSonosPausedWaitSec;
-        break;
-      case 'stopped':
-        waitSec = _config.localSonosStoppedWaitSec;
-        break;
-      case 'transitioning':
-      case 'buffering':
-        // Don't cycle during transitioning/buffering - temporary state
-        debugPrint('[Orchestrator] Sonos transitioning/buffering - not cycling');
-        return;
-      default:
-        // idle, no_media, or unknown - use idle wait time
-        waitSec = _config.localSonosIdleWaitSec;
+
+    // Special case: "paused" but no track info means user likely switched away
+    // Treat this as "idle" for quicker fallback
+    if (normalizedStatus == 'paused' && !hasTrackInfo) {
+      debugPrint(
+          '[Orchestrator] Sonos paused with no track info - treating as idle (user likely switched away)');
+      waitSec = _config.localSonosIdleWaitSec;
+    } else {
+      switch (normalizedStatus) {
+        case 'paused':
+          // True pause with track info - user may resume
+          waitSec = _config.localSonosPausedWaitSec;
+          break;
+        case 'stopped':
+          waitSec = _config.localSonosStoppedWaitSec;
+          break;
+        case 'transitioning':
+        case 'buffering':
+          // Don't cycle during transitioning/buffering - temporary state
+          debugPrint(
+              '[Orchestrator] Sonos transitioning/buffering - not cycling');
+          return;
+        default:
+          // idle, no_media, or unknown - use idle wait time
+          waitSec = _config.localSonosIdleWaitSec;
+      }
     }
 
     // 0 means disabled - don't cycle for this status
     if (waitSec <= 0) {
-      debugPrint('[Orchestrator] Sonos $normalizedStatus - cycling disabled (waitSec=0)');
+      debugPrint(
+          '[Orchestrator] Sonos $normalizedStatus - cycling disabled (waitSec=0)');
       return;
     }
 
     debugPrint(
-        '[Orchestrator] Sonos $normalizedStatus - waiting ${waitSec}s before cycling');
+        '[Orchestrator] Sonos $normalizedStatus (hasTrack=$hasTrackInfo) - waiting ${waitSec}s before cycling');
 
     _pausedService = ServiceType.localSonos;
     _servicePausedTimer = Timer(Duration(seconds: waitSec), () {

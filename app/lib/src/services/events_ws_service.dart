@@ -159,9 +159,13 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
             final data = jsonDecode(message as String) as Map<String, dynamic>;
             final type = data['type'];
             if (type == 'now_playing') {
-              // Only use backend data if not in direct polling mode
-              if (!_useDirectPolling) {
-                final provider = data['provider'] as String?;
+              final provider = data['provider'] as String?;
+
+              // Process if:
+              // 1. Not in direct polling mode (use all backend data), OR
+              // 2. This is Sonos data (Sonos can only come via WebSocket, never from direct polling)
+              final isSonosData = provider == 'sonos';
+              if (!_useDirectPolling || isSonosData) {
                 final payload = (data['data'] as Map?)?.cast<String, dynamic>();
                 final directMode = ref.read(spotifyDirectProvider).mode;
                 state = NowPlayingState(
