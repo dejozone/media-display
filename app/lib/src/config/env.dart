@@ -123,6 +123,10 @@ class EnvConfig {
     required this.spotifyDirectFallback,
     required this.cloudSpotifyFallback,
     required this.localSonosFallback,
+    required this.localSonosPausedWaitSec,
+    required this.spotifyPausedWaitSec,
+    required this.enableServiceCycling,
+    required this.serviceCycleResetSec,
     required this.serviceTransitionGraceSec,
     required this.tokenWaitTimeoutSec,
     this.sonosPollIntervalSec,
@@ -153,6 +157,10 @@ class EnvConfig {
   final ServiceFallbackConfig spotifyDirectFallback;
   final ServiceFallbackConfig cloudSpotifyFallback;
   final ServiceFallbackConfig localSonosFallback;
+  final int localSonosPausedWaitSec;
+  final int spotifyPausedWaitSec;
+  final bool enableServiceCycling;
+  final int serviceCycleResetSec;
   final int serviceTransitionGraceSec;
   final int tokenWaitTimeoutSec;
 
@@ -295,6 +303,20 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
             300,
   );
 
+  // Parse Local Sonos auto-switch settings
+  final localSonosPausedWaitSec =
+      int.tryParse(dotenv.env['LOCAL_SONOS_PAUSED_WAIT_SEC'] ?? '') ?? 3;
+
+  // Parse Spotify paused wait time
+  final spotifyPausedWaitSec =
+      int.tryParse(dotenv.env['SPOTIFY_PAUSED_WAIT_SEC'] ?? '') ?? 5;
+
+  // Parse service cycling settings
+  final enableServiceCycling =
+      (dotenv.env['ENABLE_SERVICE_CYCLING'] ?? 'true').toLowerCase() == 'true';
+  final serviceCycleResetSec =
+      int.tryParse(dotenv.env['SERVICE_CYCLE_RESET_SEC'] ?? '') ?? 30;
+
   // Parse global service settings
   final serviceTransitionGraceSec =
       int.tryParse(dotenv.env['SERVICE_TRANSITION_GRACE_SEC'] ?? '') ?? 2;
@@ -325,6 +347,10 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
     spotifyDirectFallback: spotifyDirectFallback,
     cloudSpotifyFallback: cloudSpotifyFallback,
     localSonosFallback: localSonosFallback,
+    localSonosPausedWaitSec: localSonosPausedWaitSec,
+    spotifyPausedWaitSec: spotifyPausedWaitSec,
+    enableServiceCycling: enableServiceCycling,
+    serviceCycleResetSec: serviceCycleResetSec,
     serviceTransitionGraceSec: serviceTransitionGraceSec,
     tokenWaitTimeoutSec: tokenWaitTimeoutSec,
   );

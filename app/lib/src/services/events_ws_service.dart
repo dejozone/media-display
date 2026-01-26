@@ -355,7 +355,10 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
 
   /// Send WebSocket config for a specific service type
   /// This is called by the ServiceOrchestrator when switching services
-  Future<void> sendConfigForService(ServiceType service) async {
+  /// If [keepSonosEnabled] is true, sonos will be enabled even if not in baseWsConfig
+  /// (used when waiting for Sonos to resume after pause)
+  Future<void> sendConfigForService(ServiceType service,
+      {bool keepSonosEnabled = false}) async {
     try {
       final baseWsConfig = service.webSocketConfig;
       final env = ref.read(envConfigProvider);
@@ -403,9 +406,11 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       // Combine base WebSocket config with user settings
       // If directSpotify is active (client polls Spotify), but user also enabled Sonos,
       // we need to tell the server to poll Sonos
+      // If keepSonosEnabled is true, always keep sonos enabled (for Sonos resume detection)
       final wsConfig = (
         spotify: baseWsConfig.spotify,
         sonos: baseWsConfig.sonos ||
+            keepSonosEnabled ||
             (service == ServiceType.directSpotify && userSonosEnabled),
       );
 
@@ -429,6 +434,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
           needToken && (!hasValidToken && !tokenRequestDebounced);
 
       debugPrint('[WS] sendConfigForService: service=$service, '
+          'keepSonosEnabled=$keepSonosEnabled, '
           'baseWsConfig=(spotify=${baseWsConfig.spotify}, sonos=${baseWsConfig.sonos}), '
           'userSettings=(spotify=$userSpotifyEnabled, sonos=$userSonosEnabled), '
           'wsConfig=(spotify=${wsConfig.spotify}, sonos=${wsConfig.sonos}), '

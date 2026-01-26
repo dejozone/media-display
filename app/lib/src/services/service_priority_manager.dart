@@ -371,6 +371,53 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     });
   }
 
+  /// Switch to a specific service (for cycling)
+  /// Unlike activateService, this doesn't reset error counts or trigger retry logic
+  void switchToService(ServiceType service) {
+    if (!state.enabledServices.contains(service)) {
+      debugPrint(
+          '[ServicePriority] Cannot switch to disabled service: $service');
+      return;
+    }
+
+    if (state.currentService == service) {
+      debugPrint('[ServicePriority] Already on service: $service');
+      return;
+    }
+
+    final newStatuses =
+        Map<ServiceType, ServiceStatus>.from(state.serviceStatuses);
+
+    // Deactivate current service (but don't change its error state)
+    if (state.currentService != null) {
+      newStatuses[state.currentService!] = ServiceStatus.standby;
+    }
+
+    // Activate new service
+    newStatuses[service] = ServiceStatus.active;
+
+    state = state.copyWith(
+      currentService: service,
+      previousService: state.currentService,
+      serviceStatuses: newStatuses,
+      isTransitioning: true,
+      transitionStartTime: DateTime.now(),
+    );
+
+    debugPrint('[ServicePriority] Switched to service: $service');
+
+    // End transition after grace period
+    Future.delayed(Duration(seconds: _config.serviceTransitionGraceSec), () {
+      if (state.currentService == service) {
+        state = state.copyWith(
+          isTransitioning: false,
+          clearTransitionStartTime: true,
+          clearPreviousService: true,
+        );
+      }
+    });
+  }
+
   /// Report a successful data fetch from a service
   void reportSuccess(ServiceType service) {
     if (state.currentService != service) return;
