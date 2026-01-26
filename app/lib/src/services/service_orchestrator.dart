@@ -413,12 +413,23 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
           _resetCyclingState();
         }
       } else if (_config.enableServiceCycling) {
-        // Not playing - handle pause detection for cycling
+        // Not playing - check if we should cycle based on status
         // Only start cycling if we're NOT already waiting for primary to resume
         if (!_waitingForPrimaryResume) {
-          debugPrint(
-              '[Orchestrator] $currentService not playing (was: $wasPlaying)');
-          _handleServicePaused(currentService);
+          final status = playback?['status'] as String?;
+          
+          // Only log on state transition (from playing to not playing)
+          if (wasPlaying) {
+            debugPrint(
+                '[Orchestrator] $currentService not playing - status: $status');
+          }
+          
+          // Use status-based logic for Sonos
+          if (currentService == ServiceType.localSonos) {
+            _handleSonosPausedWithStatus(status);
+          } else {
+            _handleServicePaused(currentService);
+          }
         }
       }
 
@@ -440,8 +451,11 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
     // Empty data is treated as "stopped" - NOT a fallback trigger
     if (isStopped) {
-      debugPrint(
-          '[Orchestrator] Received stopped/empty data from $source - music paused/stopped');
+      // Only log stopped/empty data on transition (not every poll)
+      if (state.isPlaying) {
+        debugPrint(
+            '[Orchestrator] Received stopped/empty data from $source - music paused/stopped');
+      }
     }
 
     // Update state with new data
@@ -468,6 +482,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
   }
 
   /// Handle when a service reports paused/stopped - start timer to cycle
+  /// Note: For Sonos, use _handleSonosPausedWithStatus instead for state-based handling
   void _handleServicePaused(ServiceType service) {
     // Skip if we already have a pause timer running for this service
     if (_pausedService == service && _servicePausedTimer != null) return;
@@ -475,17 +490,69 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     // Cancel any existing timer for a different service
     _cancelPauseTimer();
 
-    // Get the pause wait duration for this service
-    final waitSec = service == ServiceType.localSonos
-        ? _config.localSonosPausedWaitSec
-        : _config.spotifyPausedWaitSec;
+    // Get the pause wait duration for this service (for Spotify services)
+    final waitSec = _config.spotifyPausedWaitSec;
+
+    // 0 means disabled - don't cycle for this service
+    if (waitSec <= 0) {
+      debugPrint('[Orchestrator] $service not playing - cycling disabled (waitSec=0)');
+      return;
+    }
 
     debugPrint(
-        '[Orchestrator] $service paused - waiting ${waitSec}s before cycling');
+        '[Orchestrator] $service not playing - waiting ${waitSec}s before cycling');
 
     _pausedService = service;
     _servicePausedTimer = Timer(Duration(seconds: waitSec), () {
       _onServicePauseTimerExpired(service);
+    });
+  }
+
+  /// Handle Sonos pause/stop with status-based wait times
+  /// Different wait times based on transport state:
+  /// - paused: usually 0 (disabled) - user likely to resume
+  /// - stopped: longer wait (e.g., 30s) - queue might have ended
+  /// - idle/no_media: quick switch (e.g., 3s) - nothing to play
+  void _handleSonosPausedWithStatus(String? status) {
+    // Skip if we already have a pause timer running for Sonos
+    if (_pausedService == ServiceType.localSonos && _servicePausedTimer != null) return;
+
+    // Cancel any existing timer
+    _cancelPauseTimer();
+
+    // Determine wait time based on Sonos status
+    final int waitSec;
+    final normalizedStatus = (status ?? 'idle').toLowerCase();
+    
+    switch (normalizedStatus) {
+      case 'paused':
+        waitSec = _config.localSonosPausedWaitSec;
+        break;
+      case 'stopped':
+        waitSec = _config.localSonosStoppedWaitSec;
+        break;
+      case 'transitioning':
+      case 'buffering':
+        // Don't cycle during transitioning/buffering - temporary state
+        debugPrint('[Orchestrator] Sonos transitioning/buffering - not cycling');
+        return;
+      default:
+        // idle, no_media, or unknown - use idle wait time
+        waitSec = _config.localSonosIdleWaitSec;
+    }
+
+    // 0 means disabled - don't cycle for this status
+    if (waitSec <= 0) {
+      debugPrint('[Orchestrator] Sonos $normalizedStatus - cycling disabled (waitSec=0)');
+      return;
+    }
+
+    debugPrint(
+        '[Orchestrator] Sonos $normalizedStatus - waiting ${waitSec}s before cycling');
+
+    _pausedService = ServiceType.localSonos;
+    _servicePausedTimer = Timer(Duration(seconds: waitSec), () {
+      _onServicePauseTimerExpired(ServiceType.localSonos);
     });
   }
 

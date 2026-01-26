@@ -124,6 +124,8 @@ class EnvConfig {
     required this.cloudSpotifyFallback,
     required this.localSonosFallback,
     required this.localSonosPausedWaitSec,
+    required this.localSonosStoppedWaitSec,
+    required this.localSonosIdleWaitSec,
     required this.spotifyPausedWaitSec,
     required this.enableServiceCycling,
     required this.serviceCycleResetSec,
@@ -158,6 +160,8 @@ class EnvConfig {
   final ServiceFallbackConfig cloudSpotifyFallback;
   final ServiceFallbackConfig localSonosFallback;
   final int localSonosPausedWaitSec;
+  final int localSonosStoppedWaitSec;
+  final int localSonosIdleWaitSec;
   final int spotifyPausedWaitSec;
   final bool enableServiceCycling;
   final int serviceCycleResetSec;
@@ -303,9 +307,17 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
             300,
   );
 
-  // Parse Local Sonos auto-switch settings
+  // Parse Local Sonos auto-switch settings (state-based wait times)
+  // 0 = disabled (don't cycle for that state)
   final localSonosPausedWaitSec =
-      int.tryParse(dotenv.env['LOCAL_SONOS_PAUSED_WAIT_SEC'] ?? '') ?? 3;
+      int.tryParse(dotenv.env['LOCAL_SONOS_PAUSED_WAIT_SEC'] ?? '') ??
+          0; // Default: don't cycle on pause
+  final localSonosStoppedWaitSec =
+      int.tryParse(dotenv.env['LOCAL_SONOS_STOPPED_WAIT_SEC'] ?? '') ??
+          30; // Wait 30s after stopped
+  final localSonosIdleWaitSec =
+      int.tryParse(dotenv.env['LOCAL_SONOS_IDLE_WAIT_SEC'] ?? '') ??
+          3; // Quick cycle on idle/no media
 
   // Parse Spotify paused wait time
   final spotifyPausedWaitSec =
@@ -348,6 +360,8 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
     cloudSpotifyFallback: cloudSpotifyFallback,
     localSonosFallback: localSonosFallback,
     localSonosPausedWaitSec: localSonosPausedWaitSec,
+    localSonosStoppedWaitSec: localSonosStoppedWaitSec,
+    localSonosIdleWaitSec: localSonosIdleWaitSec,
     spotifyPausedWaitSec: spotifyPausedWaitSec,
     enableServiceCycling: enableServiceCycling,
     serviceCycleResetSec: serviceCycleResetSec,
