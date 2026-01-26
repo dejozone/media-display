@@ -45,7 +45,7 @@ class _OAuthCallbackPageState extends ConsumerState<OAuthCallbackPage> {
         widget.errorParam != null &&
         widget.errorParam!.isNotEmpty) {
       _handledInitialError = true;
-      // Defer until after first frame so dialog has a mounted context.
+      // Defer until after first frame so navigation has a mounted context.
       SchedulerBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           // Use appropriate handler based on error type
@@ -53,8 +53,8 @@ class _OAuthCallbackPageState extends ConsumerState<OAuthCallbackPage> {
             _showErrorAndExit(widget.errorMessage ??
                 'This Spotify account is already linked to another user.');
           } else {
-            // For cancellation or other errors, use cancellation handler
-            _showCancellationAndRedirect(widget.errorMessage);
+            // For cancellation or other errors, redirect to login
+            context.go('/login');
           }
         }
       });
@@ -74,20 +74,20 @@ class _OAuthCallbackPageState extends ConsumerState<OAuthCallbackPage> {
           context.go('/home');
           return;
         }
-        // User likely cancelled the authentication flow
+        // User likely cancelled the authentication flow - redirect to login
         SchedulerBinding.instance.addPostFrameCallback((_) {
           if (mounted) {
-            _showCancellationAndRedirect();
+            context.go('/login');
           }
         });
         return;
       }
 
       if (widget.provider == 'spotify' && (state == null || state.isEmpty)) {
-        // Missing state - likely cancelled or something went wrong
+        // Missing state - likely cancelled or something went wrong - redirect to login
         SchedulerBinding.instance.addPostFrameCallback((_) {
           if (mounted) {
-            _showCancellationAndRedirect();
+            context.go('/login');
           }
         });
         return;
@@ -109,18 +109,6 @@ class _OAuthCallbackPageState extends ConsumerState<OAuthCallbackPage> {
       }
       setState(() => _error = e.toString());
     }
-  }
-
-  Future<void> _showCancellationAndRedirect([String? customMessage]) async {
-    await showAppModal(
-      context: context,
-      title: 'Authentication Cancelled',
-      message: customMessage ??
-          'The authentication process was cancelled or encountered an issue. Please try again.',
-      useRootNavigator: true,
-    );
-    if (!mounted) return;
-    context.go('/login');
   }
 
   Future<void> _showErrorAndExit(String message) async {
