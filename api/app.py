@@ -73,20 +73,33 @@ def spotify_auth_url():
 @app.route('/api/auth/google/callback')
 def google_callback():
     code = request.args.get('code')
+    error = request.args.get('error')
+    frontend = Config.FRONTEND_BASE_URL
+    
+    # Handle user cancellation or missing code
     if not code:
-        return jsonify({'error': 'Missing code'}), 400
+        error_msg = error or 'cancelled'
+        message = 'The authentication process was cancelled or encountered an issue.'
+        return redirect(f"{frontend}/oauth/google/callback?error={error_msg}&message={message}")
+    
     token = auth_manager.login_with_google(code)
     if not token:
-        return jsonify({'error': 'Google OAuth failed'}), 401
-    frontend = Config.FRONTEND_BASE_URL
+        return redirect(f"{frontend}/oauth/google/callback?error=auth_failed&message=Google OAuth failed")
     # Redirect back to frontend with JWT; frontend should store token and continue.
     return redirect(f"{frontend}/oauth/google/callback?jwt={token}")
 
 @app.route('/api/auth/spotify/callback')
 def spotify_callback():
     code = request.args.get('code')
+    error = request.args.get('error')
+    frontend = Config.FRONTEND_BASE_URL
+    
+    # Handle user cancellation or missing code
     if not code:
-        return jsonify({'error': 'Missing code'}), 400
+        error_msg = error or 'cancelled'
+        message = 'The authentication process was cancelled or encountered an issue.'
+        return redirect(f"{frontend}/oauth/spotify/callback?error={error_msg}&message={message}")
+    
     state = request.args.get('state')
     link_user_id = None
     allow_create = True  # allow new user creation by default for Spotify-only signups
@@ -113,8 +126,14 @@ def spotify_callback():
 @app.route('/api/auth/<provider>/callback')
 def api_auth_callback(provider: str):
     code = request.args.get('code')
+    error = request.args.get('error')
+    frontend = Config.FRONTEND_BASE_URL
+    
+    # Handle user cancellation or missing code
     if not code:
-        return jsonify({'error': 'Missing code'}), 400
+        error_msg = error or 'cancelled'
+        message = 'The authentication process was cancelled or encountered an issue.'
+        return redirect(f"{frontend}/oauth/{provider}/callback?error={error_msg}&message={message}")
 
     if provider == 'google':
         token = auth_manager.login_with_google(code)

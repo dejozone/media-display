@@ -40,13 +40,22 @@ class _OAuthCallbackPageState extends ConsumerState<OAuthCallbackPage> {
   }
 
   Future<void> _complete() async {
-    // Handle server-redirected error payloads (e.g., spotify_identity_in_use) immediately.
-    if (!_handledInitialError && widget.errorParam != null && widget.errorParam!.isNotEmpty) {
+    // Handle server-redirected error payloads immediately.
+    if (!_handledInitialError &&
+        widget.errorParam != null &&
+        widget.errorParam!.isNotEmpty) {
       _handledInitialError = true;
       // Defer until after first frame so dialog has a mounted context.
       SchedulerBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
-          _showErrorAndExit(widget.errorMessage ?? widget.errorParam!);
+          // Use appropriate handler based on error type
+          if (widget.errorParam == 'spotify_identity_in_use') {
+            _showErrorAndExit(widget.errorMessage ??
+                'This Spotify account is already linked to another user.');
+          } else {
+            // For cancellation or other errors, use cancellation handler
+            _showCancellationAndRedirect(widget.errorMessage);
+          }
         }
       });
       return;
@@ -65,17 +74,28 @@ class _OAuthCallbackPageState extends ConsumerState<OAuthCallbackPage> {
           context.go('/home');
           return;
         }
-        setState(() => _error = 'Missing code');
+        // User likely cancelled the authentication flow
+        SchedulerBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _showCancellationAndRedirect();
+          }
+        });
         return;
       }
 
       if (widget.provider == 'spotify' && (state == null || state.isEmpty)) {
-        setState(() => _error = 'Missing state for Spotify login');
+        // Missing state - likely cancelled or something went wrong
+        SchedulerBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _showCancellationAndRedirect();
+          }
+        });
         return;
       }
 
       final auth = ref.read(authServiceProvider);
-      await auth.completeOAuth(provider: widget.provider, code: code, state: state);
+      await auth.completeOAuth(
+          provider: widget.provider, code: code, state: state);
       await authNotifier.load();
       if (!mounted) return;
       setState(() => _done = true);
@@ -83,11 +103,24 @@ class _OAuthCallbackPageState extends ConsumerState<OAuthCallbackPage> {
     } catch (e) {
       if (!mounted) return;
       if (e is OAuthApiException && e.code == 'spotify_identity_in_use') {
-        await _showErrorAndExit(e.message ?? 'This Spotify account is already linked to another user.');
+        await _showErrorAndExit(e.message ??
+            'This Spotify account is already linked to another user.');
         return;
       }
       setState(() => _error = e.toString());
     }
+  }
+
+  Future<void> _showCancellationAndRedirect([String? customMessage]) async {
+    await showAppModal(
+      context: context,
+      title: 'Authentication Cancelled',
+      message: customMessage ??
+          'The authentication process was cancelled or encountered an issue. Please try again.',
+      useRootNavigator: true,
+    );
+    if (!mounted) return;
+    context.go('/login');
   }
 
   Future<void> _showErrorAndExit(String message) async {
@@ -101,7 +134,8 @@ class _OAuthCallbackPageState extends ConsumerState<OAuthCallbackPage> {
     setState(() => _error = message);
     // Navigate back to account if possible, otherwise home/login fallback.
     final auth = ref.read(authStateProvider);
-    final desired = await ref.read(authServiceProvider).consumePendingOauthRedirect();
+    final desired =
+        await ref.read(authServiceProvider).consumePendingOauthRedirect();
     if (desired != null && desired.isNotEmpty) {
       context.go(desired);
       return;
@@ -124,8 +158,10 @@ class _OAuthCallbackPageState extends ConsumerState<OAuthCallbackPage> {
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: _error != null
-                ? Text('Error: $_error', style: const TextStyle(color: Colors.red))
-                : Text(_done ? 'Signed in! Redirecting…' : 'Completing sign-in…'),
+                ? Text('Error: $_error',
+                    style: const TextStyle(color: Colors.red))
+                : Text(
+                    _done ? 'Signed in! Redirecting…' : 'Completing sign-in…'),
           ),
         ),
       ),
