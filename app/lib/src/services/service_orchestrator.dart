@@ -1,5 +1,4 @@
 import 'dart:async';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_display/src/config/env.dart';
@@ -103,7 +102,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
   // Service cycling state
   ServiceType? _pausedService;
-  Set<ServiceType> _checkedNotPlaying = {};
+  final Set<ServiceType> _checkedNotPlaying = {};
   bool _waitingForPrimaryResume = false;
   ServiceType? _originalPrimaryService;
 
@@ -409,7 +408,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
           !wsState.wsRetrying) {
         debugPrint(
             '[Orchestrator] Cloud service disconnected: ${wsState.error}');
-        ref.read(servicePriorityProvider.notifier).reportError(currentService!);
+        ref.read(servicePriorityProvider.notifier).reportError(currentService);
       }
       return;
     }
