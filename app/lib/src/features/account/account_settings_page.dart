@@ -1093,33 +1093,32 @@ class _AvatarGridItem extends StatelessWidget {
                   child: Icon(Icons.check, size: iconSize, color: Colors.white),
                 ),
               ),
-            // Delete button (hidden for provider avatars)
-            if (!avatar.isProviderAvatar)
-              Positioned(
-                top: buttonPadding,
-                left: buttonPadding,
-                child: InkWell(
-                  onTap: onDelete,
-                  customBorder: const CircleBorder(),
-                  child: Container(
-                    width: buttonSize,
-                    height: buttonSize,
-                    decoration: BoxDecoration(
-                      color: Colors.red.withValues(alpha: 0.95),
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.3),
-                          blurRadius: 4,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    child:
-                        Icon(Icons.delete, size: iconSize, color: Colors.white),
+            // Delete button (shown for all avatars)
+            Positioned(
+              top: buttonPadding,
+              left: buttonPadding,
+              child: InkWell(
+                onTap: onDelete,
+                customBorder: const CircleBorder(),
+                child: Container(
+                  width: buttonSize,
+                  height: buttonSize,
+                  decoration: BoxDecoration(
+                    color: Colors.red.withValues(alpha: 0.95),
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.3),
+                        blurRadius: 4,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
                   ),
+                  child:
+                      Icon(Icons.delete, size: iconSize, color: Colors.white),
                 ),
               ),
+            ),
           ],
         ),
       ),

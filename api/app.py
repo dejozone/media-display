@@ -557,18 +557,16 @@ def delete_user_avatar(user_id: str, avatar_id: str):
     if not avatar:
         return jsonify({'error': 'Avatar not found'}), 404
     
-    if avatar.get('source') == 'provider':
-        return jsonify({'error': 'Cannot delete provider avatars'}), 400
-    
     avatar_url = avatar.get('url')
+    avatar_source = avatar.get('source')
     
     # Delete from database
     success = auth_manager.delete_avatar(g.user_id, avatar_id)
     if not success:
         return jsonify({'error': 'Failed to delete avatar'}), 500
     
-    # Try to delete file from disk (best effort)
-    if avatar_url:
+    # Try to delete file from disk (only for uploaded avatars)
+    if avatar_source == 'upload' and avatar_url:
         try:
             # Extract filename from URL
             url_path = avatar_url.replace(Config.ASSETS_BASE_URL, '')
