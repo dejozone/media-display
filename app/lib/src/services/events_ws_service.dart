@@ -13,6 +13,7 @@ import 'package:media_display/src/services/ws_retry_policy.dart';
 import 'package:media_display/src/services/ws_ssl_override.dart'
     if (dart.library.io) 'package:media_display/src/services/ws_ssl_override_io.dart';
 import 'package:media_display/src/services/spotify_direct_service.dart';
+import 'package:media_display/src/services/service_priority_manager.dart';
 
 class NowPlayingState {
   const NowPlayingState({
@@ -199,7 +200,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
               if (!_connectionConfirmed) {
                 _connectionConfirmed = true;
                 _retryPolicy.reset();
-                // debugPrint('[WS] Connected successfully');
+                debugPrint('[WS] Connected successfully');
                 state = NowPlayingState(
                   provider: state.provider,
                   payload: state.payload,
@@ -209,6 +210,10 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
                   wsRetrying: false,
                   wsInCooldown: false,
                 );
+
+                // Notify service priority manager that WebSocket is back
+                // This allows re-evaluation of cloud services that may have been in cooldown
+                ref.read(servicePriorityProvider.notifier).onWebSocketReconnected();
               }
             }
           } catch (e) {
@@ -350,7 +355,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   /// This is called by the ServiceOrchestrator when switching services
   Future<void> sendConfigForService(ServiceType service) async {
     try {
-      final wsConfig = service.webSocketConfig;
+      final baseWsConfig = service.webSocketConfig;
       final env = ref.read(envConfigProvider);
 
       // Get poll intervals from settings or defaults
@@ -377,10 +382,29 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
         return null;
       }
 
+      // Helper to treat 0 as null (let server decide)
+      int? asIntOrNull(dynamic v) {
+        final val = asInt(v);
+        return (val == null || val <= 0) ? null : val;
+      }
+
       final spotifyPoll = asInt(settings?['spotify_poll_interval_sec']) ??
           env.spotifyPollIntervalSec;
-      final sonosPoll = asInt(settings?['sonos_poll_interval_sec']) ??
+      // Sonos poll: null or 0 = let server decide
+      final sonosPoll = asIntOrNull(settings?['sonos_poll_interval_sec']) ??
           env.sonosPollIntervalSec;
+
+      // Get user's enabled settings
+      final userSpotifyEnabled = settings?['spotify_enabled'] == true;
+      final userSonosEnabled = settings?['sonos_enabled'] == true;
+
+      // Combine base WebSocket config with user settings
+      // If directSpotify is active (client polls Spotify), but user also enabled Sonos,
+      // we need to tell the server to poll Sonos
+      final wsConfig = (
+        spotify: baseWsConfig.spotify,
+        sonos: baseWsConfig.sonos || (service == ServiceType.directSpotify && userSonosEnabled),
+      );
 
       // Determine if we need a token
       // Token is needed for direct_spotify (client polls) and cloud_spotify (backend polls)
@@ -401,6 +425,8 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
           needToken && (!hasValidToken && !tokenRequestDebounced);
 
       debugPrint('[WS] sendConfigForService: service=$service, '
+          'baseWsConfig=(spotify=${baseWsConfig.spotify}, sonos=${baseWsConfig.sonos}), '
+          'userSettings=(spotify=$userSpotifyEnabled, sonos=$userSonosEnabled), '
           'wsConfig=(spotify=${wsConfig.spotify}, sonos=${wsConfig.sonos}), '
           'needToken=$needToken, hasValidToken=$hasValidToken, '
           'shouldRequestToken=$shouldRequestToken');
@@ -414,7 +440,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
         },
         'poll': {
           'spotify': spotifyPoll,
-          'sonos': sonosPoll ?? env.spotifyPollIntervalSec,
+          'sonos': sonosPoll,  // null = let server decide
         },
       });
 
@@ -456,6 +482,16 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   }
 
   Future<void> sendConfig({bool forceTokenRequest = false}) async {
+    // If there's an active service in the priority system, use sendConfigForService
+    // This ensures the new service-based config is used instead of the legacy polling mode logic
+    final priority = ref.read(servicePriorityProvider);
+    if (priority.currentService != null) {
+      debugPrint('[WS] sendConfig delegating to sendConfigForService for ${priority.currentService}');
+      await sendConfigForService(priority.currentService!);
+      return;
+    }
+
+    // Legacy fallback: No active service yet, use old logic
     try {
       Map<String, dynamic>? settings;
       try {
@@ -504,6 +540,12 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
         return null;
       }
 
+      // Helper to treat 0 as null (let server decide)
+      int? asIntOrNull(dynamic v) {
+        final val = asInt(v);
+        return (val == null || val <= 0) ? null : val;
+      }
+
       // Attempt to pick up client-configured poll intervals if present.
       final spotifyPoll = asInt(
             settings['spotify_poll_interval_sec'] ??
@@ -520,7 +562,8 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
           })() ??
           env.spotifyPollIntervalSec;
 
-      final sonosPoll = asInt(
+      // Sonos poll: null or 0 = let server decide
+      final sonosPoll = asIntOrNull(
             settings['sonos_poll_interval_sec'] ??
                 settings['sonos_poll_interval'] ??
                 settings['sonos_poll'] ??
@@ -529,8 +572,8 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
                 settings['sonos_poll_interval_ms'],
           ) ??
           (() {
-            final ms = asInt(settings?['sonos_poll_interval_ms']);
-            return ms != null ? (ms / 1000).round() : null;
+            final ms = asIntOrNull(settings?['sonos_poll_interval_ms']);
+            return ms;
           })() ??
           env.sonosPollIntervalSec;
 

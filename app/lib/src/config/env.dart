@@ -187,8 +187,13 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
       int.tryParse(dotenv.env['WS_RETRY_MAX_TOTAL_SECONDS'] ?? '') ?? 1800;
   final spotifyPollIntervalSec =
       int.tryParse(dotenv.env['SPOTIFY_POLL_INTERVAL_SEC'] ?? '') ?? 3;
-  final sonosPollIntervalSec =
+  // Sonos poll interval: null or 0 means let the server decide
+  final sonosPollIntervalSecRaw =
       int.tryParse(dotenv.env['SONOS_POLL_INTERVAL_SEC'] ?? '');
+  final sonosPollIntervalSec = 
+      (sonosPollIntervalSecRaw == null || sonosPollIntervalSecRaw <= 0) 
+          ? null 
+          : sonosPollIntervalSecRaw;
   final maxAvatarsPerUser =
       int.tryParse(dotenv.env['MAX_AVATARS_PER_USER'] ?? '') ?? 5;
   final spotifyDirectPollIntervalSec =
