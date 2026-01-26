@@ -410,8 +410,9 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       );
 
       // Determine if we need a token
-      // Token is needed for direct_spotify (client polls) and cloud_spotify (backend polls)
-      final needToken = service.requiresSpotify;
+      // Token is ONLY needed for direct_spotify (client polls directly)
+      // For cloud_spotify, the backend handles token access on its own
+      final needToken = service == ServiceType.directSpotify;
 
       // Check if we should request token
       final directState = ref.read(spotifyDirectProvider);
