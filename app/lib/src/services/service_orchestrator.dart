@@ -203,7 +203,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     if (service.isDirectPolling) {
       _activateDirectSpotify();
     } else {
-      // cloud_spotify or cloud_sonos
+      // cloud_spotify or local_sonos
       _activateCloudService(service);
     }
   }
@@ -282,7 +282,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     final priority = ref.read(servicePriorityProvider);
     final currentService = priority.currentService;
 
-    // Only process if a cloud service (cloud_spotify or cloud_sonos) is active
+    // Only process if a cloud service (cloud_spotify or local_sonos) is active
     if (currentService == null || !currentService.isCloudService) return;
 
     // Check connection status
@@ -484,9 +484,9 @@ final isCloudSpotifyActiveProvider = Provider<bool>((ref) {
   return ref.watch(activeServiceProvider) == ServiceType.cloudSpotify;
 });
 
-/// Convenience provider to check if we're using cloud Sonos
-final isCloudSonosActiveProvider = Provider<bool>((ref) {
-  return ref.watch(activeServiceProvider) == ServiceType.cloudSonos;
+/// Convenience provider to check if we're using local Sonos
+final isLocalSonosActiveProvider = Provider<bool>((ref) {
+  return ref.watch(activeServiceProvider) == ServiceType.localSonos;
 });
 
 /// Convenience provider to check if we're using any cloud service

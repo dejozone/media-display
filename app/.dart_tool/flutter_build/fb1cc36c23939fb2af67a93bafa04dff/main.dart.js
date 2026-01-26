@@ -29902,7 +29902,7 @@ Tp:function Tp(a){this.a=a},
 al5:function al5(a){this.a=a},
 b8F(a){switch(B.e.cR(a.toLowerCase())){case"direct_spotify":return B.bv
 case"cloud_spotify":return B.cY
-case"cloud_sonos":return B.dE
+case"local_sonos":return B.dE
 default:return null}},
 aLQ(){var s=0,r=A.B(t.H)
 var $async$aLQ=A.x(function(a,b){if(a===1)return A.y(b,r)
@@ -110293,7 +110293,7 @@ b=$.ch().gcs().h(0,"SPOTIFY_DIRECT_API_BASE_URL")
 if(b==null)b="https://api.spotify.com/v1"
 a=$.ch().gcs().h(0,"PRIORITY_ORDER_OF_SERVICES")
 a0=t.Vc
-a1=A.S(new A.ce(new A.a8(A.b((a==null?"direct_spotify,cloud_spotify,cloud_sonos":a).split(","),t.s),new A.aLl(),t.uk),a0),a0.i("m.E"))
+a1=A.S(new A.ce(new A.a8(A.b((a==null?"direct_spotify,cloud_spotify,local_sonos":a).split(","),t.s),new A.aLl(),t.uk),a0),a0.i("m.E"))
 if(a1.length===0)B.d.W(a1,A.b([B.bv,B.cY,B.dE],t.Hl))
 a0=$.ch().gcs().h(0,"SPOTIFY_DIRECT_FALLBACK_TIMEOUT_SEC")
 a0=A.co(a0==null?"":a0,c1)
@@ -110329,21 +110329,21 @@ if(b1==null)b1=30
 b2=$.ch().gcs().h(0,"CLOUD_SPOTIFY_RETRY_MAX_WINDOW_SEC")
 b2=A.co(b2==null?"":b2,c1)
 if(b2==null)b2=300
-b3=$.ch().gcs().h(0,"CLOUD_SONOS_FALLBACK_TIMEOUT_SEC")
+b3=$.ch().gcs().h(0,"LOCAL_SONOS_FALLBACK_TIMEOUT_SEC")
 b3=A.co(b3==null?"":b3,c1)
 if(b3==null)b3=0
-b4=$.ch().gcs().h(0,"CLOUD_SONOS_FALLBACK_ON_ERROR")
+b4=$.ch().gcs().h(0,"LOCAL_SONOS_FALLBACK_ON_ERROR")
 if(b4==null)b4=c2
-b5=$.ch().gcs().h(0,"CLOUD_SONOS_FALLBACK_ERROR_THRESHOLD")
+b5=$.ch().gcs().h(0,"LOCAL_SONOS_FALLBACK_ERROR_THRESHOLD")
 b5=A.co(b5==null?"":b5,c1)
 if(b5==null)b5=3
-b6=$.ch().gcs().h(0,"CLOUD_SONOS_RETRY_INTERVAL_SEC")
+b6=$.ch().gcs().h(0,"LOCAL_SONOS_RETRY_INTERVAL_SEC")
 b6=A.co(b6==null?"":b6,c1)
 if(b6==null)b6=10
-b7=$.ch().gcs().h(0,"CLOUD_SONOS_RETRY_COOLDOWN_SEC")
+b7=$.ch().gcs().h(0,"LOCAL_SONOS_RETRY_COOLDOWN_SEC")
 b7=A.co(b7==null?"":b7,c1)
 if(b7==null)b7=30
-b8=$.ch().gcs().h(0,"CLOUD_SONOS_RETRY_MAX_WINDOW_SEC")
+b8=$.ch().gcs().h(0,"LOCAL_SONOS_RETRY_MAX_WINDOW_SEC")
 b8=A.co(b8==null?"":b8,c1)
 if(b8==null)b8=300
 b9=$.ch().gcs().h(0,"SERVICE_TRANSITION_GRACE_SEC")
@@ -120697,6 +120697,10 @@ B.N1=s([48,13,10,13,10],t.t)
 B.qK=s([0,4,12,1,5,13,3,7,15],t.t)
 B.N9=s([63,207,243,252],t.t)
 B.Na=s([65533],t.t)
+B.bv=new A.hT(0,"directSpotify")
+B.cY=new A.hT(1,"cloudSpotify")
+B.dE=new A.hT(2,"localSonos")
+B.il=s([B.bv,B.cY,B.dE],t.Hl)
 B.Nk=s([17,18,24,47,99,99,99,99,18,21,26,66,99,99,99,99,24,26,56,99,99,99,99,99,47,66,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99],t.t)
 B.Nm=s([72,84,84,80],t.t)
 B.eh=s([0,1,2,3,4,5,6,7,8,9,10,11],t.t)
@@ -120738,10 +120742,6 @@ B.PV=s([4.85481134,2.47563463],t.n)
 B.O9=s([5.62945551,2.72948597],t.n)
 B.OX=s([6.43023796,2.98020421],t.n)
 B.qM=s([B.OV,B.Mb,B.RO,B.RW,B.NZ,B.Oj,B.Qk,B.Pd,B.PV,B.O9,B.OX],t.zg)
-B.bv=new A.hT(0,"directSpotify")
-B.cY=new A.hT(1,"cloudSpotify")
-B.dE=new A.hT(2,"cloudSonos")
-B.il=s([B.bv,B.cY,B.dE],t.Hl)
 B.qN=s([1,1.387039845,1.306562965,1.175875602,1,0.785694958,0.5411961,0.275899379],t.n)
 B.NQ=s([5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5],t.t)
 B.NX=s([B.k5,B.k6],A.al("u<Ck>"))

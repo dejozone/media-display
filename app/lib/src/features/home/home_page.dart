@@ -743,7 +743,7 @@ class _EqualizerIndicatorState extends State<_EqualizerIndicator>
     // Determine color based on active service and connection state:
     // - direct_spotify active → Green (#22C55E)
     // - cloud_spotify active → Light Blue (#38BDF8)
-    // - cloud_sonos active → Cyan (#06B6D4)
+    // - local_sonos active → Cyan (#06B6D4)
     // - Not connected / retrying → blink appropriate color
     // - In cooldown → blink red
     // - No active service → red
@@ -753,7 +753,7 @@ class _EqualizerIndicatorState extends State<_EqualizerIndicator>
     // Color definitions
     const greenColor = Color(0xFF22C55E); // Direct Spotify
     const lightBlueColor = Color(0xFF38BDF8); // Cloud Spotify
-    const cyanColor = Color(0xFF06B6D4); // Cloud Sonos
+    const cyanColor = Color(0xFF06B6D4); // Local Sonos
     const redColor = Color(0xFFEF4444); // Disconnected/Error
     const purpleColor =
         Color.fromARGB(255, 163, 92, 211); // Retrying without playback
@@ -765,7 +765,7 @@ class _EqualizerIndicatorState extends State<_EqualizerIndicator>
           return greenColor;
         case ServiceType.cloudSpotify:
           return lightBlueColor;
-        case ServiceType.cloudSonos:
+        case ServiceType.localSonos:
           return cyanColor;
         case null:
           return redColor;

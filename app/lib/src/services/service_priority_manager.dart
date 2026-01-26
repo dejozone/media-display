@@ -310,7 +310,7 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       }
     } else if (currentService != null) {
       // Current service is still enabled, but check if a higher-priority service
-      // has become available (e.g., Sonos was re-enabled and cloudSonos is higher priority)
+      // has become available (e.g., Sonos was re-enabled and localSonos is higher priority)
       final nextAvailable = state.getNextAvailableService();
       if (nextAvailable != null && nextAvailable != currentService) {
         final currentIndex = state.effectiveOrder.indexOf(currentService);

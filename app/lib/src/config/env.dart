@@ -5,7 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 enum ServiceType {
   directSpotify,
   cloudSpotify,
-  cloudSonos;
+  localSonos;
 
   static ServiceType? fromString(String value) {
     switch (value.toLowerCase().trim()) {
@@ -13,8 +13,8 @@ enum ServiceType {
         return ServiceType.directSpotify;
       case 'cloud_spotify':
         return ServiceType.cloudSpotify;
-      case 'cloud_sonos':
-        return ServiceType.cloudSonos;
+      case 'local_sonos':
+        return ServiceType.localSonos;
       default:
         return null;
     }
@@ -26,8 +26,8 @@ enum ServiceType {
         return 'direct_spotify';
       case ServiceType.cloudSpotify:
         return 'cloud_spotify';
-      case ServiceType.cloudSonos:
-        return 'cloud_sonos';
+      case ServiceType.localSonos:
+        return 'local_sonos';
     }
   }
 
@@ -37,7 +37,7 @@ enum ServiceType {
       case ServiceType.directSpotify:
       case ServiceType.cloudSpotify:
         return true;
-      case ServiceType.cloudSonos:
+      case ServiceType.localSonos:
         return false;
     }
   }
@@ -48,7 +48,7 @@ enum ServiceType {
       case ServiceType.directSpotify:
       case ServiceType.cloudSpotify:
         return false;
-      case ServiceType.cloudSonos:
+      case ServiceType.localSonos:
         return true;
     }
   }
@@ -60,7 +60,7 @@ enum ServiceType {
 
   /// Whether this service uses WebSocket/cloud backend
   bool get isCloudService {
-    return this == ServiceType.cloudSpotify || this == ServiceType.cloudSonos;
+    return this == ServiceType.cloudSpotify || this == ServiceType.localSonos;
   }
 
   /// Get WebSocket config payload for this service
@@ -73,7 +73,7 @@ enum ServiceType {
       case ServiceType.cloudSpotify:
         // Backend polls Spotify
         return (spotify: true, sonos: false);
-      case ServiceType.cloudSonos:
+      case ServiceType.localSonos:
         // Backend polls Sonos
         return (spotify: false, sonos: true);
     }
@@ -122,7 +122,7 @@ class EnvConfig {
     required this.priorityOrderOfServices,
     required this.spotifyDirectFallback,
     required this.cloudSpotifyFallback,
-    required this.cloudSonosFallback,
+    required this.localSonosFallback,
     required this.serviceTransitionGraceSec,
     required this.tokenWaitTimeoutSec,
     this.sonosPollIntervalSec,
@@ -152,7 +152,7 @@ class EnvConfig {
   final List<ServiceType> priorityOrderOfServices;
   final ServiceFallbackConfig spotifyDirectFallback;
   final ServiceFallbackConfig cloudSpotifyFallback;
-  final ServiceFallbackConfig cloudSonosFallback;
+  final ServiceFallbackConfig localSonosFallback;
   final int serviceTransitionGraceSec;
   final int tokenWaitTimeoutSec;
 
@@ -163,8 +163,8 @@ class EnvConfig {
         return spotifyDirectFallback;
       case ServiceType.cloudSpotify:
         return cloudSpotifyFallback;
-      case ServiceType.cloudSonos:
-        return cloudSonosFallback;
+      case ServiceType.localSonos:
+        return localSonosFallback;
     }
   }
 }
@@ -214,7 +214,7 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
 
   // Parse service priority order
   final priorityOrderString = dotenv.env['PRIORITY_ORDER_OF_SERVICES'] ??
-      'direct_spotify,cloud_spotify,cloud_sonos';
+      'direct_spotify,cloud_spotify,local_sonos';
   final priorityOrderOfServices = priorityOrderString
       .split(',')
       .map((s) => ServiceType.fromString(s))
@@ -225,7 +225,7 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
     priorityOrderOfServices.addAll([
       ServiceType.directSpotify,
       ServiceType.cloudSpotify,
-      ServiceType.cloudSonos
+      ServiceType.localSonos
     ]);
   }
 
@@ -273,25 +273,25 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
             300,
   );
 
-  // Parse Cloud Sonos fallback config
+  // Parse Local Sonos fallback config
   // NOTE: Sonos is event-driven (only emits on state change), so timeout is disabled by default (0)
   // Fallback for Sonos relies on WebSocket connection state, not data timeout
-  final cloudSonosFallback = ServiceFallbackConfig(
+  final localSonosFallback = ServiceFallbackConfig(
     timeoutSec:
-        int.tryParse(dotenv.env['CLOUD_SONOS_FALLBACK_TIMEOUT_SEC'] ?? '') ??
+        int.tryParse(dotenv.env['LOCAL_SONOS_FALLBACK_TIMEOUT_SEC'] ?? '') ??
             0, // 0 = disabled (event-driven)
     onError:
-        (dotenv.env['CLOUD_SONOS_FALLBACK_ON_ERROR'] ?? 'true').toLowerCase() ==
+        (dotenv.env['LOCAL_SONOS_FALLBACK_ON_ERROR'] ?? 'true').toLowerCase() ==
             'true',
     errorThreshold: int.tryParse(
-            dotenv.env['CLOUD_SONOS_FALLBACK_ERROR_THRESHOLD'] ?? '') ??
+            dotenv.env['LOCAL_SONOS_FALLBACK_ERROR_THRESHOLD'] ?? '') ??
         3,
     retryIntervalSec:
-        int.tryParse(dotenv.env['CLOUD_SONOS_RETRY_INTERVAL_SEC'] ?? '') ?? 10,
+        int.tryParse(dotenv.env['LOCAL_SONOS_RETRY_INTERVAL_SEC'] ?? '') ?? 10,
     retryCooldownSec:
-        int.tryParse(dotenv.env['CLOUD_SONOS_RETRY_COOLDOWN_SEC'] ?? '') ?? 30,
+        int.tryParse(dotenv.env['LOCAL_SONOS_RETRY_COOLDOWN_SEC'] ?? '') ?? 30,
     retryMaxWindowSec:
-        int.tryParse(dotenv.env['CLOUD_SONOS_RETRY_MAX_WINDOW_SEC'] ?? '') ??
+        int.tryParse(dotenv.env['LOCAL_SONOS_RETRY_MAX_WINDOW_SEC'] ?? '') ??
             300,
   );
 
@@ -324,7 +324,7 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
     priorityOrderOfServices: priorityOrderOfServices,
     spotifyDirectFallback: spotifyDirectFallback,
     cloudSpotifyFallback: cloudSpotifyFallback,
-    cloudSonosFallback: cloudSonosFallback,
+    localSonosFallback: localSonosFallback,
     serviceTransitionGraceSec: serviceTransitionGraceSec,
     tokenWaitTimeoutSec: tokenWaitTimeoutSec,
   );
