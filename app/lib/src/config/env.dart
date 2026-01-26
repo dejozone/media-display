@@ -190,9 +190,9 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
   // Sonos poll interval: null or 0 means let the server decide
   final sonosPollIntervalSecRaw =
       int.tryParse(dotenv.env['SONOS_POLL_INTERVAL_SEC'] ?? '');
-  final sonosPollIntervalSec = 
-      (sonosPollIntervalSecRaw == null || sonosPollIntervalSecRaw <= 0) 
-          ? null 
+  final sonosPollIntervalSec =
+      (sonosPollIntervalSecRaw == null || sonosPollIntervalSecRaw <= 0)
+          ? null
           : sonosPollIntervalSecRaw;
   final maxAvatarsPerUser =
       int.tryParse(dotenv.env['MAX_AVATARS_PER_USER'] ?? '') ?? 5;

@@ -561,20 +561,25 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
   /// Resets cooldowns for cloud services so they can be retried
   /// and re-evaluates if we should switch back to a higher-priority cloud service
   void onWebSocketReconnected() {
-    debugPrint('[ServicePriority] WebSocket reconnected - re-evaluating cloud services');
+    debugPrint(
+        '[ServicePriority] WebSocket reconnected - re-evaluating cloud services');
 
     // Reset cooldowns and error counts for cloud services
-    final newStatuses = Map<ServiceType, ServiceStatus>.from(state.serviceStatuses);
+    final newStatuses =
+        Map<ServiceType, ServiceStatus>.from(state.serviceStatuses);
     final newErrors = Map<ServiceType, int>.from(state.errorCounts);
     final newCooldowns = Map<ServiceType, DateTime?>.from(state.cooldownEnds);
-    final newRetryWindows = Map<ServiceType, DateTime?>.from(state.retryWindowStarts);
+    final newRetryWindows =
+        Map<ServiceType, DateTime?>.from(state.retryWindowStarts);
 
     for (final service in ServiceType.values) {
       if (service.isCloudService && state.enabledServices.contains(service)) {
         // Reset cloud services that were in cooldown or failing
         final status = newStatuses[service];
-        if (status == ServiceStatus.cooldown || status == ServiceStatus.failing) {
-          debugPrint('[ServicePriority] Resetting $service from $status to standby');
+        if (status == ServiceStatus.cooldown ||
+            status == ServiceStatus.failing) {
+          debugPrint(
+              '[ServicePriority] Resetting $service from $status to standby');
           newStatuses[service] = ServiceStatus.standby;
           newErrors[service] = 0;
           newCooldowns[service] = null;
@@ -596,15 +601,16 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
 
     if (nextAvailable != null && nextAvailable != currentService) {
       // Check if the next available is higher priority than current
-      final currentIndex = currentService != null 
+      final currentIndex = currentService != null
           ? state.effectiveOrder.indexOf(currentService)
           : state.effectiveOrder.length;
       final nextIndex = state.effectiveOrder.indexOf(nextAvailable);
 
       if (nextIndex < currentIndex) {
-        debugPrint('[ServicePriority] Switching to higher-priority service: $nextAvailable (was $currentService)');
+        debugPrint(
+            '[ServicePriority] Switching to higher-priority service: $nextAvailable (was $currentService)');
         activateService(nextAvailable);
-        
+
         // If switching to primary service, cancel retry timer
         if (nextAvailable == _getFirstEnabledService()) {
           _cancelRetryTimer();
@@ -634,7 +640,8 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
   /// Cancel the retry timer
   void _cancelRetryTimer() {
     if (_retryTimer != null) {
-      debugPrint('[ServicePriority] Cancelling retry timer - on primary service');
+      debugPrint(
+          '[ServicePriority] Cancelling retry timer - on primary service');
       _retryTimer?.cancel();
       _retryTimer = null;
     }

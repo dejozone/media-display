@@ -213,7 +213,9 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
 
                 // Notify service priority manager that WebSocket is back
                 // This allows re-evaluation of cloud services that may have been in cooldown
-                ref.read(servicePriorityProvider.notifier).onWebSocketReconnected();
+                ref
+                    .read(servicePriorityProvider.notifier)
+                    .onWebSocketReconnected();
               }
             }
           } catch (e) {
@@ -403,7 +405,8 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       // we need to tell the server to poll Sonos
       final wsConfig = (
         spotify: baseWsConfig.spotify,
-        sonos: baseWsConfig.sonos || (service == ServiceType.directSpotify && userSonosEnabled),
+        sonos: baseWsConfig.sonos ||
+            (service == ServiceType.directSpotify && userSonosEnabled),
       );
 
       // Determine if we need a token
@@ -440,7 +443,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
         },
         'poll': {
           'spotify': spotifyPoll,
-          'sonos': sonosPoll,  // null = let server decide
+          'sonos': sonosPoll, // null = let server decide
         },
       });
 
@@ -486,7 +489,8 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     // This ensures the new service-based config is used instead of the legacy polling mode logic
     final priority = ref.read(servicePriorityProvider);
     if (priority.currentService != null) {
-      debugPrint('[WS] sendConfig delegating to sendConfigForService for ${priority.currentService}');
+      debugPrint(
+          '[WS] sendConfig delegating to sendConfigForService for ${priority.currentService}');
       await sendConfigForService(priority.currentService!);
       return;
     }
