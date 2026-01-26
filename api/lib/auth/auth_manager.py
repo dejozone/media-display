@@ -3,7 +3,6 @@
 Auth Manager
 Handles JWT creation, validation, refresh, and integrates with Google/Spotify OAuth clients
 """
-import os
 import sys
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple, List

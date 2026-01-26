@@ -3,7 +3,6 @@
 Spotify OAuth 2.0 Client
 Handles Spotify OAuth authentication flow without external OAuth libraries
 """
-import os
 import sys
 from pathlib import Path
 from typing import Dict, Any

@@ -3,10 +3,9 @@
 Google OAuth 2.0 Client
 Handles Google OAuth authentication flow without external OAuth libraries
 """
-import os
 import sys
 from pathlib import Path
-from typing import Dict, Optional, Any
+from typing import Dict, Any
 from urllib.parse import urlencode
 import requests
 
