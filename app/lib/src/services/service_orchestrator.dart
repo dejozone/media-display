@@ -98,6 +98,14 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
   Timer? _servicePausedTimer;
   Timer? _cycleResetTimer;
   DateTime? _lastDataTime;
+
+  // Track if Sonos has played this session - helps distinguish between:
+  // - Initial state (never received playing data) -> wait for activity
+  // - Was playing, now paused -> may cycle depending on status
+  bool _sonosHasPlayedThisSession = false;
+
+  // Track when Sonos last reported playing - for detecting stale pause states
+  DateTime? _lastSonosPlayingTime;
   bool _initialized = false;
 
   // Service cycling state
@@ -437,6 +445,12 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
         // Playing - cancel pause timer
         _cancelPauseTimer();
 
+        // Track Sonos playing state for session awareness
+        if (effectiveService == ServiceType.localSonos) {
+          _sonosHasPlayedThisSession = true;
+          _lastSonosPlayingTime = DateTime.now();
+        }
+
         // If Sonos starts playing but we're on a different service, switch to Sonos
         if (isFromDifferentService &&
             effectiveService == ServiceType.localSonos) {
@@ -583,9 +597,12 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
   /// Handle Sonos pause/stop with status-based wait times
   /// Different wait times based on transport state:
   /// - paused (with track): usually 0 (disabled) - user likely to resume
-  /// - paused (no track): treat as idle - user switched away
+  /// - paused (no track): use idle wait time - user may have switched away
   /// - stopped: longer wait (e.g., 30s) - queue might have ended
   /// - idle/no_media: quick switch (e.g., 3s) - nothing to play
+  ///
+  /// NOTE: Even if Sonos has never played this session, we still cycle
+  /// (with idle wait time) to discover if other services are playing.
   void _handleSonosPausedWithStatus(String? status,
       {bool hasTrackInfo = true}) {
     // Skip if we already have a pause timer running for Sonos
@@ -601,12 +618,35 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     final int waitSec;
     final normalizedStatus = (status ?? 'idle').toLowerCase();
 
-    // Special case: "paused" but no track info means user likely switched away
-    // Treat this as "idle" for quicker fallback
+    // "paused" but no track info means nothing is actively playing on Sonos
+    // This could be:
+    // 1. Initial state (app just loaded, Sonos idle)
+    // 2. User switched away from Sonos to another service
+    // 3. Stale state from WebSocket reconnect
+    // In all cases, we should eventually cycle to check other services
     if (normalizedStatus == 'paused' && !hasTrackInfo) {
-      debugPrint(
-          '[Orchestrator] Sonos paused with no track info - treating as idle (user likely switched away)');
-      waitSec = _config.localSonosIdleWaitSec;
+      // Check if Sonos was recently playing (within last 30 seconds)
+      // If so, this "paused" state might be stale or a brief transition
+      if (_sonosHasPlayedThisSession && _lastSonosPlayingTime != null) {
+        final timeSinceLastPlaying =
+            DateTime.now().difference(_lastSonosPlayingTime!).inSeconds;
+        if (timeSinceLastPlaying < 30) {
+          debugPrint(
+              '[Orchestrator] Sonos paused with no track but was playing ${timeSinceLastPlaying}s ago - using longer wait');
+          // Use stopped wait time (longer) instead of idle
+          waitSec = _config.localSonosStoppedWaitSec;
+        } else {
+          debugPrint(
+              '[Orchestrator] Sonos paused with no track info - treating as idle');
+          waitSec = _config.localSonosIdleWaitSec;
+        }
+      } else {
+        // Never played this session or no timestamp - use idle wait time
+        // This allows cycling to discover other playing services
+        debugPrint(
+            '[Orchestrator] Sonos paused with no track info - treating as idle (will cycle to check other services)');
+        waitSec = _config.localSonosIdleWaitSec;
+      }
     } else {
       switch (normalizedStatus) {
         case 'paused':
@@ -621,6 +661,9 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
           // Don't cycle during transitioning/buffering - temporary state
           debugPrint(
               '[Orchestrator] Sonos transitioning/buffering - not cycling');
+          return;
+        case 'playing':
+          // Should not reach here, but just in case
           return;
         default:
           // idle, no_media, or unknown - use idle wait time
@@ -908,6 +951,10 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     _resetCyclingState();
     _lastIsPlaying.clear();
 
+    // Reset Sonos session tracking
+    _sonosHasPlayedThisSession = false;
+    _lastSonosPlayingTime = null;
+
     ref.read(servicePriorityProvider.notifier).reset();
     ref.read(spotifyDirectProvider.notifier).stopPolling();
 
@@ -935,6 +982,10 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     _initialized = false;
     _resetCyclingState();
     _lastIsPlaying.clear();
+
+    // Reset Sonos session tracking
+    _sonosHasPlayedThisSession = false;
+    _lastSonosPlayingTime = null;
 
     // Stop services
     ref.read(servicePriorityProvider.notifier).reset();
