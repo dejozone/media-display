@@ -1389,6 +1389,7 @@ file:///Users/hthai00/Projects/media-display/app/lib/src/services/auth_service.d
 file:///Users/hthai00/Projects/media-display/app/lib/src/services/auth_state.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/services/avatar_service.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/services/events_ws_service.dart
+file:///Users/hthai00/Projects/media-display/app/lib/src/services/service_health.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/services/service_orchestrator.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/services/service_priority_manager.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/services/settings_service.dart

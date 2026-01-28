@@ -19,7 +19,8 @@
     "requestTimeoutSec": 10,
     "retryIntervalSec": 2,
     "retryWindowSec": 20,
-    "cooldownSec": 30
+    "cooldownSec": 30,
+    "sendHealthStatusWindowSec": 30
   },
   "sonos": {
     "deviceDiscRetryIntervalSec": 2,
@@ -31,7 +32,8 @@
     "discoveryCacheTtlSec": 60,
     "resumeDiscoveryIntervalSec": 10,
     "idleStuckTimeoutSec": 10,
-    "noDeviceRetryIntervalSec": 15
+    "noDeviceRetryIntervalSec": 15,
+    "sendHealthStatusWindowSec": 30
   },
   "server": {
     "timeoutGracefulShutdownSec": 1

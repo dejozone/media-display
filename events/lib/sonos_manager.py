@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Tuple
 
 try:
     from soco import SoCo
@@ -11,6 +11,7 @@ except ImportError as exc:  # pragma: no cover
     raise ImportError("soco is required for Sonos support; please install soco") from exc
 
 from lib.payload_normalizer import normalize_payload
+from lib.service_health import HEALTH_TRACKER, ErrorCode
 
 
 class SonosManager:
@@ -46,15 +47,42 @@ class SonosManager:
         except Exception:
             return None
 
-    async def discover_coordinator(self) -> Optional[SoCo]:
+    async def discover_coordinator(
+        self,
+        on_status_change: Optional[Callable[[Dict[str, Any]], Any]] = None,
+    ) -> Tuple[Optional[SoCo], int]:
+        """Discover Sonos coordinator.
+        
+        Args:
+            on_status_change: Optional callback for health status changes.
+            
+        Returns:
+            Tuple of (coordinator, device_count). Coordinator may be None if no devices found.
+        """
         loop = asyncio.get_running_loop()
-        now = time.monotonic()
 
         self.logger.info("sonos: discovering devices")
-        devices = await loop.run_in_executor(None, discover)
+        try:
+            devices = await loop.run_in_executor(None, discover)
+        except Exception as exc:
+            self.logger.warning(f"sonos: discovery failed with error: {exc}")
+            status = await HEALTH_TRACKER.report_error(
+                "sonos", ErrorCode.NETWORK_ERROR, f"Discovery failed: {exc}"
+            )
+            if on_status_change and status:
+                await on_status_change(status)
+            return None, 0
+            
         if not devices:
             self.logger.info("sonos: no devices discovered")
-            return None
+            status = await HEALTH_TRACKER.report_error(
+                "sonos", ErrorCode.NO_DEVICES, "No Sonos devices found on network"
+            )
+            if on_status_change and status:
+                await on_status_change(status)
+            return None, 0
+
+        device_count = len(devices)
 
         def _sort_key(dev: SoCo) -> str:
             try:
@@ -87,7 +115,8 @@ class SonosManager:
                 if state in self._active_states:
                     active_coord = coord
                     break
-            except Exception:
+            except Exception as exc:
+                self.logger.debug(f"sonos: error checking device {dev}: {exc}")
                 continue
 
         chosen = active_coord or fallback_coord
@@ -96,9 +125,20 @@ class SonosManager:
                 self.logger.info(f"sonos: found coordinator {chosen.player_name}")
             except Exception:
                 pass
-            return chosen
+            # Report healthy status
+            status = await HEALTH_TRACKER.report_healthy("sonos", device_count)
+            if on_status_change and status:
+                await on_status_change(status)
+            return chosen, device_count
 
-        return None
+        # Devices found but no coordinator - coordinator error
+        self.logger.warning("sonos: devices found but no valid coordinator")
+        status = await HEALTH_TRACKER.report_error(
+            "sonos", ErrorCode.COORDINATOR_ERROR, f"Found {device_count} devices but no valid coordinator"
+        )
+        if on_status_change and status:
+            await on_status_change(status)
+        return None, device_count
 
     def _build_payload(self, coordinator: SoCo) -> Dict[str, Any]:
         track_info = coordinator.get_current_track_info()
@@ -186,7 +226,7 @@ class SonosManager:
             try:
                 now = time.monotonic()
                 if coordinator is None or (now - last_discovery_at) >= self.resume_discovery_interval:
-                    coordinator = await self.discover_coordinator()
+                    coordinator, _ = await self.discover_coordinator()
                     last_discovery_at = time.monotonic()
                     if coordinator is None:
                         await asyncio.sleep(self.discovery_retry_interval)
@@ -219,6 +259,7 @@ class SonosManager:
         poll_interval_override: Optional[int] = None,
         global_stop: Optional[asyncio.Event] = None,
         no_device_timeout: Optional[float] = None,
+        on_status_change: Optional[Callable[[Dict[str, Any]], Any]] = None,
     ) -> None:
         coordinator: Optional[SoCo] = None
         last_payload: Optional[Dict[str, Any]] = None
@@ -235,6 +276,7 @@ class SonosManager:
         ever_active = False
         idle_time_gate_sec = 10
         no_device_deadline = None if no_device_timeout is None else time.monotonic() + no_device_timeout
+        last_device_count = 0
 
         self.logger.info("sonos: stream started")
 
@@ -252,7 +294,8 @@ class SonosManager:
                     break
 
                 if coordinator is None:
-                    coordinator = await self.discover_coordinator()
+                    coordinator, device_count = await self.discover_coordinator(on_status_change)
+                    last_device_count = device_count
                     if coordinator is None:
                         if no_device_deadline is not None and time.monotonic() >= no_device_deadline:
                             self.logger.info(
@@ -381,6 +424,16 @@ class SonosManager:
                 # Reset coordinator on any failure and retry soon
                 self.logger.warning(f"sonos: stream error, resetting coordinator: {exc}")
                 coordinator = None
+                # Report error status (may be None if debounced)
+                if on_status_change:
+                    status = await HEALTH_TRACKER.report_error(
+                        "sonos", ErrorCode.COORDINATOR_ERROR, f"Stream error: {exc}"
+                    )
+                    if status:
+                        try:
+                            await on_status_change(status)
+                        except Exception:
+                            pass
                 await asyncio.sleep(self.coordinator_retry)
                 continue
 

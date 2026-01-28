@@ -136,6 +136,7 @@ class _HomePageState extends ConsumerState<HomePage>
 
       // Also send config to WebSocket for backward compatibility
       final ws = ref.read(eventsWsProvider.notifier);
+      ws.updateCachedSettings(next); // Update cached settings first
       await ws.sendConfig();
     } catch (e) {
       if (mounted) setState(() => error = e.toString());

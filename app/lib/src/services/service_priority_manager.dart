@@ -3,6 +3,18 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_display/src/config/env.dart';
 
+/// Timestamped debug print for correlation with server logs
+void _log(String message) {
+  final now = DateTime.now();
+  final mo = now.month.toString().padLeft(2, '0');
+  final d = now.day.toString().padLeft(2, '0');
+  final h = now.hour.toString().padLeft(2, '0');
+  final m = now.minute.toString().padLeft(2, '0');
+  final s = now.second.toString().padLeft(2, '0');
+  final ms = now.millisecond.toString().padLeft(3, '0');
+  debugPrint('[$mo-$d $h:$m:$s.$ms] $message');
+}
+
 /// Status of a service in the priority system
 enum ServiceStatus {
   /// Service is currently providing data
@@ -251,9 +263,14 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
   }
 
   /// Update enabled services based on user settings
+  ///
+  /// [unhealthyServices] - Optional set of services known to be unhealthy.
+  /// If provided, these services will not be auto-switched to even if they
+  /// are higher priority, allowing the current service to continue.
   void updateEnabledServices({
     required bool spotifyEnabled,
     required bool sonosEnabled,
+    Set<ServiceType>? unhealthyServices,
   }) {
     final enabled = <ServiceType>{};
 
@@ -287,37 +304,43 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       serviceStatuses: newStatuses,
     );
 
-    debugPrint(
+    _log(
         '[ServicePriority] Updated enabled services: $enabled (spotify=$spotifyEnabled, sonos=$sonosEnabled)');
 
     // If current service is now disabled, switch to next available
     final currentService = state.currentService;
-    debugPrint(
+    _log(
         '[ServicePriority] Checking if current service needs switch: currentService=$currentService, isInEnabled=${currentService != null ? enabled.contains(currentService) : 'n/a'}');
 
     if (currentService != null && !enabled.contains(currentService)) {
-      debugPrint(
+      _log(
           '[ServicePriority] Current service $currentService is disabled, finding next available');
       final next = state.getNextAvailableService();
-      debugPrint('[ServicePriority] Next available service: $next');
+      _log('[ServicePriority] Next available service: $next');
       if (next != null) {
         activateService(next);
       } else {
-        debugPrint(
-            '[ServicePriority] No next service available, clearing current');
+        _log('[ServicePriority] No next service available, clearing current');
         state = state.copyWith(clearCurrentService: true);
       }
     } else if (currentService != null) {
       // Current service is still enabled, but check if a higher-priority service
       // has become available (e.g., Sonos was re-enabled and localSonos is higher priority)
+      // BUT: Don't switch if that service is known to be unhealthy
       final nextAvailable = state.getNextAvailableService();
       if (nextAvailable != null && nextAvailable != currentService) {
         final currentIndex = state.effectiveOrder.indexOf(currentService);
         final nextIndex = state.effectiveOrder.indexOf(nextAvailable);
-        if (nextIndex < currentIndex) {
-          debugPrint(
+        final isHigherPriority = nextIndex < currentIndex;
+        final isUnhealthy = unhealthyServices?.contains(nextAvailable) ?? false;
+
+        if (isHigherPriority && !isUnhealthy) {
+          _log(
               '[ServicePriority] Higher-priority service $nextAvailable is now available (was on $currentService)');
           activateService(nextAvailable);
+        } else if (isHigherPriority && isUnhealthy) {
+          _log(
+              '[ServicePriority] Higher-priority service $nextAvailable is enabled but unhealthy - staying on $currentService');
         }
       }
     }
@@ -326,8 +349,7 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
   /// Activate a specific service
   void activateService(ServiceType service) {
     if (!state.enabledServices.contains(service)) {
-      debugPrint(
-          '[ServicePriority] Cannot activate disabled service: $service');
+      _log('[ServicePriority] Cannot activate disabled service: $service');
       return;
     }
 
@@ -356,7 +378,7 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       transitionStartTime: DateTime.now(),
     );
 
-    debugPrint('[ServicePriority] Activated service: $service');
+    _log('[ServicePriority] Activated service: $service');
 
     // End transition after grace period
     Future.delayed(Duration(seconds: _config.serviceTransitionGraceSec), () {
@@ -374,13 +396,12 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
   /// Unlike activateService, this doesn't reset error counts or trigger retry logic
   void switchToService(ServiceType service) {
     if (!state.enabledServices.contains(service)) {
-      debugPrint(
-          '[ServicePriority] Cannot switch to disabled service: $service');
+      _log('[ServicePriority] Cannot switch to disabled service: $service');
       return;
     }
 
     if (state.currentService == service) {
-      debugPrint('[ServicePriority] Already on service: $service');
+      _log('[ServicePriority] Already on service: $service');
       return;
     }
 
@@ -403,7 +424,7 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       transitionStartTime: DateTime.now(),
     );
 
-    debugPrint('[ServicePriority] Switched to service: $service');
+    _log('[ServicePriority] Switched to service: $service');
 
     // End transition after grace period
     Future.delayed(Duration(seconds: _config.serviceTransitionGraceSec), () {
@@ -445,7 +466,7 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
   void reportError(ServiceType service, {bool is401 = false}) {
     // 401 errors should trigger token refresh, not fallback
     if (is401) {
-      debugPrint(
+      _log(
           '[ServicePriority] 401 error on $service - triggering token refresh, not fallback');
       return;
     }
@@ -453,7 +474,7 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     final fallbackConfig = _config.getFallbackConfig(service);
 
     if (!fallbackConfig.onError) {
-      debugPrint('[ServicePriority] Fallback on error disabled for $service');
+      _log('[ServicePriority] Fallback on error disabled for $service');
       return;
     }
 
@@ -461,7 +482,7 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     final currentCount = newErrors[service] ?? 0;
     newErrors[service] = currentCount + 1;
 
-    debugPrint(
+    _log(
         '[ServicePriority] Error on $service (${newErrors[service]}/${fallbackConfig.errorThreshold})');
 
     final newStatuses =
@@ -469,7 +490,7 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
 
     if (newErrors[service]! >= fallbackConfig.errorThreshold) {
       // Threshold reached - enter cooldown and trigger fallback
-      debugPrint(
+      _log(
           '[ServicePriority] Error threshold reached for $service - entering cooldown');
 
       newStatuses[service] = ServiceStatus.cooldown;
@@ -507,7 +528,7 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
 
   /// Report a timeout from a service
   void reportTimeout(ServiceType service) {
-    debugPrint('[ServicePriority] Timeout on $service');
+    _log('[ServicePriority] Timeout on $service');
     reportError(service);
   }
 
@@ -516,11 +537,11 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     final next = state.getNextAvailableService();
 
     if (next != null && next != failedService) {
-      debugPrint('[ServicePriority] Falling back from $failedService to $next');
+      _log('[ServicePriority] Falling back from $failedService to $next');
       activateService(next);
       _startRetryTimer(failedService);
     } else {
-      debugPrint('[ServicePriority] No fallback available from $failedService');
+      _log('[ServicePriority] No fallback available from $failedService');
       // All services unavailable - stay on current and retry later
       _startRetryTimer(failedService);
     }
@@ -556,7 +577,7 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     // If current service is active and hasn't reached error threshold, don't retry others
     if (currentStatus == ServiceStatus.active &&
         currentErrors < currentFallbackConfig.errorThreshold) {
-      debugPrint(
+      _log(
           '[ServicePriority] Skipping retry - current service ${state.currentService} is active with $currentErrors/${currentFallbackConfig.errorThreshold} errors');
       return;
     }
@@ -566,7 +587,7 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       if (service == state.currentService) continue;
 
       if (state.shouldRetryService(service, _config)) {
-        debugPrint('[ServicePriority] Attempting retry of $service');
+        _log('[ServicePriority] Attempting retry of $service');
 
         // Update last retry attempt
         final newRetries =
@@ -607,7 +628,7 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
   /// Resets cooldowns for cloud services so they can be retried
   /// and re-evaluates if we should switch back to a higher-priority cloud service
   void onWebSocketReconnected() {
-    debugPrint(
+    _log(
         '[ServicePriority] WebSocket reconnected - re-evaluating cloud services');
 
     // Reset cooldowns and error counts for cloud services
@@ -624,8 +645,7 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
         final status = newStatuses[service];
         if (status == ServiceStatus.cooldown ||
             status == ServiceStatus.failing) {
-          debugPrint(
-              '[ServicePriority] Resetting $service from $status to standby');
+          _log('[ServicePriority] Resetting $service from $status to standby');
           newStatuses[service] = ServiceStatus.standby;
           newErrors[service] = 0;
           newCooldowns[service] = null;
@@ -653,7 +673,7 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       final nextIndex = state.effectiveOrder.indexOf(nextAvailable);
 
       if (nextIndex < currentIndex) {
-        debugPrint(
+        _log(
             '[ServicePriority] Switching to higher-priority service: $nextAvailable (was $currentService)');
         activateService(nextAvailable);
 
@@ -686,8 +706,7 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
   /// Cancel the retry timer
   void _cancelRetryTimer() {
     if (_retryTimer != null) {
-      debugPrint(
-          '[ServicePriority] Cancelling retry timer - on primary service');
+      _log('[ServicePriority] Cancelling retry timer - on primary service');
       _retryTimer?.cancel();
       _retryTimer = null;
     }

@@ -7,6 +7,7 @@ import httpx
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 
 from lib.payload_normalizer import normalize_payload
+from lib.service_health import HEALTH_TRACKER, ErrorCode
 
 
 class SupportsWebSocket(Protocol):
@@ -40,7 +41,21 @@ class SpotifyManager:
         close_on_stop: bool = True,
         poll_interval_override: Optional[int] = None,
         safe_close: Optional[Callable[[SupportsWebSocket, int, str], Awaitable[None]]] = None,
+        on_status_change: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
     ) -> None:
+        """Stream Spotify now-playing data via polling.
+        
+        Args:
+            ws: WebSocket to send data to.
+            token: User's auth token.
+            user_id: User ID.
+            stop_event: Event to signal stop.
+            http_client: HTTP client for API calls.
+            close_on_stop: Whether to close WebSocket on stop.
+            poll_interval_override: Override poll interval from config.
+            safe_close: Custom close function.
+            on_status_change: Callback for health status changes (may be None if debounced).
+        """
         assert stop_event is not None
         assert http_client is not None
         assert user_id is not None
@@ -59,10 +74,19 @@ class SpotifyManager:
                 pass
 
         closer = safe_close or _safe_close
+        
+        async def _report_status(status: Optional[Dict[str, Any]]) -> None:
+            """Report status if callback provided and status is not None (debounced)."""
+            if on_status_change and status:
+                try:
+                    await on_status_change(status)
+                except Exception:
+                    pass
 
         etag: Optional[str] = None
         last_payload: Optional[Dict[str, Any]] = None
         failure_start: Optional[float] = None
+        was_healthy: bool = True  # Track if we were healthy before
 
         while not stop_event.is_set() and ws.application_state == WebSocketState.CONNECTED:
             try:
@@ -85,6 +109,12 @@ class SpotifyManager:
                         except ValueError:
                             pass
                     self.logger.warning("spotify: rate limited, backing off %ss", retry_after)
+                    # Report rate limited status
+                    status = await HEALTH_TRACKER.report_error(
+                        "spotify", ErrorCode.RATE_LIMITED, f"Rate limited, retry after {retry_after}s"
+                    )
+                    await _report_status(status)
+                    was_healthy = False
                     try:
                         await ws.send_json({"type": "error", "error": "spotify_rate_limited"})
                     except Exception:
@@ -96,16 +126,33 @@ class SpotifyManager:
                     continue
 
                 if resp.status_code == 304:
+                    # Not modified - still healthy
+                    if not was_healthy:
+                        status = await HEALTH_TRACKER.report_healthy("spotify")
+                        await _report_status(status)
+                        was_healthy = True
                     if failure_start is not None:
                         recovered_for = time.monotonic() - failure_start
                         self.logger.info("spotify: recovered after %.1fs of errors", recovered_for)
                     failure_start = None
                 elif resp.status_code == 401:
+                    # Auth error - report and close
+                    status = await HEALTH_TRACKER.report_error(
+                        "spotify", ErrorCode.AUTH_ERROR, "Unauthorized - token may be expired"
+                    )
+                    await _report_status(status)
                     await closer(ws, 4401, "Unauthorized")
                     break
                 elif resp.status_code >= 500:
+                    # Server error - will be caught by raise_for_status
                     resp.raise_for_status()
                 else:
+                    # Success - report healthy if we weren't before
+                    if not was_healthy:
+                        status = await HEALTH_TRACKER.report_healthy("spotify")
+                        await _report_status(status)
+                        was_healthy = True
+                    
                     payload = resp.json()
                     etag = resp.headers.get("ETag", etag)
                     if payload != last_payload:
@@ -128,9 +175,54 @@ class SpotifyManager:
             except asyncio.CancelledError:
                 self.logger.info("spotify: stream cancelled")
                 break
-            except (httpx.TimeoutException, httpx.TransportError, httpx.HTTPStatusError) as exc:
+            except httpx.HTTPStatusError as exc:
+                # Handle 5xx errors specifically
                 if stop_event.is_set():
                     break
+                status_code = exc.response.status_code if exc.response else 0
+                if status_code >= 500:
+                    status = await HEALTH_TRACKER.report_error(
+                        "spotify", ErrorCode.SERVER_ERROR, f"Server error: {status_code}"
+                    )
+                    await _report_status(status)
+                    was_healthy = False
+                # Fall through to general error handling
+                now = time.monotonic()
+                if failure_start is None:
+                    self.logger.warning("spotify: poll error starting failure window: %s", exc)
+                    failure_start = now
+                else:
+                    self.logger.warning(
+                        "spotify: poll error during failure window (elapsed=%.1fs): %s",
+                        now - failure_start,
+                        exc,
+                    )
+                elapsed = now - failure_start
+                if elapsed >= retry_window:
+                    self.logger.warning("spotify: cooldown %.1fs after failure window", cooldown)
+                    try:
+                        await asyncio.wait_for(asyncio.sleep(cooldown), timeout=cooldown + 1)
+                    except asyncio.CancelledError:
+                        break
+                    failure_start = None
+                else:
+                    self.logger.info("spotify: retrying after %.1fs (within failure window)", retry_interval)
+                    try:
+                        await asyncio.wait_for(asyncio.sleep(retry_interval), timeout=retry_interval + 1)
+                    except asyncio.CancelledError:
+                        break
+                continue
+            except (httpx.TimeoutException, httpx.TransportError) as exc:
+                if stop_event.is_set():
+                    break
+                # Report network/timeout error
+                error_code = ErrorCode.TIMEOUT if isinstance(exc, httpx.TimeoutException) else ErrorCode.NETWORK_ERROR
+                status = await HEALTH_TRACKER.report_error(
+                    "spotify", error_code, f"Connection error: {exc}"
+                )
+                await _report_status(status)
+                was_healthy = False
+                
                 now = time.monotonic()
                 if failure_start is None:
                     self.logger.warning("spotify: poll error starting failure window: %s", exc)
@@ -160,7 +252,12 @@ class SpotifyManager:
                 self.logger.info("spotify: websocket disconnect")
                 stop_event.set()
                 break
-            except Exception:
+            except Exception as exc:
+                # Report unknown error
+                status = await HEALTH_TRACKER.report_error(
+                    "spotify", ErrorCode.UNKNOWN, f"Unexpected error: {exc}"
+                )
+                await _report_status(status)
                 try:
                     await ws.send_json({"type": "error", "error": "internal_error"})
                 finally:

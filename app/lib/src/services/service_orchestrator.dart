@@ -4,10 +4,23 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_display/src/config/env.dart';
 import 'package:media_display/src/services/auth_state.dart';
 import 'package:media_display/src/services/events_ws_service.dart';
+import 'package:media_display/src/services/service_health.dart';
 import 'package:media_display/src/services/service_priority_manager.dart';
 import 'package:media_display/src/services/settings_service.dart';
 import 'package:media_display/src/services/spotify_direct_service.dart';
 import 'package:media_display/src/services/user_service.dart';
+
+/// Timestamped debug print for correlation with server logs
+void _log(String message) {
+  final now = DateTime.now();
+  final mo = now.month.toString().padLeft(2, '0');
+  final d = now.day.toString().padLeft(2, '0');
+  final h = now.hour.toString().padLeft(2, '0');
+  final m = now.minute.toString().padLeft(2, '0');
+  final s = now.second.toString().padLeft(2, '0');
+  final ms = now.millisecond.toString().padLeft(3, '0');
+  debugPrint('[$mo-$d $h:$m:$s.$ms] $message');
+}
 
 /// Unified playback state from the active service
 @immutable
@@ -99,13 +112,6 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
   Timer? _cycleResetTimer;
   DateTime? _lastDataTime;
 
-  // Track if Sonos has played this session - helps distinguish between:
-  // - Initial state (never received playing data) -> wait for activity
-  // - Was playing, now paused -> may cycle depending on status
-  bool _sonosHasPlayedThisSession = false;
-
-  // Track when Sonos last reported playing - for detecting stale pause states
-  DateTime? _lastSonosPlayingTime;
   bool _initialized = false;
 
   // Service cycling state
@@ -116,6 +122,9 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
   // Track last playing state per service
   final Map<ServiceType, bool> _lastIsPlaying = {};
+
+  // Service health tracking
+  final Map<String, ServiceHealthState> _serviceHealth = {};
 
   EnvConfig get _config => ref.read(envConfigProvider);
 
@@ -138,6 +147,9 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     if (_initialized) return;
     _initialized = true;
 
+    // Set up service status callback to receive health updates from WebSocket
+    ref.read(eventsWsProvider.notifier).onServiceStatus = _handleServiceStatus;
+
     // Load user settings to determine which services are enabled
     await _loadServicesSettings();
 
@@ -159,7 +171,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       final spotifyEnabled = settings['spotify_enabled'] == true;
       final sonosEnabled = settings['sonos_enabled'] == true;
 
-      debugPrint(
+      _log(
           '[Orchestrator] Settings loaded: spotify=$spotifyEnabled, sonos=$sonosEnabled');
 
       // Update service priority with enabled services
@@ -168,7 +180,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
             sonosEnabled: sonosEnabled,
           );
     } catch (e) {
-      debugPrint('[Orchestrator] Failed to load settings: $e');
+      _log('[Orchestrator] Failed to load settings: $e');
     }
   }
 
@@ -176,7 +188,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     // Watch auth state changes to stop everything on logout
     ref.listen<AuthState>(authStateProvider, (prev, next) {
       if (prev?.isAuthenticated == true && !next.isAuthenticated) {
-        debugPrint('[Orchestrator] User logged out - stopping all services');
+        _log('[Orchestrator] User logged out - stopping all services');
         _stopAllServices();
       }
     });
@@ -206,8 +218,38 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     final prevService = prev?.currentService;
 
     if (currentService != prevService) {
-      debugPrint(
+      _log(
           '[Orchestrator] Active service changed: $prevService -> $currentService');
+
+      // Check if this is a switch to a higher-priority service (not a fallback due to cycling)
+      // If so, reset cycling state to allow fresh evaluation of the new service
+      if (currentService != null) {
+        bool shouldResetCycling = false;
+
+        if (prevService == null) {
+          // Initial activation - reset cycling state
+          shouldResetCycling = true;
+        } else {
+          final serviceList = _config.priorityOrderOfServices;
+          final currentPriority = serviceList.indexOf(currentService);
+          final previousPriority = serviceList.indexOf(prevService);
+
+          // Lower index = higher priority
+          // If switching to higher priority (or previous not in list), reset cycling
+          // This happens on WS reconnect when a cloud service becomes available
+          if (currentPriority >= 0 &&
+              (previousPriority < 0 || currentPriority < previousPriority)) {
+            shouldResetCycling = true;
+          }
+        }
+
+        if (shouldResetCycling) {
+          _log(
+              '[Orchestrator] Switching to higher-priority service - resetting cycling state');
+          _cancelPauseTimer();
+          _resetCyclingState();
+        }
+      }
 
       // Update state with new service - preserve existing track data
       state = state.copyWith(
@@ -223,11 +265,11 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
   void _activateService(ServiceType? service) {
     if (service == null) {
-      debugPrint('[Orchestrator] No service to activate');
+      _log('[Orchestrator] No service to activate');
       return;
     }
 
-    debugPrint('[Orchestrator] Activating service: $service');
+    _log('[Orchestrator] Activating service: $service');
 
     if (service.isDirectPolling) {
       _activateDirectSpotify();
@@ -238,7 +280,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
   }
 
   void _activateDirectSpotify() {
-    debugPrint('[Orchestrator] Activating direct Spotify polling');
+    _log('[Orchestrator] Activating direct Spotify polling');
 
     // Stop any direct polling first (in case switching from another mode)
     // Start direct polling
@@ -259,7 +301,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
   }
 
   void _activateCloudService(ServiceType service) {
-    debugPrint('[Orchestrator] Activating cloud service: $service');
+    _log('[Orchestrator] Activating cloud service: $service');
 
     // Stop direct polling if it was running
     ref.read(spotifyDirectProvider.notifier).stopPolling();
@@ -290,8 +332,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       final isPlaying = playback?['is_playing'] as bool? ?? false;
 
       if (isPlaying) {
-        debugPrint(
-            '[Orchestrator] Primary service directSpotify resumed playing!');
+        _log('[Orchestrator] Primary service directSpotify resumed playing!');
         _handlePrimaryServiceResumed();
         return;
       }
@@ -305,8 +346,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       // Check if it's a 401 error (handled separately - triggers token refresh, not fallback)
       if (spotifyState.error!.contains('401') ||
           spotifyState.error!.contains('Unauthorized')) {
-        debugPrint(
-            '[Orchestrator] Direct Spotify 401 - token refresh triggered');
+        _log('[Orchestrator] Direct Spotify 401 - token refresh triggered');
         return; // Don't trigger fallback for auth errors
       }
 
@@ -319,7 +359,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     // Check for fallback mode
     if (spotifyState.mode == SpotifyPollingMode.fallback ||
         spotifyState.mode == SpotifyPollingMode.offline) {
-      debugPrint(
+      _log(
           '[Orchestrator] Direct Spotify in fallback/offline mode - triggering service fallback');
       ref
           .read(servicePriorityProvider.notifier)
@@ -349,7 +389,10 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
         // Not playing - handle pause detection for cycling
         // Only start cycling if we're NOT already waiting for primary to resume
         if (!_waitingForPrimaryResume) {
-          debugPrint('[Orchestrator] Spotify not playing (was: $wasPlaying)');
+          // Only log state change (was playing → not playing)
+          if (wasPlaying) {
+            _log('[Orchestrator] Spotify stopped playing');
+          }
           _handleServicePaused(ServiceType.directSpotify);
         }
       }
@@ -381,8 +424,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       final isPlaying = playback?['is_playing'] as bool? ?? false;
 
       if (dataSource == _originalPrimaryService && isPlaying) {
-        debugPrint(
-            '[Orchestrator] Primary service $dataSource resumed playing!');
+        _log('[Orchestrator] Primary service $dataSource resumed playing!');
         _handlePrimaryServiceResumed();
         // Don't return - continue to process the payload below
       }
@@ -414,8 +456,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       if (isCurrentCloudService &&
           wsState.error != null &&
           !wsState.wsRetrying) {
-        debugPrint(
-            '[Orchestrator] Cloud service disconnected: ${wsState.error}');
+        _log('[Orchestrator] Cloud service disconnected: ${wsState.error}');
         ref.read(servicePriorityProvider.notifier).reportError(currentService);
       }
       return;
@@ -430,7 +471,6 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       final track = wsState.payload!['track'] as Map<String, dynamic>?;
       final playback = wsState.payload!['playback'] as Map<String, dynamic>?;
       final isPlaying = playback?['is_playing'] as bool? ?? false;
-      final wasPlaying = _lastIsPlaying[effectiveService] ?? false;
       _lastIsPlaying[effectiveService] = isPlaying;
       final hasTrackInfo = _hasValidTrackInfo(track);
 
@@ -445,16 +485,10 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
         // Playing - cancel pause timer
         _cancelPauseTimer();
 
-        // Track Sonos playing state for session awareness
-        if (effectiveService == ServiceType.localSonos) {
-          _sonosHasPlayedThisSession = true;
-          _lastSonosPlayingTime = DateTime.now();
-        }
-
         // If Sonos starts playing but we're on a different service, switch to Sonos
         if (isFromDifferentService &&
             effectiveService == ServiceType.localSonos) {
-          debugPrint(
+          _log(
               '[Orchestrator] Sonos started playing while on $currentService - switching to Sonos');
           ref
               .read(servicePriorityProvider.notifier)
@@ -474,7 +508,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
         // Sonos is paused with valid track info, and current service is also not playing
         // This means user switched their playback device to Sonos (even while paused)
         // Switch to show Sonos data
-        debugPrint(
+        _log(
             '[Orchestrator] Sonos has track data while $currentService is not playing - switching to Sonos');
         ref
             .read(servicePriorityProvider.notifier)
@@ -485,12 +519,6 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
         // Only start cycling if we're NOT already waiting for primary to resume
         if (!_waitingForPrimaryResume) {
           final status = playback?['status'] as String?;
-
-          // Only log on state transition (from playing to not playing)
-          if (wasPlaying) {
-            debugPrint(
-                '[Orchestrator] $effectiveService not playing - status: $status, hasTrackInfo: $hasTrackInfo');
-          }
 
           // Use status-based logic for Sonos (with track info awareness)
           if (effectiveService == ServiceType.localSonos) {
@@ -531,7 +559,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     if (isStopped) {
       // Only log stopped/empty data on transition (not every poll)
       if (state.isPlaying) {
-        debugPrint(
+        _log(
             '[Orchestrator] Received stopped/empty data from $source - music paused/stopped');
       }
     }
@@ -559,11 +587,143 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     ref.read(servicePriorityProvider.notifier).reportSuccess(source);
   }
 
+  /// Handle service status messages from WebSocket backend
+  void _handleServiceStatus(Map<String, dynamic> data) {
+    final healthState = ServiceHealthState.fromMessage(data);
+    final provider = healthState.provider;
+
+    _log('[Orchestrator] Service status: $provider = ${healthState.status.name}'
+        '${healthState.errorCode != null ? ' (${healthState.errorCode!.name})' : ''}'
+        '${healthState.message != null ? ' - ${healthState.message}' : ''}');
+
+    // Store the health state
+    final previousHealth = _serviceHealth[provider];
+    _serviceHealth[provider] = healthState;
+
+    // Determine the service type for this provider
+    final serviceType = provider == 'sonos'
+        ? ServiceType.localSonos
+        : (provider == 'spotify' ? ServiceType.cloudSpotify : null);
+
+    if (serviceType == null) {
+      _log('[Orchestrator] Unknown provider: $provider');
+      return;
+    }
+
+    final currentService = ref.read(servicePriorityProvider).currentService;
+
+    // Check if this is a NEW unhealthy state (status changed from healthy to unhealthy)
+    final wasHealthy =
+        previousHealth == null || previousHealth.status.isHealthy;
+    final isNowUnhealthy = !healthState.status.isHealthy;
+
+    // Handle based on status
+    switch (healthState.status) {
+      case HealthStatus.healthy:
+        _onServiceRecovered(serviceType, healthState, previousHealth);
+        break;
+
+      case HealthStatus.degraded:
+        // Degraded but usable - don't cycle, just log
+        _log('[Orchestrator] $serviceType is degraded but usable');
+        break;
+
+      case HealthStatus.recovering:
+      case HealthStatus.unavailable:
+        // Only cycle if:
+        // 1. This is NEW unhealthy state (was healthy before)
+        // 2. Current service is the unhealthy one
+        // 3. shouldFallback is true (for recovering) or always (for unavailable)
+        final shouldCycle =
+            wasHealthy && isNowUnhealthy && currentService == serviceType;
+
+        if (shouldCycle) {
+          if (healthState.status == HealthStatus.recovering &&
+              !healthState.shouldFallback) {
+            _log(
+                '[Orchestrator] $serviceType recovering but shouldFallback=false - staying');
+          } else {
+            _log(
+                '[Orchestrator] $serviceType became ${healthState.status.name} (first time) - cycling to fallback');
+            _cycleToNextService(serviceType);
+          }
+        } else if (!wasHealthy && isNowUnhealthy) {
+          // Already unhealthy - don't switch again, stay on fallback
+          _log(
+              '[Orchestrator] $serviceType still ${healthState.status.name} - staying on current fallback');
+        }
+
+        // Handle auth error specially - no auto-retry
+        if (healthState.errorCode?.requiresUserAction == true) {
+          _log(
+              '[Orchestrator] $serviceType requires user action - no auto-retry');
+        }
+        break;
+    }
+  }
+
+  /// Called when a service recovers from an unhealthy state
+  void _onServiceRecovered(
+    ServiceType service,
+    ServiceHealthState health,
+    ServiceHealthState? previousHealth,
+  ) {
+    // Only log recovery if it was previously unhealthy
+    if (previousHealth != null && !previousHealth.status.isHealthy) {
+      _log(
+          '[Orchestrator] $service recovered with ${health.devicesCount} devices');
+
+      // If this service is higher priority than current and was our original primary,
+      // switch back to it
+      final currentService = ref.read(servicePriorityProvider).currentService;
+      if (currentService != null && currentService != service) {
+        final serviceList = _config.priorityOrderOfServices;
+        final currentPriority = serviceList.indexOf(currentService);
+        final recoveredPriority = serviceList.indexOf(service);
+
+        // If recovered service is higher priority AND was our original primary
+        if (recoveredPriority >= 0 &&
+            (currentPriority < 0 || recoveredPriority < currentPriority) &&
+            _originalPrimaryService == service) {
+          _log(
+              '[Orchestrator] Original primary $service recovered - switching back');
+
+          // Reset cycling state so the recovered service gets a fresh evaluation
+          // This ensures that if it has no playback, it will cycle to the next service
+          _resetCyclingState();
+
+          // Remember the original primary again since we're switching back to it
+          _originalPrimaryService = service;
+
+          ref.read(servicePriorityProvider.notifier).switchToService(service);
+        }
+      }
+    }
+  }
+
+  /// Get the current health state for a service
+  ServiceHealthState? getServiceHealth(ServiceType service) {
+    final provider = service == ServiceType.localSonos ? 'sonos' : 'spotify';
+    return _serviceHealth[provider];
+  }
+
+  /// Check if a service is healthy and usable
+  bool isServiceHealthy(ServiceType service) {
+    final health = getServiceHealth(service);
+    return health == null || health.status.isHealthy;
+  }
+
   /// Handle when a service reports paused/stopped - start timer to cycle
   /// Note: For Sonos, use _handleSonosPausedWithStatus instead for state-based handling
   void _handleServicePaused(ServiceType service) {
     // Skip if we already have a pause timer running for this service
     if (_pausedService == service && _servicePausedTimer != null) return;
+
+    // Skip if this service has already been checked this cycle and found not playing
+    // This prevents infinite loops when all services are paused/stopped
+    if (_checkedNotPlaying.contains(service)) {
+      return;
+    }
 
     // Cancel any existing timer for a different service
     _cancelPauseTimer();
@@ -573,12 +733,12 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
     // 0 means disabled - don't cycle for this service
     if (waitSec <= 0) {
-      debugPrint(
+      _log(
           '[Orchestrator] $service not playing - cycling disabled (waitSec=0)');
       return;
     }
 
-    debugPrint(
+    _log(
         '[Orchestrator] $service not playing - waiting ${waitSec}s before cycling');
 
     _pausedService = service;
@@ -611,6 +771,12 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       return;
     }
 
+    // Skip if Sonos has already been checked this cycle and found not playing
+    // This prevents infinite loops when all services are paused/stopped
+    if (_checkedNotPlaying.contains(ServiceType.localSonos)) {
+      return;
+    }
+
     // Cancel any existing timer
     _cancelPauseTimer();
 
@@ -618,35 +784,13 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     final int waitSec;
     final normalizedStatus = (status ?? 'idle').toLowerCase();
 
-    // "paused" but no track info means nothing is actively playing on Sonos
-    // This could be:
-    // 1. Initial state (app just loaded, Sonos idle)
-    // 2. User switched away from Sonos to another service
-    // 3. Stale state from WebSocket reconnect
-    // In all cases, we should eventually cycle to check other services
+    // "paused" but no track info means user has switched away from Sonos
+    // This should ALWAYS use the short idle wait time - the user has actively
+    // switched to another device/app, so we should check other services quickly
     if (normalizedStatus == 'paused' && !hasTrackInfo) {
-      // Check if Sonos was recently playing (within last 30 seconds)
-      // If so, this "paused" state might be stale or a brief transition
-      if (_sonosHasPlayedThisSession && _lastSonosPlayingTime != null) {
-        final timeSinceLastPlaying =
-            DateTime.now().difference(_lastSonosPlayingTime!).inSeconds;
-        if (timeSinceLastPlaying < 30) {
-          debugPrint(
-              '[Orchestrator] Sonos paused with no track but was playing ${timeSinceLastPlaying}s ago - using longer wait');
-          // Use stopped wait time (longer) instead of idle
-          waitSec = _config.localSonosStoppedWaitSec;
-        } else {
-          debugPrint(
-              '[Orchestrator] Sonos paused with no track info - treating as idle');
-          waitSec = _config.localSonosIdleWaitSec;
-        }
-      } else {
-        // Never played this session or no timestamp - use idle wait time
-        // This allows cycling to discover other playing services
-        debugPrint(
-            '[Orchestrator] Sonos paused with no track info - treating as idle (will cycle to check other services)');
-        waitSec = _config.localSonosIdleWaitSec;
-      }
+      _log(
+          '[Orchestrator] Sonos paused with no track - user switched away, checking other services');
+      waitSec = _config.localSonosIdleWaitSec;
     } else {
       switch (normalizedStatus) {
         case 'paused':
@@ -659,8 +803,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
         case 'transitioning':
         case 'buffering':
           // Don't cycle during transitioning/buffering - temporary state
-          debugPrint(
-              '[Orchestrator] Sonos transitioning/buffering - not cycling');
+          _log('[Orchestrator] Sonos transitioning/buffering - not cycling');
           return;
         case 'playing':
           // Should not reach here, but just in case
@@ -673,12 +816,12 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
     // 0 means disabled - don't cycle for this status
     if (waitSec <= 0) {
-      debugPrint(
+      _log(
           '[Orchestrator] Sonos $normalizedStatus - cycling disabled (waitSec=0)');
       return;
     }
 
-    debugPrint(
+    _log(
         '[Orchestrator] Sonos $normalizedStatus (hasTrack=$hasTrackInfo) - waiting ${waitSec}s before cycling');
 
     _pausedService = ServiceType.localSonos;
@@ -689,7 +832,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
   /// Called when pause timer expires - try next service in priority
   void _onServicePauseTimerExpired(ServiceType service) {
-    debugPrint('[Orchestrator] Pause timer expired for $service');
+    _log('[Orchestrator] Pause timer expired for $service');
 
     _servicePausedTimer = null;
     _pausedService = null;
@@ -701,18 +844,18 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     // (they use the same account, so if one isn't playing, neither is the other)
     if (service == ServiceType.directSpotify) {
       _checkedNotPlaying.add(ServiceType.cloudSpotify);
-      debugPrint(
+      _log(
           '[Orchestrator] Also marking cloudSpotify as checked (same account)');
     } else if (service == ServiceType.cloudSpotify) {
       _checkedNotPlaying.add(ServiceType.directSpotify);
-      debugPrint(
+      _log(
           '[Orchestrator] Also marking directSpotify as checked (same account)');
     }
 
     // Remember the original primary service if not set
     if (_originalPrimaryService == null) {
       _originalPrimaryService = _getHighestPriorityEnabledService();
-      debugPrint(
+      _log(
           '[Orchestrator] Remembering primary service: $_originalPrimaryService');
     }
 
@@ -720,7 +863,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     final nextService = _getNextServiceToTry();
 
     if (nextService != null) {
-      debugPrint('[Orchestrator] Cycling to next service: $nextService');
+      _log('[Orchestrator] Cycling to next service: $nextService');
       _waitingForPrimaryResume = true;
 
       // Use switchToService in priority manager
@@ -735,7 +878,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
           );
     } else {
       // All services checked, none playing
-      debugPrint('[Orchestrator] All services checked - none playing');
+      _log('[Orchestrator] All services checked - none playing');
       _startCycleResetTimer();
 
       // Stay on or switch to first priority service
@@ -752,6 +895,42 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       // Reset waiting state since we've exhausted options
       _waitingForPrimaryResume = false;
       _originalPrimaryService = null;
+    }
+  }
+
+  /// Immediately cycle to next service (called when service becomes unavailable)
+  void _cycleToNextService(ServiceType fromService) {
+    // Mark the current service as checked
+    _checkedNotPlaying.add(fromService);
+
+    // Cancel any existing pause timer
+    _cancelPauseTimer();
+
+    // Remember the original primary service if not set
+    if (_originalPrimaryService == null) {
+      _originalPrimaryService = _getHighestPriorityEnabledService();
+    }
+
+    // Find next service to try
+    final nextService = _getNextServiceToTry();
+
+    if (nextService != null) {
+      _log(
+          '[Orchestrator] Cycling to next service: $nextService (from $fromService)');
+      _waitingForPrimaryResume = true;
+
+      ref.read(servicePriorityProvider.notifier).switchToService(nextService);
+
+      // Keep listening for the original service to recover
+      final keepSonos = _originalPrimaryService == ServiceType.localSonos;
+      ref.read(eventsWsProvider.notifier).sendConfigForService(
+            nextService,
+            keepSonosEnabled: keepSonos,
+          );
+    } else {
+      // All services checked - none available
+      _log('[Orchestrator] All services checked - none available');
+      _startCycleResetTimer();
     }
   }
 
@@ -791,7 +970,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
   /// Called when the primary service we were waiting for resumes
   void _handlePrimaryServiceResumed() {
     final primaryService = _originalPrimaryService;
-    debugPrint(
+    _log(
         '[Orchestrator] Primary service resumed - switching back to $primaryService');
 
     _cancelPauseTimer();
@@ -809,10 +988,10 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     _cycleResetTimer?.cancel();
 
     final resetSec = _config.serviceCycleResetSec;
-    debugPrint('[Orchestrator] Starting cycle reset timer (${resetSec}s)');
+    _log('[Orchestrator] Starting cycle reset timer (${resetSec}s)');
 
     _cycleResetTimer = Timer(Duration(seconds: resetSec), () {
-      debugPrint(
+      _log(
           '[Orchestrator] Cycle reset timer expired - clearing checked services');
       _checkedNotPlaying.clear();
       _cycleResetTimer = null;
@@ -849,8 +1028,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     if (fallbackConfig.timeoutSec <= 0) return;
 
     _timeoutTimer = Timer(Duration(seconds: fallbackConfig.timeoutSec), () {
-      debugPrint(
-          '[Orchestrator] Timeout waiting for data from $currentService');
+      _log('[Orchestrator] Timeout waiting for data from $currentService');
       ref.read(servicePriorityProvider.notifier).reportTimeout(currentService);
     });
   }
@@ -872,7 +1050,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       if (_lastDataTime != null) {
         final elapsed = DateTime.now().difference(_lastDataTime!).inSeconds;
         if (elapsed > fallbackConfig.timeoutSec) {
-          debugPrint(
+          _log(
               '[Orchestrator] No data received for ${elapsed}s from $currentService');
           ref
               .read(servicePriorityProvider.notifier)
@@ -888,19 +1066,34 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     required bool spotifyEnabled,
     required bool sonosEnabled,
   }) {
-    debugPrint(
+    _log(
         '[Orchestrator] Services updated: spotify=$spotifyEnabled, sonos=$sonosEnabled');
 
     // If Spotify is being disabled, immediately stop direct polling
     // This ensures polling stops even if service switching hasn't occurred yet
     if (!spotifyEnabled) {
-      debugPrint('[Orchestrator] Spotify disabled - stopping direct polling');
+      _log('[Orchestrator] Spotify disabled - stopping direct polling');
       ref.read(spotifyDirectProvider.notifier).stopPolling();
     }
+
+    // Collect unhealthy services so we don't auto-switch to them
+    final unhealthyServices = <ServiceType>{};
+    for (final entry in _serviceHealth.entries) {
+      if (!entry.value.status.isHealthy) {
+        final serviceType = entry.key == 'sonos'
+            ? ServiceType.localSonos
+            : (entry.key == 'spotify' ? ServiceType.cloudSpotify : null);
+        if (serviceType != null) {
+          unhealthyServices.add(serviceType);
+        }
+      }
+    }
+    _log('[Orchestrator] Unhealthy services: $unhealthyServices');
 
     ref.read(servicePriorityProvider.notifier).updateEnabledServices(
           spotifyEnabled: spotifyEnabled,
           sonosEnabled: sonosEnabled,
+          unhealthyServices: unhealthyServices,
         );
 
     // Re-evaluate active service - force switch if current is no longer enabled
@@ -912,7 +1105,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       ref.read(servicePriorityProvider.notifier).activateFirstAvailable();
     } else if (!priority.enabledServices.contains(currentService)) {
       // Current service is disabled, must switch
-      debugPrint(
+      _log(
           '[Orchestrator] Current service $currentService is now disabled, forcing switch');
       ref.read(servicePriorityProvider.notifier).activateFirstAvailable();
     }
@@ -920,16 +1113,21 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
   /// Manually switch to a specific service (for debugging/testing)
   void switchToService(ServiceType service) {
-    debugPrint('[Orchestrator] Manual switch to $service');
+    _log('[Orchestrator] Manual switch to $service');
     ref.read(servicePriorityProvider.notifier).activateService(service);
   }
 
   /// Force reconnect/restart the current service
+  /// Called when app resumes from background after being idle
   void reconnect() {
     final priority = ref.read(servicePriorityProvider);
     final currentService = priority.currentService;
 
-    debugPrint('[Orchestrator] Reconnecting current service: $currentService');
+    _log('[Orchestrator] Reconnecting current service: $currentService');
+
+    // Cancel any existing pause timer since it may not have fired while app was suspended
+    // This allows fresh cycling evaluation when new data arrives
+    _cancelPauseTimer();
 
     if (currentService != null) {
       _activateService(currentService);
@@ -938,7 +1136,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
   /// Reset everything and start fresh
   void reset() {
-    debugPrint('[Orchestrator] Reset requested');
+    _log('[Orchestrator] Reset requested');
 
     _timeoutTimer?.cancel();
     _dataWatchTimer?.cancel();
@@ -951,9 +1149,8 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     _resetCyclingState();
     _lastIsPlaying.clear();
 
-    // Reset Sonos session tracking
-    _sonosHasPlayedThisSession = false;
-    _lastSonosPlayingTime = null;
+    // Clear service health tracking
+    _serviceHealth.clear();
 
     ref.read(servicePriorityProvider.notifier).reset();
     ref.read(spotifyDirectProvider.notifier).stopPolling();
@@ -966,7 +1163,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
   /// Stop all services and timers (called on logout)
   void _stopAllServices() {
-    debugPrint('[Orchestrator] Stopping all services');
+    _log('[Orchestrator] Stopping all services');
 
     // Cancel all timers
     _timeoutTimer?.cancel();
@@ -983,9 +1180,8 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     _resetCyclingState();
     _lastIsPlaying.clear();
 
-    // Reset Sonos session tracking
-    _sonosHasPlayedThisSession = false;
-    _lastSonosPlayingTime = null;
+    // Clear service health tracking
+    _serviceHealth.clear();
 
     // Stop services
     ref.read(servicePriorityProvider.notifier).reset();

@@ -16,6 +16,7 @@ from starlette.websockets import WebSocketState
 
 from lib.sonos_manager import SonosManager
 from lib.spotify_manager import SpotifyManager, SupportsWebSocket
+from lib.service_health import HEALTH_TRACKER
 
 load_dotenv()
 
@@ -40,8 +41,18 @@ TOKEN_REFRESH_JITTER = int(SPOTIFY_CFG.get("tokenRefreshJitterSec", 30) or 30)
 SONOS_MANAGER = SonosManager(SONOS_CFG)
 SPOTIFY_MANAGER = SpotifyManager(SPOTIFY_CFG, API_BASE_URL)
 
+# Configure health tracker with service-specific debounce windows
+HEALTH_TRACKER.configure({
+    "sonos": SONOS_CFG,
+    "spotify": SPOTIFY_CFG,
+})
+
 logger = logging.getLogger("events")
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s.%(msecs)03d %(levelname)s %(name)s: %(message)s',
+    datefmt='%m-%d %H:%M:%S'
+)
 
 HTTP_CLIENT: Optional[httpx.AsyncClient] = None
 STOP_EVENT: Optional[asyncio.Event] = None
@@ -436,6 +447,7 @@ async def _spotify_fallback_loop(
     sonos_enabled: bool,
     global_stop: Optional[asyncio.Event],
     safe_close: Callable[[SupportsWebSocket, int, str], Awaitable[None]],
+    on_spotify_status: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
 ) -> bool:
     """Run Spotify stream with retry/backoff until stopped or Sonos resumes."""
 
@@ -457,6 +469,7 @@ async def _spotify_fallback_loop(
                 close_on_stop=False,
                 poll_interval_override=poll_interval_override,
                 safe_close=safe_close,
+                on_status_change=on_spotify_status,
             )
         )
         ACTIVE_TASKS.add(spotify_task)
@@ -522,6 +535,23 @@ async def _spotify_fallback_loop(
             continue
 
     return False
+
+
+async def _send_service_status(channel: MultiSessionChannel, status: Optional[Dict[str, Any]]) -> None:
+    """Send service status message to all sessions in a channel.
+    
+    Args:
+        channel: The channel to send to.
+        status: The status message, or None if debounced (should not send).
+    """
+    if status is None:
+        return  # Debounced, don't send
+    try:
+        if channel.application_state == WebSocketState.CONNECTED:
+            await channel.send_json(status)
+            logger.debug("Sent service_status: provider=%s status=%s", status.get("provider"), status.get("status"))
+    except Exception as exc:
+        logger.warning("Failed to send service_status: %s", exc)
 
 
 async def _user_driver(ctx: UserContext) -> None:
@@ -591,6 +621,11 @@ async def _user_driver(ctx: UserContext) -> None:
 
                 if allow_sonos:
                     logger.info("starting sonos stream (user=%s)", ctx.user_id)
+                    
+                    # Create status callback to send health updates to client
+                    async def on_sonos_status(status: Dict[str, Any]) -> None:
+                        await _send_service_status(ctx.channel, status)
+                    
                     sonos_task = asyncio.create_task(
                         SONOS_MANAGER.stream(
                             ctx.channel,
@@ -599,6 +634,7 @@ async def _user_driver(ctx: UserContext) -> None:
                             poll_interval_override=client_sonos_poll,
                             global_stop=STOP_EVENT,
                             no_device_timeout=SONOS_MANAGER.no_device_retry_interval if spotify_enabled else None,
+                            on_status_change=on_sonos_status,
                         )
                     )
                     ACTIVE_TASKS.add(sonos_task)
@@ -634,6 +670,11 @@ async def _user_driver(ctx: UserContext) -> None:
                         break
                     logger.info("starting spotify stream (fallback loop) user=%s", ctx.user_id)
                     assert HTTP_CLIENT is not None
+                    
+                    # Create status callback to send health updates to client
+                    async def on_spotify_status(status: Dict[str, Any]) -> None:
+                        await _send_service_status(ctx.channel, status)
+                    
                     resume_found = await _spotify_fallback_loop(
                         channel=ctx.channel,
                         token=ctx.token,
@@ -644,6 +685,7 @@ async def _user_driver(ctx: UserContext) -> None:
                         sonos_enabled=sonos_enabled,
                         global_stop=STOP_EVENT,
                         safe_close=_safe_close_ws,
+                        on_spotify_status=on_spotify_status,
                     )
                     if (
                         resume_found
@@ -726,6 +768,14 @@ async def media_events(ws: WebSocket) -> None:
         logger.info("config received user=%s raw_config=%s", user_id, msg)
         need_token = msg.get("need_spotify_token") is True
 
+        # Reset health tracker debounce state so new/reconnecting clients get fresh status
+        # This ensures the first health status is always sent after reconnection
+        enabled_cfg = msg.get("enabled") or {}
+        if enabled_cfg.get("sonos"):
+            HEALTH_TRACKER.reset("sonos")
+        if enabled_cfg.get("spotify"):
+            HEALTH_TRACKER.reset("spotify")
+
         # If need_spotify_token is True, enter token-only mode
         if need_token:
             logger.info("entering token-only mode user=%s", user_id)
@@ -759,13 +809,11 @@ async def media_events(ws: WebSocket) -> None:
             return
 
         # Switching to config mode exits token-only mode.
+        # Note: We no longer cancel the token refresh task here - it should persist
+        # as long as Spotify is enabled, regardless of which service is active.
         if ctx.token_mode:
             ctx.token_mode = False
-            cache_key = (ctx.user_id, "spotify")
-            ttask = TOKEN_TASKS.pop(cache_key, None)
-            if ttask:
-                ttask.cancel()
-            TOKEN_CACHE.pop(cache_key, None)
+            # Don't cancel token refresh task or clear cache - let it continue running
 
         enabled_cfg = msg.get("enabled") or {}
         poll_cfg = msg.get("poll") or {}
@@ -777,6 +825,30 @@ async def media_events(ws: WebSocket) -> None:
             "spotify": poll_cfg.get("spotify") if isinstance(poll_cfg.get("spotify"), (int, float)) else None,
             "sonos": poll_cfg.get("sonos") if isinstance(poll_cfg.get("sonos"), (int, float)) else None,
         }
+
+        # Manage token refresh task based on Spotify enabled state
+        # This is independent of which driver is active - we want proactive token refresh
+        # as long as Spotify is enabled in user settings
+        cache_key = (ctx.user_id, "spotify")
+        if not enabled["spotify"]:
+            # Cancel token refresh if Spotify is disabled
+            ttask = TOKEN_TASKS.pop(cache_key, None)
+            if ttask and not ttask.done():
+                logger.info("cancelling token refresh task (spotify disabled) user=%s", user_id)
+                ttask.cancel()
+            TOKEN_CACHE.pop(cache_key, None)
+        else:
+            # Spotify is enabled - ensure token refresh task is running
+            existing_task = TOKEN_TASKS.get(cache_key)
+            if existing_task is None or existing_task.done():
+                # Need to start token refresh task
+                token_state = await _ensure_access_token(
+                    ctx=ctx,
+                    service="spotify",
+                    subscribe_channel=ctx.channel,  # This will start the refresh task
+                )
+                if token_state:
+                    logger.info("token refresh task started (spotify enabled) user=%s", user_id)
 
         # Enforce minimum poll intervals; if client sends below min, fall back to configured defaults.
         def _apply_min(raw: Optional[float], min_allowed: Optional[float], default_val: Optional[float]) -> Optional[float]:
