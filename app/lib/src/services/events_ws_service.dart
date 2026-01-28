@@ -60,9 +60,6 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   Map<String, dynamic>? _lastSettings;
   bool _useDirectPolling = false;
 
-  /// Track last sent config to avoid duplicate sends
-  String? _lastSentConfigPayload;
-
   /// Update the cached settings. Call this before sendConfig when settings change.
   void updateCachedSettings(Map<String, dynamic> settings) {
     _lastSettings = settings;
@@ -358,7 +355,6 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     _lastTokenRequestTime =
         null; // Reset debounce - any pending token request was lost
     _lastSpotifyEnabled = false; // Reset so next enable triggers token request
-    _lastSentConfigPayload = null; // Reset so next connect sends fresh config
 
     // If not scheduling retry (intentional disconnect), reset retry policy
     // so future manual reconnection attempts can proceed
@@ -403,6 +399,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
 
     final payload = jsonEncode({
       'type': 'config',
+      'need_spotify_token': false, // Explicitly cancel token refresh task
       'enabled': {
         'spotify': false,
         'sonos': false,
@@ -413,18 +410,6 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       },
     });
 
-    // Build config key for deduplication tracking
-    final configKey = jsonEncode({
-      'enabled': {'spotify': false, 'sonos': false},
-      'poll': {'spotify': null, 'sonos': null},
-    });
-
-    // Skip if this config is identical to the last sent config
-    if (_lastSentConfigPayload == configKey) {
-      _log('[WS] Skipping duplicate disable config send');
-      return;
-    }
-
     if (_channel == null) {
       _log('[WS] No channel to send disable config - already disconnected');
       return;
@@ -432,10 +417,101 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
 
     try {
       _channel?.sink.add(payload);
-      _lastSentConfigPayload = configKey;
       _log('[WS] Disable all config sent');
     } catch (e) {
       _log('[WS] Error sending disable all config: $e');
+    }
+  }
+
+  /// Send config based purely on user settings (no active client-side service)
+  /// Called when user has services enabled but none are available for client-side use
+  /// (e.g., all enabled services are unhealthy). This keeps server-side polling
+  /// active for those services so they can recover.
+  Future<void> sendConfigForUserSettings() async {
+    try {
+      final env = ref.read(envConfigProvider);
+
+      // Get poll intervals from settings or defaults
+      Map<String, dynamic>? settings = _lastSettings;
+      if (settings == null) {
+        try {
+          final user = await ref.read(userServiceProvider).fetchMe();
+          final userId = user['id']?.toString() ?? '';
+          if (userId.isNotEmpty) {
+            settings = await ref
+                .read(settingsServiceProvider)
+                .fetchSettingsForUser(userId);
+            _lastSettings = settings;
+          }
+        } catch (_) {
+          // Use defaults
+        }
+      }
+
+      // Get user's enabled settings
+      final userSpotifyEnabled = settings?['spotify_enabled'] == true;
+      final userSonosEnabled = settings?['sonos_enabled'] == true;
+
+      // If both are disabled, delegate to sendDisableAllConfig
+      if (!userSpotifyEnabled && !userSonosEnabled) {
+        await sendDisableAllConfig();
+        return;
+      }
+
+      int? asInt(dynamic v) {
+        if (v is int) return v;
+        if (v is double) return v.toInt();
+        if (v is String) return int.tryParse(v);
+        return null;
+      }
+
+      int? asIntOrNull(dynamic v) {
+        final val = asInt(v);
+        return (val == null || val <= 0) ? null : val;
+      }
+
+      final spotifyPoll = asInt(settings?['spotify_poll_interval_sec']) ??
+          env.spotifyPollIntervalSec;
+      final sonosPoll = asIntOrNull(settings?['sonos_poll_interval_sec']) ??
+          env.sonosPollIntervalSec;
+
+      // Request token if Spotify is enabled
+      final needToken = userSpotifyEnabled;
+
+      _log('[WS] sendConfigForUserSettings: '
+          'enabled=(spotify=$userSpotifyEnabled, sonos=$userSonosEnabled), '
+          'needToken=$needToken');
+
+      final payload = jsonEncode({
+        'type': 'config',
+        'need_spotify_token': needToken,
+        'enabled': {
+          'spotify': userSpotifyEnabled,
+          'sonos': userSonosEnabled,
+        },
+        'poll': {
+          'spotify': spotifyPoll,
+          'sonos': sonosPoll,
+        },
+      });
+
+      // If no channel, try to connect first
+      if (_channel == null) {
+        final auth = ref.read(authStateProvider);
+        if (!auth.isAuthenticated || _connecting) return;
+        await _connect(auth,
+            caller: 'sendConfigForUserSettings', skipSendConfig: true);
+        if (_channel != null) {
+          _channel?.sink.add(payload);
+          _initialConfigSent = true;
+        }
+        return;
+      }
+
+      _initialConfigSent = true;
+      _channel?.sink.add(payload);
+    } catch (e) {
+      _log('[WS] sendConfigForUserSettings error: $e');
     }
   }
 
@@ -485,7 +561,8 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       final sonosPoll = asIntOrNull(settings?['sonos_poll_interval_sec']) ??
           env.sonosPollIntervalSec;
 
-      // Get user's sonos enabled setting (spotify is handled by service type)
+      // Get user's enabled settings
+      final userSpotifyEnabled = settings?['spotify_enabled'] == true;
       final userSonosEnabled = settings?['sonos_enabled'] == true;
 
       // Combine base WebSocket config with user settings
@@ -499,39 +576,22 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
             (service == ServiceType.directSpotify && userSonosEnabled),
       );
 
-      // Simplified token logic: Always request token when directSpotify is active
-      // This ensures the server always emits a fresh token, simplifying state management
-      // The server can handle frequent token requests efficiently
-      final needToken = service == ServiceType.directSpotify;
+      // Token logic: Request token whenever Spotify is enabled in user settings
+      // This ensures we have a token ready for direct polling fallback even when
+      // another service (like Sonos) is currently active.
+      // When Spotify is disabled, explicitly send false to cancel token task on server.
+      final needToken = userSpotifyEnabled;
 
       _log('[WS] sendConfigForService: service=$service, '
           'keepSonosEnabled=$keepSonosEnabled, '
           'wsConfig=(spotify=${wsConfig.spotify}, sonos=${wsConfig.sonos}), '
-          'needToken=$needToken');
+          'needToken=$needToken (spotifyEnabled=$userSpotifyEnabled)');
 
-      // Build config payload for deduplication check
-      final configKey = jsonEncode({
-        'enabled': {
-          'spotify': wsConfig.spotify,
-          'sonos': wsConfig.sonos,
-        },
-        'poll': {
-          'spotify': spotifyPoll,
-          'sonos': sonosPoll,
-        },
-        'needToken': needToken,
-      });
-
-      // Skip if this config is identical to the last sent config
-      // Note: needToken is included in configKey, so if needToken changes, we send
-      if (_lastSentConfigPayload == configKey) {
-        _log('[WS] Skipping duplicate config send');
-        return;
-      }
-
+      // Always include need_spotify_token to explicitly tell server what to do
+      // true = emit tokens for direct polling, false = cancel token refresh task
       final payload = jsonEncode({
         'type': 'config',
-        if (needToken) 'need_spotify_token': true,
+        'need_spotify_token': needToken,
         'enabled': {
           'spotify': wsConfig.spotify,
           'sonos': wsConfig.sonos,
@@ -552,7 +612,6 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
         // After connect, send the specific config for this service
         if (_channel != null) {
           _channel?.sink.add(payload);
-          _lastSentConfigPayload = configKey;
           _initialConfigSent = true;
         }
         return;
@@ -561,9 +620,8 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       // Mark initial config as sent
       _initialConfigSent = true;
 
-      // Send the config and track it
+      // Send the config
       _channel?.sink.add(payload);
-      _lastSentConfigPayload = configKey;
     } catch (e) {
       _log('[WS] sendConfigForService error: $e');
     }

@@ -272,11 +272,14 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
   void _activateService(ServiceType? service) {
     if (service == null) {
-      _log('[Orchestrator] No service to activate - disabling all services');
+      _log(
+          '[Orchestrator] No service to activate - sending user settings config');
       // Stop direct polling if running
       ref.read(spotifyDirectProvider.notifier).stopPolling();
-      // Send config to server to stop all streams
-      _sendDisableAllConfig();
+      // Send config based on user settings (not disabling everything)
+      // This ensures server keeps polling services that user has enabled
+      // even if they're temporarily unavailable on client side
+      _sendConfigForUserSettings();
       return;
     }
 
@@ -290,12 +293,11 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     }
   }
 
-  /// Send config to server to disable all services
-  void _sendDisableAllConfig() {
-    _log('[Orchestrator] Sending config to disable all services on server');
+  /// Send config to server based on user settings (no specific active service)
+  void _sendConfigForUserSettings() {
+    _log('[Orchestrator] Sending config based on user settings');
     final channel = ref.read(eventsWsProvider.notifier);
-    // Send a config with both services disabled
-    channel.sendDisableAllConfig();
+    channel.sendConfigForUserSettings();
   }
 
   void _activateDirectSpotify() {
@@ -915,15 +917,21 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       _log('[Orchestrator] All services checked - none playing');
       _startCycleResetTimer();
 
-      // Stay on or switch to first priority service
-      final firstService = _getHighestPriorityEnabledService();
-      if (firstService != null) {
+      // Stay on or switch to first available (not unhealthy) service
+      // This ensures we don't switch to an unhealthy service that can't provide data
+      final bestService = _getHighestPriorityAvailableService();
+      if (bestService != null) {
         final current = ref.read(servicePriorityProvider).currentService;
-        if (current != firstService) {
+        if (current != bestService) {
+          _log(
+              '[Orchestrator] Switching to best available service: $bestService');
           ref
               .read(servicePriorityProvider.notifier)
-              .switchToService(firstService);
+              .switchToService(bestService);
         }
+      } else {
+        // No available services - keep current or clear
+        _log('[Orchestrator] No available services after cycling');
       }
 
       // Reset waiting state since we've exhausted options
@@ -983,7 +991,22 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     return null;
   }
 
-  /// Get highest priority enabled service
+  /// Get highest priority enabled AND available service
+  /// (skips unhealthy services)
+  ServiceType? _getHighestPriorityAvailableService() {
+    final priority = ref.read(servicePriorityProvider);
+
+    for (final service in _config.priorityOrderOfServices) {
+      if (priority.enabledServices.contains(service) &&
+          priority.isServiceAvailable(service)) {
+        return service;
+      }
+    }
+
+    return null;
+  }
+
+  /// Get highest priority enabled service (may include unhealthy services)
   ServiceType? _getHighestPriorityEnabledService() {
     final priority = ref.read(servicePriorityProvider);
 

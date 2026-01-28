@@ -132,7 +132,6 @@ class UserContext:
         }
         self.config_event = asyncio.Event()
         self.lock = asyncio.Lock()
-        self.token_mode = False
         self.token_lock = asyncio.Lock()
 
     def enabled_any(self) -> bool:
@@ -560,8 +559,6 @@ async def _user_driver(ctx: UserContext) -> None:
     defer_sonos: bool = False
     try:
         while not ctx.stop_event.is_set():
-            if ctx.token_mode:
-                break
             config_wait = asyncio.create_task(ctx.config_event.wait())
             stop_wait = asyncio.create_task(ctx.stop_event.wait())
             try:
@@ -722,14 +719,11 @@ async def _user_driver(ctx: UserContext) -> None:
     except asyncio.CancelledError:
         logger.info("user driver cancelled user=%s", ctx.user_id)
     finally:
-        # Only close the channel if we're not in token-only mode
-        # (entering token mode cancels the driver but keeps the connection alive)
-        if not ctx.token_mode:
-            await ctx.channel.close(code=1012, reason="User stop")
+        # Don't close the channel here - let the websocket handler manage it
         current = asyncio.current_task()
         if current:
             ACTIVE_TASKS.discard(current)
-        logger.info("user driver stopped user=%s (token_mode=%s)", ctx.user_id, ctx.token_mode)
+        logger.info("user driver stopped user=%s", ctx.user_id)
 
 
 @app.websocket(WS_CFG.get("path", "/events/media"))
@@ -776,29 +770,27 @@ async def media_events(ws: WebSocket) -> None:
         if enabled_cfg.get("spotify"):
             HEALTH_TRACKER.reset("spotify")
 
-        # If need_spotify_token is True, enter token-only mode
+        # If client requests a token, emit it immediately
+        # This happens when the client is using direct Spotify polling
+        # Note: We don't return early - we still process the full config below
         if need_token:
-            logger.info("entering token-only mode user=%s", user_id)
-            ctx.token_mode = True
-            ctx.config_event.set()
-            if ctx.driver_task and not ctx.driver_task.done():
-                ctx.stop_event.set()
-                ctx.driver_task.cancel()
-                with contextlib.suppress(Exception):
-                    await ctx.driver_task
-                ACTIVE_TASKS.discard(ctx.driver_task)
-                ctx.driver_task = None
-
-            # Reset stop_event so the token refresh runner can continue
-            ctx.stop_event.clear()
-
+            cache_key = (ctx.user_id, "spotify")
+            existing_task = TOKEN_TASKS.get(cache_key)
+            
+            # Get token (from cache or fresh fetch)
             token_state = await _ensure_access_token(
                 ctx=ctx,
                 service="spotify",
-                subscribe_channel=ctx.channel,
+                # Only pass subscribe_channel if no refresh task is running
+                # This prevents spawning duplicate refresh tasks
+                subscribe_channel=ctx.channel if (existing_task is None or existing_task.done()) else None,
             )
             if token_state:
-                logger.info("emitting spotify_token via client request user=%s", user_id)
+                logger.info(
+                    "emitting spotify_token user=%s refresh_task_running=%s",
+                    user_id,
+                    existing_task is not None and not existing_task.done()
+                )
                 await ctx.channel.send_json(
                     {
                         "type": "spotify_token",
@@ -806,15 +798,8 @@ async def media_events(ws: WebSocket) -> None:
                         "expires_at": token_state.get("expires_at"),
                     }
                 )
-            return
 
-        # Switching to config mode exits token-only mode.
-        # Note: We no longer cancel the token refresh task here - it should persist
-        # as long as Spotify is enabled, regardless of which service is active.
-        if ctx.token_mode:
-            ctx.token_mode = False
-            # Don't cancel token refresh task or clear cache - let it continue running
-
+        # Process the config (enabled services and poll intervals)
         enabled_cfg = msg.get("enabled") or {}
         poll_cfg = msg.get("poll") or {}
         enabled = {
@@ -826,29 +811,35 @@ async def media_events(ws: WebSocket) -> None:
             "sonos": poll_cfg.get("sonos") if isinstance(poll_cfg.get("sonos"), (int, float)) else None,
         }
 
-        # Manage token refresh task based on Spotify enabled state
-        # This is independent of which driver is active - we want proactive token refresh
-        # as long as Spotify is enabled in user settings
+        # Manage token refresh task based on need_token flag or Spotify enabled state
+        # Token refresh task should run when:
+        # 1. Client requests token (need_token=true, for direct polling)
+        # 2. Server is polling Spotify (enabled.spotify=true)
         cache_key = (ctx.user_id, "spotify")
-        if not enabled["spotify"]:
-            # Cancel token refresh if Spotify is disabled
+        need_token_refresh = need_token or enabled["spotify"]
+        
+        if not need_token_refresh:
+            # Cancel token refresh if neither direct polling nor server polling is active
             ttask = TOKEN_TASKS.pop(cache_key, None)
             if ttask and not ttask.done():
                 logger.info("cancelling token refresh task (spotify disabled) user=%s", user_id)
                 ttask.cancel()
             TOKEN_CACHE.pop(cache_key, None)
         else:
-            # Spotify is enabled - ensure token refresh task is running
+            # Ensure token refresh task is running (only start if not already running)
             existing_task = TOKEN_TASKS.get(cache_key)
             if existing_task is None or existing_task.done():
-                # Need to start token refresh task
-                token_state = await _ensure_access_token(
-                    ctx=ctx,
-                    service="spotify",
-                    subscribe_channel=ctx.channel,  # This will start the refresh task
-                )
-                if token_state:
-                    logger.info("token refresh task started (spotify enabled) user=%s", user_id)
+                # Need to start token refresh task - but only if we haven't already
+                # started it above when handling need_token
+                if not need_token:
+                    # Only fetch token here if we didn't already do it above
+                    token_state = await _ensure_access_token(
+                        ctx=ctx,
+                        service="spotify",
+                        subscribe_channel=ctx.channel,  # This will start the refresh task
+                    )
+                    if token_state:
+                        logger.info("token refresh task started (spotify enabled) user=%s", user_id)
 
         # Enforce minimum poll intervals; if client sends below min, fall back to configured defaults.
         def _apply_min(raw: Optional[float], min_allowed: Optional[float], default_val: Optional[float]) -> Optional[float]:
@@ -889,7 +880,8 @@ async def media_events(ws: WebSocket) -> None:
             msg,
         )
 
-        if not ctx.token_mode and (ctx.driver_task is None or ctx.driver_task.done()):
+        # Start driver task if not running and at least one service is enabled
+        if (enabled["spotify"] or enabled["sonos"]) and (ctx.driver_task is None or ctx.driver_task.done()):
             ctx.stop_event.clear()
             ctx.driver_task = asyncio.create_task(_user_driver(ctx))
             ACTIVE_TASKS.add(ctx.driver_task)
