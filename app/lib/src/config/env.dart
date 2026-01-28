@@ -225,8 +225,9 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
       dotenv.env['SPOTIFY_DIRECT_API_BASE_URL'] ?? 'https://api.spotify.com/v1';
 
   // Parse service priority order
+  // Default: Sonos is primary when both are enabled, then direct Spotify, then cloud Spotify
   final priorityOrderString = dotenv.env['PRIORITY_ORDER_OF_SERVICES'] ??
-      'direct_spotify,cloud_spotify,local_sonos';
+      'local_sonos,direct_spotify,cloud_spotify';
   final priorityOrderOfServices = priorityOrderString
       .split(',')
       .map((s) => ServiceType.fromString(s))
@@ -235,9 +236,9 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
   // Ensure we have at least one service
   if (priorityOrderOfServices.isEmpty) {
     priorityOrderOfServices.addAll([
+      ServiceType.localSonos,
       ServiceType.directSpotify,
       ServiceType.cloudSpotify,
-      ServiceType.localSonos
     ]);
   }
 

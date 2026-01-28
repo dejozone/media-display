@@ -60,6 +60,9 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   Map<String, dynamic>? _lastSettings;
   bool _useDirectPolling = false;
 
+  /// Track last sent config to avoid duplicate sends
+  String? _lastSentConfigPayload;
+
   /// Update the cached settings. Call this before sendConfig when settings change.
   void updateCachedSettings(Map<String, dynamic> settings) {
     _lastSettings = settings;
@@ -115,7 +118,8 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     return const NowPlayingState();
   }
 
-  Future<void> _connect(AuthState auth, {String caller = 'unknown'}) async {
+  Future<void> _connect(AuthState auth,
+      {String caller = 'unknown', bool skipSendConfig = false}) async {
     if (!auth.isAuthenticated) return;
 
     // CRITICAL: Set _connecting FIRST to prevent race conditions
@@ -125,10 +129,12 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     }
     _connecting = true;
 
-    // If already connected, don't reconnect - just send config
+    // If already connected, don't reconnect - just send config (unless skipped)
     if (_channel != null && _connectionConfirmed) {
       _connecting = false; // Reset since we're not actually connecting
-      await sendConfig();
+      if (!skipSendConfig) {
+        await sendConfig();
+      }
       return;
     }
 
@@ -174,8 +180,10 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       // Don't reset retry policy or mark connected yet - wait for 'ready' message
       _connectionConfirmed = false;
 
-      // Send current service enablement to the server.
-      await sendConfig();
+      // Send current service enablement to the server (unless skipped by caller)
+      if (!skipSendConfig) {
+        await sendConfig();
+      }
 
       _channel?.stream.listen(
         (message) {
@@ -350,6 +358,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     _lastTokenRequestTime =
         null; // Reset debounce - any pending token request was lost
     _lastSpotifyEnabled = false; // Reset so next enable triggers token request
+    _lastSentConfigPayload = null; // Reset so next connect sends fresh config
 
     // If not scheduling retry (intentional disconnect), reset retry policy
     // so future manual reconnection attempts can proceed
@@ -385,6 +394,49 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     _retryPolicy.reset();
     _disconnect(scheduleRetry: false);
     connect();
+  }
+
+  /// Send config to disable all services on the server
+  /// Called when user disables all services
+  Future<void> sendDisableAllConfig() async {
+    _log('[WS] Sending disable all config');
+
+    final payload = jsonEncode({
+      'type': 'config',
+      'enabled': {
+        'spotify': false,
+        'sonos': false,
+      },
+      'poll': {
+        'spotify': null,
+        'sonos': null,
+      },
+    });
+
+    // Build config key for deduplication tracking
+    final configKey = jsonEncode({
+      'enabled': {'spotify': false, 'sonos': false},
+      'poll': {'spotify': null, 'sonos': null},
+    });
+
+    // Skip if this config is identical to the last sent config
+    if (_lastSentConfigPayload == configKey) {
+      _log('[WS] Skipping duplicate disable config send');
+      return;
+    }
+
+    if (_channel == null) {
+      _log('[WS] No channel to send disable config - already disconnected');
+      return;
+    }
+
+    try {
+      _channel?.sink.add(payload);
+      _lastSentConfigPayload = configKey;
+      _log('[WS] Disable all config sent');
+    } catch (e) {
+      _log('[WS] Error sending disable all config: $e');
+    }
   }
 
   /// Send WebSocket config for a specific service type
@@ -433,8 +485,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       final sonosPoll = asIntOrNull(settings?['sonos_poll_interval_sec']) ??
           env.sonosPollIntervalSec;
 
-      // Get user's enabled settings
-      final userSpotifyEnabled = settings?['spotify_enabled'] == true;
+      // Get user's sonos enabled setting (spotify is handled by service type)
       final userSonosEnabled = settings?['sonos_enabled'] == true;
 
       // Combine base WebSocket config with user settings
@@ -448,36 +499,39 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
             (service == ServiceType.directSpotify && userSonosEnabled),
       );
 
-      // Determine if we need a token
-      // Token is ONLY needed for direct_spotify (client polls directly)
-      // For cloud_spotify, the backend handles token access on its own
+      // Simplified token logic: Always request token when directSpotify is active
+      // This ensures the server always emits a fresh token, simplifying state management
+      // The server can handle frequent token requests efficiently
       final needToken = service == ServiceType.directSpotify;
-
-      // Check if we should request token
-      final directState = ref.read(spotifyDirectProvider);
-      final hasValidToken = directState.accessToken != null &&
-          directState.tokenExpiresAt != null &&
-          directState.tokenExpiresAt! >
-              (DateTime.now().millisecondsSinceEpoch ~/ 1000) + 60;
-
-      final now = DateTime.now();
-      final tokenRequestDebounced = _lastTokenRequestTime != null &&
-          now.difference(_lastTokenRequestTime!).inSeconds < 5;
-
-      final shouldRequestToken =
-          needToken && (!hasValidToken && !tokenRequestDebounced);
 
       _log('[WS] sendConfigForService: service=$service, '
           'keepSonosEnabled=$keepSonosEnabled, '
-          'baseWsConfig=(spotify=${baseWsConfig.spotify}, sonos=${baseWsConfig.sonos}), '
-          'userSettings=(spotify=$userSpotifyEnabled, sonos=$userSonosEnabled), '
           'wsConfig=(spotify=${wsConfig.spotify}, sonos=${wsConfig.sonos}), '
-          'needToken=$needToken, hasValidToken=$hasValidToken, '
-          'shouldRequestToken=$shouldRequestToken');
+          'needToken=$needToken');
+
+      // Build config payload for deduplication check
+      final configKey = jsonEncode({
+        'enabled': {
+          'spotify': wsConfig.spotify,
+          'sonos': wsConfig.sonos,
+        },
+        'poll': {
+          'spotify': spotifyPoll,
+          'sonos': sonosPoll,
+        },
+        'needToken': needToken,
+      });
+
+      // Skip if this config is identical to the last sent config
+      // Note: needToken is included in configKey, so if needToken changes, we send
+      if (_lastSentConfigPayload == configKey) {
+        _log('[WS] Skipping duplicate config send');
+        return;
+      }
 
       final payload = jsonEncode({
         'type': 'config',
-        if (shouldRequestToken) 'need_spotify_token': true,
+        if (needToken) 'need_spotify_token': true,
         'enabled': {
           'spotify': wsConfig.spotify,
           'sonos': wsConfig.sonos,
@@ -492,28 +546,24 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       if (_channel == null) {
         final auth = ref.read(authStateProvider);
         if (!auth.isAuthenticated || _connecting) return;
-        await _connect(auth, caller: 'sendConfigForService');
-        // After connect, send config again
+        // Skip sending config in _connect() - we'll send it here after connection
+        await _connect(auth,
+            caller: 'sendConfigForService', skipSendConfig: true);
+        // After connect, send the specific config for this service
         if (_channel != null) {
-          if (shouldRequestToken) {
-            _lastTokenRequestTime = DateTime.now();
-          }
           _channel?.sink.add(payload);
+          _lastSentConfigPayload = configKey;
           _initialConfigSent = true;
         }
         return;
       }
 
-      // Update debounce timestamp
-      if (shouldRequestToken) {
-        _lastTokenRequestTime = DateTime.now();
-      }
-
       // Mark initial config as sent
       _initialConfigSent = true;
 
-      // Send the config
+      // Send the config and track it
       _channel?.sink.add(payload);
+      _lastSentConfigPayload = configKey;
     } catch (e) {
       _log('[WS] sendConfigForService error: $e');
     }

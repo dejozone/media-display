@@ -127,17 +127,20 @@ class _HomePageState extends ConsumerState<HomePage>
       setState(() => settings = next);
 
       // Update the orchestrator with new service settings
+      // The orchestrator will handle activating services and sending config to WebSocket
       final spotifyEnabled = next['spotify_enabled'] == true;
       final sonosEnabled = next['sonos_enabled'] == true;
+
+      // Update cached settings first so orchestrator has latest when it sends config
+      final ws = ref.read(eventsWsProvider.notifier);
+      ws.updateCachedSettings(next);
+
       ref.read(serviceOrchestratorProvider.notifier).updateServicesEnabled(
             spotifyEnabled: spotifyEnabled,
             sonosEnabled: sonosEnabled,
           );
-
-      // Also send config to WebSocket for backward compatibility
-      final ws = ref.read(eventsWsProvider.notifier);
-      ws.updateCachedSettings(next); // Update cached settings first
-      await ws.sendConfig();
+      // Note: No need to call ws.sendConfig() here - the orchestrator already
+      // sends config when it activates/switches services
     } catch (e) {
       if (mounted) setState(() => error = e.toString());
     } finally {

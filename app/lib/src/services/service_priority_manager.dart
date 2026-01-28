@@ -49,6 +49,7 @@ class ServicePriorityState {
     this.isTransitioning = false,
     this.transitionStartTime,
     this.lastDataTime,
+    this.unhealthyServices = const {},
   });
 
   /// Priority order from configuration
@@ -78,6 +79,10 @@ class ServicePriorityState {
   /// When retry window started for each service
   final Map<ServiceType, DateTime?> retryWindowStarts;
 
+  /// Services that are known to be unhealthy (from orchestrator health tracking)
+  /// Used during fallback to skip services that are recovering/failing
+  final Set<ServiceType> unhealthyServices;
+
   /// Whether we're currently transitioning between services
   final bool isTransitioning;
 
@@ -92,10 +97,13 @@ class ServicePriorityState {
     return configuredOrder.where((s) => enabledServices.contains(s)).toList();
   }
 
-  /// Check if a service is available (not in cooldown or disabled)
+  /// Check if a service is available (not in cooldown, disabled, or unhealthy)
   bool isServiceAvailable(ServiceType service) {
     final status = serviceStatuses[service];
-    return status != ServiceStatus.cooldown && status != ServiceStatus.disabled;
+    final isUnhealthy = unhealthyServices.contains(service);
+    return status != ServiceStatus.cooldown &&
+        status != ServiceStatus.disabled &&
+        !isUnhealthy;
   }
 
   /// Get the next available service based on priority
@@ -161,6 +169,7 @@ class ServicePriorityState {
     bool? isTransitioning,
     DateTime? transitionStartTime,
     DateTime? lastDataTime,
+    Set<ServiceType>? unhealthyServices,
     bool clearCurrentService = false,
     bool clearPreviousService = false,
     bool clearTransitionStartTime = false,
@@ -185,6 +194,7 @@ class ServicePriorityState {
           : (transitionStartTime ?? this.transitionStartTime),
       lastDataTime:
           clearLastDataTime ? null : (lastDataTime ?? this.lastDataTime),
+      unhealthyServices: unhealthyServices ?? this.unhealthyServices,
     );
   }
 
@@ -198,7 +208,8 @@ class ServicePriorityState {
         other.previousService == previousService &&
         mapEquals(other.serviceStatuses, serviceStatuses) &&
         mapEquals(other.errorCounts, errorCounts) &&
-        other.isTransitioning == isTransitioning;
+        other.isTransitioning == isTransitioning &&
+        setEquals(other.unhealthyServices, unhealthyServices);
   }
 
   @override
@@ -210,6 +221,7 @@ class ServicePriorityState {
         Object.hashAllUnordered(serviceStatuses.entries),
         Object.hashAllUnordered(errorCounts.entries),
         isTransitioning,
+        Object.hashAllUnordered(unhealthyServices),
       );
 
   @override
@@ -219,7 +231,8 @@ class ServicePriorityState {
         'effectiveOrder: $effectiveOrder, '
         'statuses: $serviceStatuses, '
         'errors: $errorCounts, '
-        'transitioning: $isTransitioning)';
+        'transitioning: $isTransitioning, '
+        'unhealthy: $unhealthyServices)';
   }
 }
 
@@ -343,6 +356,15 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
               '[ServicePriority] Higher-priority service $nextAvailable is enabled but unhealthy - staying on $currentService');
         }
       }
+    }
+  }
+
+  /// Update the set of unhealthy services
+  /// Called by the orchestrator when service health changes
+  void updateUnhealthyServices(Set<ServiceType> unhealthy) {
+    if (!setEquals(state.unhealthyServices, unhealthy)) {
+      _log('[ServicePriority] Updated unhealthy services: $unhealthy');
+      state = state.copyWith(unhealthyServices: unhealthy);
     }
   }
 
@@ -617,11 +639,13 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
   }
 
   /// Manually request activation of the first available service
-  void activateFirstAvailable() {
+  /// Returns the activated service, or null if none available
+  ServiceType? activateFirstAvailable() {
     final service = state.getNextAvailableService();
     if (service != null) {
       activateService(service);
     }
+    return service;
   }
 
   /// Called when WebSocket successfully reconnects

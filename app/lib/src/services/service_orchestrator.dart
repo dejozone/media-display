@@ -157,7 +157,14 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     _startServiceWatchers();
 
     // Activate the first available service
-    ref.read(servicePriorityProvider.notifier).activateFirstAvailable();
+    final activatedService =
+        ref.read(servicePriorityProvider.notifier).activateFirstAvailable();
+    if (activatedService == null) {
+      // No services enabled on init - no need to send disable config
+      // because the server isn't running anything yet
+      _log(
+          '[Orchestrator] No services enabled on init - server not running anything');
+    }
   }
 
   Future<void> _loadServicesSettings() async {
@@ -265,7 +272,11 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
   void _activateService(ServiceType? service) {
     if (service == null) {
-      _log('[Orchestrator] No service to activate');
+      _log('[Orchestrator] No service to activate - disabling all services');
+      // Stop direct polling if running
+      ref.read(spotifyDirectProvider.notifier).stopPolling();
+      // Send config to server to stop all streams
+      _sendDisableAllConfig();
       return;
     }
 
@@ -277,6 +288,14 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       // cloud_spotify or local_sonos
       _activateCloudService(service);
     }
+  }
+
+  /// Send config to server to disable all services
+  void _sendDisableAllConfig() {
+    _log('[Orchestrator] Sending config to disable all services on server');
+    final channel = ref.read(eventsWsProvider.notifier);
+    // Send a config with both services disabled
+    channel.sendDisableAllConfig();
   }
 
   void _activateDirectSpotify() {
@@ -660,6 +679,9 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
         }
         break;
     }
+
+    // Always sync unhealthy services to priority manager after health state changes
+    _syncUnhealthyServices();
   }
 
   /// Called when a service recovers from an unhealthy state
@@ -711,6 +733,25 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
   bool isServiceHealthy(ServiceType service) {
     final health = getServiceHealth(service);
     return health == null || health.status.isHealthy;
+  }
+
+  /// Sync unhealthy services to the priority manager
+  /// Call this after any health state change
+  void _syncUnhealthyServices() {
+    final unhealthyServices = <ServiceType>{};
+    for (final entry in _serviceHealth.entries) {
+      if (!entry.value.status.isHealthy) {
+        final serviceType = entry.key == 'sonos'
+            ? ServiceType.localSonos
+            : (entry.key == 'spotify' ? ServiceType.cloudSpotify : null);
+        if (serviceType != null) {
+          unhealthyServices.add(serviceType);
+        }
+      }
+    }
+    ref
+        .read(servicePriorityProvider.notifier)
+        .updateUnhealthyServices(unhealthyServices);
   }
 
   /// Handle when a service reports paused/stopped - start timer to cycle
@@ -866,16 +907,9 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       _log('[Orchestrator] Cycling to next service: $nextService');
       _waitingForPrimaryResume = true;
 
-      // Use switchToService in priority manager
+      // switchToService will trigger _handleServicePriorityChange which calls
+      // _activateService -> sendConfigForService, so no need to send config here
       ref.read(servicePriorityProvider.notifier).switchToService(nextService);
-
-      // Re-send WebSocket config to keep listening for primary service resume
-      // Keep sonos enabled if primary is localSonos
-      final keepSonos = _originalPrimaryService == ServiceType.localSonos;
-      ref.read(eventsWsProvider.notifier).sendConfigForService(
-            nextService,
-            keepSonosEnabled: keepSonos,
-          );
     } else {
       // All services checked, none playing
       _log('[Orchestrator] All services checked - none playing');
@@ -919,14 +953,9 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
           '[Orchestrator] Cycling to next service: $nextService (from $fromService)');
       _waitingForPrimaryResume = true;
 
+      // switchToService will trigger _handleServicePriorityChange which calls
+      // _activateService -> sendConfigForService, so no need to send config here
       ref.read(servicePriorityProvider.notifier).switchToService(nextService);
-
-      // Keep listening for the original service to recover
-      final keepSonos = _originalPrimaryService == ServiceType.localSonos;
-      ref.read(eventsWsProvider.notifier).sendConfigForService(
-            nextService,
-            keepSonosEnabled: keepSonos,
-          );
     } else {
       // All services checked - none available
       _log('[Orchestrator] All services checked - none available');
@@ -1090,6 +1119,17 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     }
     _log('[Orchestrator] Unhealthy services: $unhealthyServices');
 
+    // Update priority manager's unhealthy services state for use in fallback decisions
+    ref
+        .read(servicePriorityProvider.notifier)
+        .updateUnhealthyServices(unhealthyServices);
+
+    // Remember which services were enabled before the update
+    final previousEnabledServices =
+        ref.read(servicePriorityProvider).enabledServices.toSet();
+    final previousActiveService =
+        ref.read(servicePriorityProvider).currentService;
+
     ref.read(servicePriorityProvider.notifier).updateEnabledServices(
           spotifyEnabled: spotifyEnabled,
           sonosEnabled: sonosEnabled,
@@ -1099,15 +1139,87 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     // Re-evaluate active service - force switch if current is no longer enabled
     final priority = ref.read(servicePriorityProvider);
     final currentService = priority.currentService;
+    final newEnabledServices = priority.enabledServices.toSet();
+
+    // Detect if services changed and whether a switch occurred
+    final servicesChanged = previousEnabledServices != newEnabledServices;
+    final switchOccurred = previousActiveService != currentService;
+
+    // If a switch already occurred (handled by listener via _activateService),
+    // we don't need to do anything here - the listener already sent config
+    if (switchOccurred) {
+      _log('[Orchestrator] Service switch already handled by listener');
+      return;
+    }
 
     if (currentService == null) {
-      // No current service, activate first available
-      ref.read(servicePriorityProvider.notifier).activateFirstAvailable();
+      // No current service and no switch occurred - try to activate first available
+      final newActiveService =
+          ref.read(servicePriorityProvider.notifier).activateFirstAvailable();
+
+      // If still no service (shouldn't normally happen since no switch occurred
+      // means services didn't change in a way that affects current), log it
+      if (newActiveService == null && newEnabledServices.isEmpty) {
+        _log('[Orchestrator] No services to activate');
+      }
     } else if (!priority.enabledServices.contains(currentService)) {
-      // Current service is disabled, must switch
+      // Current service is disabled but no switch occurred (shouldn't happen)
       _log(
-          '[Orchestrator] Current service $currentService is now disabled, forcing switch');
+          '[Orchestrator] Current service $currentService is disabled but no switch - forcing');
       ref.read(servicePriorityProvider.notifier).activateFirstAvailable();
+    } else {
+      // Current service is still enabled
+
+      // If services changed but no switch occurred, we still need to send config
+      // to the server so it knows to stop disabled services
+      if (servicesChanged) {
+        _log(
+            '[Orchestrator] Services changed without switch - sending config to update server');
+        ref
+            .read(eventsWsProvider.notifier)
+            .sendConfigForService(currentService);
+      }
+
+      // Check if we should re-evaluate cycling
+      // This handles the case where:
+      // 1. Current service was checked and found not playing
+      // 2. User enables new services
+      // 3. We should check if the newly enabled services are playing
+      final newlyEnabledServices =
+          newEnabledServices.difference(previousEnabledServices);
+
+      if (newlyEnabledServices.isNotEmpty &&
+          _checkedNotPlaying.contains(currentService)) {
+        _log(
+            '[Orchestrator] New services enabled while current service not playing: $newlyEnabledServices');
+
+        // Clear the checked set to allow re-evaluation
+        // but keep the current service as "checked" since we know it's not playing
+        _checkedNotPlaying.clear();
+        _checkedNotPlaying.add(currentService);
+
+        // Cancel cycle reset timer since we're re-evaluating now
+        _cycleResetTimer?.cancel();
+        _cycleResetTimer = null;
+
+        // Try to find a playing service among the newly enabled ones
+        final nextService = _getNextServiceToTry();
+        if (nextService != null) {
+          _log('[Orchestrator] Cycling to newly enabled service: $nextService');
+          _waitingForPrimaryResume = true;
+          _originalPrimaryService ??= currentService;
+
+          // switchToService will trigger _handleServicePriorityChange which calls
+          // _activateService -> sendConfigForService, so no need to send config here
+          ref
+              .read(servicePriorityProvider.notifier)
+              .switchToService(nextService);
+        } else {
+          _log('[Orchestrator] No new services available to try');
+          // Restart the cycle reset timer
+          _startCycleResetTimer();
+        }
+      }
     }
   }
 
