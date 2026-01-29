@@ -107,9 +107,10 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
     // Schedule proactive token refresh before expiry
     _scheduleTokenRefresh(expiresAt);
 
-    // Start direct polling if idle, or retry if in fallback/offline mode
-    if (state.mode == SpotifyPollingMode.idle ||
-        state.mode == SpotifyPollingMode.fallback ||
+    // Start direct polling if in fallback/offline mode (trying to recover)
+    // or if already in direct mode but timer was cancelled (waiting for token)
+    // Do NOT start if idle - that means polling was intentionally stopped by orchestrator
+    if (state.mode == SpotifyPollingMode.fallback ||
         state.mode == SpotifyPollingMode.offline) {
       _startDirectPolling();
     } else if (state.mode == SpotifyPollingMode.direct && _pollTimer == null) {
@@ -117,6 +118,7 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
       // debugPrint('[SPOTIFY] Restarting poll after token update');
       _poll();
     }
+    // If mode is idle, do nothing - orchestrator will call startDirectPolling() if needed
   }
 
   /// Schedule fallback token refresh before it expires
@@ -223,6 +225,10 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
   }
 
   Future<void> _poll() async {
+    // Cancel both timers to prevent overlapping polls
+    _pollTimer?.cancel();
+    _retryTimer?.cancel();
+
     if (state.mode != SpotifyPollingMode.direct) return;
 
     final token = state.accessToken;
@@ -263,7 +269,8 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
       // Reset 401 counter on success
       _consecutive401Errors = 0;
 
-      // Schedule next poll
+      // Schedule next poll (cancel any stray retry timer first)
+      _retryTimer?.cancel();
       final env = ref.read(envConfigProvider);
       _pollTimer = Timer(
         Duration(seconds: env.spotifyDirectPollIntervalSec),
@@ -322,7 +329,9 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
     //     '[SPOTIFY] Direct poll failed: $errorMessage (retry $_consecutiveFailures)');
     state = state.copyWith(error: errorMessage);
 
+    // Cancel both timers to prevent overlapping
     _pollTimer?.cancel();
+    _retryTimer?.cancel();
     _pollTimer = Timer(
       Duration(seconds: env.spotifyDirectRetryIntervalSec),
       _poll,
@@ -343,6 +352,8 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
   }
 
   void _startBackgroundRetry() {
+    // Cancel both timers to prevent overlapping
+    _pollTimer?.cancel();
     _retryTimer?.cancel();
 
     final env = ref.read(envConfigProvider);
