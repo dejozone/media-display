@@ -179,8 +179,16 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
 
   /// Starts direct Spotify API polling
   void startDirectPolling() {
+    // Set mode to direct even if no token yet
+    // When token arrives, updateToken() will start actual polling
     if (state.accessToken == null) {
-      // debugPrint('[SPOTIFY] Cannot start direct polling: no access token');
+      debugPrint('[SPOTIFY] Direct polling requested - waiting for token');
+      _pollTimer?.cancel();
+      _retryTimer?.cancel();
+      state = state.copyWith(
+        mode: SpotifyPollingMode.direct,
+        error: null,
+      );
       return;
     }
     _startDirectPolling();

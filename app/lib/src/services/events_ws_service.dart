@@ -525,6 +525,10 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       final baseWsConfig = service.webSocketConfig;
       final env = ref.read(envConfigProvider);
 
+      // Update direct polling flag based on the service being activated
+      // This is critical for the WebSocket listener to process/ignore incoming data correctly
+      _useDirectPolling = service == ServiceType.directSpotify;
+
       // Get poll intervals from settings or defaults
       Map<String, dynamic>? settings = _lastSettings;
       if (settings == null) {
@@ -563,17 +567,23 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
 
       // Get user's enabled settings
       final userSpotifyEnabled = settings?['spotify_enabled'] == true;
-      final userSonosEnabled = settings?['sonos_enabled'] == true;
+      // final userSonosEnabled = settings?['sonos_enabled'] == true;  // Not used - see below
 
-      // Combine base WebSocket config with user settings
-      // If directSpotify is active (client polls Spotify), but user also enabled Sonos,
-      // we need to tell the server to poll Sonos
-      // If keepSonosEnabled is true, always keep sonos enabled (for Sonos resume detection)
+      // Use base WebSocket config for the active service
+      // Each service type defines exactly what the server should stream:
+      // - directSpotify: spotify=false, sonos=false (client polls Spotify directly)
+      // - cloudSpotify: spotify=true, sonos=false (server polls Spotify)
+      // - localSonos: spotify=false, sonos=true (server streams Sonos)
+      //
+      // keepSonosEnabled overrides sonos to true when we need health monitoring
+      // during cycling/fallback (e.g., waiting for Sonos to resume)
+      //
+      // NOTE: We intentionally do NOT enable Sonos when directSpotify is active,
+      // even if user has Sonos enabled. Receiving Sonos data would cause the
+      // orchestrator to switch away from directSpotify prematurely.
       final wsConfig = (
         spotify: baseWsConfig.spotify,
-        sonos: baseWsConfig.sonos ||
-            keepSonosEnabled ||
-            (service == ServiceType.directSpotify && userSonosEnabled),
+        sonos: baseWsConfig.sonos || keepSonosEnabled,
       );
 
       // Token logic: Request token whenever Spotify is enabled in user settings

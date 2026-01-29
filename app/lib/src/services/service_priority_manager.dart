@@ -599,8 +599,6 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     // If current service is active and hasn't reached error threshold, don't retry others
     if (currentStatus == ServiceStatus.active &&
         currentErrors < currentFallbackConfig.errorThreshold) {
-      _log(
-          '[ServicePriority] Skipping retry - current service ${state.currentService} is active with $currentErrors/${currentFallbackConfig.errorThreshold} errors');
       return;
     }
 
