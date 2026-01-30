@@ -55,6 +55,8 @@ class AppHeader extends ConsumerWidget {
         const SizedBox(width: 8),
         if (onHome != null)
           Container(
+            width: 48,
+            height: 48,
             decoration: BoxDecoration(
               color: const Color(0xFF1A2333),
               shape: BoxShape.circle,
@@ -69,6 +71,8 @@ class AppHeader extends ConsumerWidget {
         if (onLogout != null) ...[
           const SizedBox(width: 8),
           Container(
+            width: 48,
+            height: 48,
             decoration: BoxDecoration(
               color: const Color(0xFF1A2333),
               shape: BoxShape.circle,
