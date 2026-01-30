@@ -317,11 +317,10 @@ class SonosManager:
                 payload = await loop.run_in_executor(None, self._build_payload, coordinator)
 
                 if stop_event.is_set() or ws.application_state != WebSocketState.CONNECTED:
-                    self.logger.info(
-                        "sonos: websocket not connected before send, stopping stream (stop_event=%s ws_state=%s)",
-                        stop_event.is_set(),
-                        ws.application_state,
-                    )
+                    if stop_event.is_set():
+                        self.logger.info("sonos: stop_event set, stopping stream (ws_state=%s)", ws.application_state)
+                    elif ws.application_state != WebSocketState.CONNECTED:
+                        self.logger.info("sonos: websocket disconnected, stopping stream (ws_state=%s)", ws.application_state)
                     stop_event.set()
                     break
 
