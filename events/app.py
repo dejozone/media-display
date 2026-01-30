@@ -886,11 +886,49 @@ async def media_events(ws: WebSocket) -> None:
             ctx.driver_task = asyncio.create_task(_user_driver(ctx))
             ACTIVE_TASKS.add(ctx.driver_task)
 
+    async def _handle_service_status_request(msg: Dict[str, Any]) -> None:
+        """Handle service_status request - check health of specified providers."""
+        providers = msg.get("providers", [])
+        if not providers:
+            logger.warning("service_status request with no providers user=%s", user_id)
+            return
+        
+        logger.info("service_status request for providers=%s user=%s", providers, user_id)
+        
+        statuses = []
+        for provider in providers:
+            if provider == "sonos":
+                status = await SONOS_MANAGER.check_health()
+                statuses.append(status)
+            elif provider == "spotify":
+                # Need HTTP client and token for Spotify health check
+                assert HTTP_CLIENT is not None
+                status = await SPOTIFY_MANAGER.check_health(
+                    token=ctx.token,
+                    user_id=ctx.user_id,
+                    http_client=HTTP_CLIENT,
+                )
+                statuses.append(status)
+            else:
+                logger.warning("Unknown provider in service_status request: %s", provider)
+        
+        # Send response with all statuses
+        if statuses:
+            await ctx.channel.send_json({
+                "type": "service_status",
+                "statuses": statuses,
+            })
+            logger.info("Sent service_status response with %d statuses user=%s", len(statuses), user_id)
+
     try:
         while True:
             msg = await ws.receive_json()
-            if isinstance(msg, dict) and msg.get("type") == "config":
-                await _apply_config(msg)
+            if isinstance(msg, dict):
+                msg_type = msg.get("type")
+                if msg_type == "config":
+                    await _apply_config(msg)
+                elif msg_type == "service_status":
+                    await _handle_service_status_request(msg)
     except asyncio.CancelledError:
         pass
     except Exception:

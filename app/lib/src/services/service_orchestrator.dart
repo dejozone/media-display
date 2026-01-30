@@ -150,6 +150,11 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     // Set up service status callback to receive health updates from WebSocket
     ref.read(eventsWsProvider.notifier).onServiceStatus = _handleServiceStatus;
 
+    // Set up probe callback for service recovery
+    ref
+        .read(servicePriorityProvider.notifier)
+        .setProbeCallback(_probeServiceForRecovery);
+
     // Load user settings to determine which services are enabled
     await _loadServicesSettings();
 
@@ -164,6 +169,26 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       // because the server isn't running anything yet
       _log(
           '[Orchestrator] No services enabled on init - server not running anything');
+    }
+  }
+
+  /// Probe a service for recovery (used by priority manager)
+  /// Returns true if service is healthy, false otherwise
+  /// NOTE: Only directSpotify is probed client-side. Cloud services have recovery handled by server.
+  Future<bool> _probeServiceForRecovery(ServiceType service) async {
+    _log('[Orchestrator] Probing $service for recovery');
+
+    switch (service) {
+      case ServiceType.directSpotify:
+        // Direct Spotify - probe via client-side API call
+        return ref.read(spotifyDirectProvider.notifier).probeService();
+
+      case ServiceType.cloudSpotify:
+      case ServiceType.localSonos:
+        // Cloud services - recovery handled by server, no client-side probing
+        _log(
+            '[Orchestrator] Skipping probe for $service (recovery handled by server)');
+        return false;
     }
   }
 
@@ -230,6 +255,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
       // Check if this is a switch to a higher-priority service (not a fallback due to cycling)
       // If so, reset cycling state to allow fresh evaluation of the new service
+      bool isFallback = false;
       if (currentService != null) {
         bool shouldResetCycling = false;
 
@@ -247,6 +273,9 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
           if (currentPriority >= 0 &&
               (previousPriority < 0 || currentPriority < previousPriority)) {
             shouldResetCycling = true;
+          } else if (currentPriority > previousPriority) {
+            // Switching to lower priority = fallback
+            isFallback = true;
           }
         }
 
@@ -266,11 +295,11 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       );
 
       // Start/stop services based on new active service
-      _activateService(currentService);
+      _activateService(currentService, isFallback: isFallback);
     }
   }
 
-  void _activateService(ServiceType? service) {
+  void _activateService(ServiceType? service, {bool isFallback = false}) {
     if (service == null) {
       _log(
           '[Orchestrator] No service to activate - sending user settings config');
@@ -283,13 +312,31 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       return;
     }
 
-    _log('[Orchestrator] Activating service: $service');
+    _log(
+        '[Orchestrator] Activating service: $service${isFallback ? ' (fallback)' : ''}');
+
+    // Clear previous health state for this service so any new failure
+    // is treated as a "first time" failure, not a continuation
+    // BUT don't clear during fallback - we need to keep the failed service's
+    // health state so we know to keep server polling for recovery
+    if (!isFallback) {
+      _clearHealthState(service);
+    }
 
     if (service.isDirectPolling) {
       _activateDirectSpotify();
     } else {
       // cloud_spotify or local_sonos
       _activateCloudService(service);
+    }
+  }
+
+  /// Clear the health state for a service (e.g., when activating after recovery)
+  void _clearHealthState(ServiceType service) {
+    final provider = service == ServiceType.localSonos ? 'sonos' : 'spotify';
+    if (_serviceHealth.containsKey(provider)) {
+      _log('[Orchestrator] Clearing health state for $service');
+      _serviceHealth.remove(provider);
     }
   }
 
@@ -312,9 +359,25 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     // Keep sonos enabled if we're waiting for it to resume
     final keepSonos = _waitingForPrimaryResume &&
         _originalPrimaryService == ServiceType.localSonos;
+
+    // Keep spotify polling enabled if cloudSpotify is unhealthy
+    // This allows the server to continue its retry loop and emit healthy status
+    // when it recovers, so we can switch back to cloudSpotify
+    // NOTE: Check _serviceHealth directly, not priority.unhealthyServices,
+    // because unhealthyServices is synced after the service switch
+    final spotifyHealth = _serviceHealth['spotify'];
+    final keepSpotifyForRecovery =
+        spotifyHealth != null && !spotifyHealth.status.isHealthy;
+
+    if (keepSpotifyForRecovery) {
+      _log(
+          '[Orchestrator] Keeping server Spotify polling enabled for recovery');
+    }
+
     ref.read(eventsWsProvider.notifier).sendConfigForService(
           ServiceType.directSpotify,
           keepSonosEnabled: keepSonos,
+          keepSpotifyPollingForRecovery: keepSpotifyForRecovery,
         );
 
     // Reset timeout timer
@@ -609,7 +672,25 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
   }
 
   /// Handle service status messages from WebSocket backend
+  /// Supports both single status format and multi-status format (probe response)
   void _handleServiceStatus(Map<String, dynamic> data) {
+    // Check if this is a multi-status response (from probe request)
+    final statuses = data['statuses'] as List?;
+    if (statuses != null) {
+      // Handle each status in the array
+      for (final status in statuses) {
+        if (status is Map<String, dynamic>) {
+          _handleSingleServiceStatus(status);
+        }
+      }
+    } else {
+      // Single status format (regular health update)
+      _handleSingleServiceStatus(data);
+    }
+  }
+
+  /// Handle a single service status update
+  void _handleSingleServiceStatus(Map<String, dynamic> data) {
     final healthState = ServiceHealthState.fromMessage(data);
     final provider = healthState.provider;
 
@@ -692,35 +773,36 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     ServiceHealthState health,
     ServiceHealthState? previousHealth,
   ) {
-    // Only log recovery if it was previously unhealthy
-    if (previousHealth != null && !previousHealth.status.isHealthy) {
-      _log(
-          '[Orchestrator] $service recovered with ${health.devicesCount} devices');
+    // Only process recovery if it was previously unhealthy
+    if (previousHealth == null || previousHealth.status.isHealthy) {
+      return;
+    }
 
-      // If this service is higher priority than current and was our original primary,
-      // switch back to it
-      final currentService = ref.read(servicePriorityProvider).currentService;
-      if (currentService != null && currentService != service) {
-        final serviceList = _config.priorityOrderOfServices;
-        final currentPriority = serviceList.indexOf(currentService);
-        final recoveredPriority = serviceList.indexOf(service);
+    _log(
+        '[Orchestrator] $service recovered with ${health.devicesCount} devices');
 
-        // If recovered service is higher priority AND was our original primary
-        if (recoveredPriority >= 0 &&
-            (currentPriority < 0 || recoveredPriority < currentPriority) &&
-            _originalPrimaryService == service) {
-          _log(
-              '[Orchestrator] Original primary $service recovered - switching back');
+    // If this service is higher priority than current, switch back to it
+    final currentService = ref.read(servicePriorityProvider).currentService;
+    if (currentService != null && currentService != service) {
+      final serviceList = _config.priorityOrderOfServices;
+      final currentPriority = serviceList.indexOf(currentService);
+      final recoveredPriority = serviceList.indexOf(service);
 
-          // Reset cycling state so the recovered service gets a fresh evaluation
-          // This ensures that if it has no playback, it will cycle to the next service
-          _resetCyclingState();
+      // Switch to recovered service if it's higher priority than current
+      // (lower index = higher priority)
+      if (recoveredPriority >= 0 &&
+          (currentPriority < 0 || recoveredPriority < currentPriority)) {
+        _log(
+            '[Orchestrator] Higher-priority service $service recovered - switching back');
 
-          // Remember the original primary again since we're switching back to it
-          _originalPrimaryService = service;
+        // Reset cycling state so the recovered service gets a fresh evaluation
+        // This ensures that if it has no playback, it will cycle to the next service
+        _resetCyclingState();
 
-          ref.read(servicePriorityProvider.notifier).switchToService(service);
-        }
+        // Set original primary to the recovered service
+        _originalPrimaryService = service;
+
+        ref.read(servicePriorityProvider.notifier).switchToService(service);
       }
     }
   }
@@ -964,10 +1046,34 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       // switchToService will trigger _handleServicePriorityChange which calls
       // _activateService -> sendConfigForService, so no need to send config here
       ref.read(servicePriorityProvider.notifier).switchToService(nextService);
+
+      // Start recovery monitoring for the failed service
+      ref.read(servicePriorityProvider.notifier).startRecovery(fromService);
     } else {
       // All services checked - none available
       _log('[Orchestrator] All services checked - none available');
       _startCycleResetTimer();
+
+      // Try to switch to the best available (healthy) service
+      // This ensures we don't stay stuck on an unhealthy service
+      final bestService = _getHighestPriorityAvailableService();
+      if (bestService != null) {
+        final current = ref.read(servicePriorityProvider).currentService;
+        if (current != bestService) {
+          _log(
+              '[Orchestrator] Switching to best available service: $bestService');
+          ref
+              .read(servicePriorityProvider.notifier)
+              .switchToService(bestService);
+        }
+      } else {
+        // No available services - keep current or clear
+        _log('[Orchestrator] No available services after cycling');
+      }
+
+      // Reset waiting state since we've exhausted options
+      _waitingForPrimaryResume = false;
+      _originalPrimaryService = null;
     }
   }
 
@@ -1091,6 +1197,12 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       final priority = ref.read(servicePriorityProvider);
       final currentService = priority.currentService;
       if (currentService == null) return;
+
+      // Skip timeout check for cloud services - they're event-driven from server
+      // and the WebSocket connection itself handles disconnection detection.
+      // The server uses 304 Not Modified when data hasn't changed, which doesn't
+      // send new data to client. This isn't a timeout condition, just no changes.
+      if (currentService.isCloudService) return;
 
       // Get fallback config for this service type
       final fallbackConfig = _config.getFallbackConfig(currentService);

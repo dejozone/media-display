@@ -194,6 +194,36 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
     _startDirectPolling();
   }
 
+  /// Probe Spotify API to check if service is healthy
+  /// Returns true if API responds successfully (HTTP < 300)
+  /// This does NOT affect polling state or UI - it's just a health check
+  Future<bool> probeService() async {
+    final token = state.accessToken;
+    if (token == null) {
+      debugPrint('[SPOTIFY] Probe failed: no access token');
+      return false;
+    }
+
+    if (_isTokenExpired()) {
+      debugPrint('[SPOTIFY] Probe failed: token expired');
+      return false;
+    }
+
+    try {
+      // Make a single API call to check if Spotify is reachable
+      await _apiClient!.getCurrentPlayback(token);
+      // Any response (including null for 204) is considered healthy
+      debugPrint('[SPOTIFY] Probe successful');
+      return true;
+    } on SpotifyApiException catch (e) {
+      debugPrint('[SPOTIFY] Probe failed: ${e.message}');
+      return false;
+    } catch (e) {
+      debugPrint('[SPOTIFY] Probe failed: $e');
+      return false;
+    }
+  }
+
   /// Stops all polling and cancels all timers
   void stopPolling() {
     _pollTimer?.cancel();

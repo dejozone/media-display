@@ -33,6 +33,53 @@ enum ServiceStatus {
   disabled,
 }
 
+/// State for tracking recovery of a failed higher-priority service
+@immutable
+class ServiceRecoveryState {
+  const ServiceRecoveryState({
+    required this.service,
+    required this.windowStartTime,
+    this.lastProbeTime,
+    this.consecutiveFailures = 0,
+    this.inCooldown = false,
+    this.cooldownEndTime,
+  });
+
+  final ServiceType service;
+  final DateTime windowStartTime;
+  final DateTime? lastProbeTime;
+  final int consecutiveFailures;
+  final bool inCooldown;
+  final DateTime? cooldownEndTime;
+
+  ServiceRecoveryState copyWith({
+    DateTime? windowStartTime,
+    DateTime? lastProbeTime,
+    int? consecutiveFailures,
+    bool? inCooldown,
+    DateTime? cooldownEndTime,
+    bool clearLastProbeTime = false,
+    bool clearCooldownEndTime = false,
+  }) {
+    return ServiceRecoveryState(
+      service: service,
+      windowStartTime: windowStartTime ?? this.windowStartTime,
+      lastProbeTime:
+          clearLastProbeTime ? null : (lastProbeTime ?? this.lastProbeTime),
+      consecutiveFailures: consecutiveFailures ?? this.consecutiveFailures,
+      inCooldown: inCooldown ?? this.inCooldown,
+      cooldownEndTime: clearCooldownEndTime
+          ? null
+          : (cooldownEndTime ?? this.cooldownEndTime),
+    );
+  }
+
+  @override
+  String toString() {
+    return 'RecoveryState($service, failures=$consecutiveFailures, inCooldown=$inCooldown)';
+  }
+}
+
 /// State for tracking service priority and status
 @immutable
 class ServicePriorityState {
@@ -50,6 +97,7 @@ class ServicePriorityState {
     this.transitionStartTime,
     this.lastDataTime,
     this.unhealthyServices = const {},
+    this.recoveryStates = const {},
   });
 
   /// Priority order from configuration
@@ -83,6 +131,10 @@ class ServicePriorityState {
   /// Used during fallback to skip services that are recovering/failing
   final Set<ServiceType> unhealthyServices;
 
+  /// Recovery states for failed higher-priority services
+  /// Key: service type, Value: recovery state
+  final Map<ServiceType, ServiceRecoveryState> recoveryStates;
+
   /// Whether we're currently transitioning between services
   final bool isTransitioning;
 
@@ -91,6 +143,20 @@ class ServicePriorityState {
 
   /// Last time we received data from any service
   final DateTime? lastDataTime;
+
+  /// Get services that need recovery (higher priority than current, in recovery state)
+  List<ServiceType> get servicesNeedingRecovery {
+    if (currentService == null) return [];
+    final currentIndex = configuredOrder.indexOf(currentService!);
+    if (currentIndex < 0) return [];
+
+    return recoveryStates.keys.where((service) {
+      final serviceIndex = configuredOrder.indexOf(service);
+      return serviceIndex >= 0 && serviceIndex < currentIndex;
+    }).toList()
+      ..sort((a, b) =>
+          configuredOrder.indexOf(a).compareTo(configuredOrder.indexOf(b)));
+  }
 
   /// Get the effective priority order (filtered by enabled services)
   List<ServiceType> get effectiveOrder {
@@ -170,6 +236,7 @@ class ServicePriorityState {
     DateTime? transitionStartTime,
     DateTime? lastDataTime,
     Set<ServiceType>? unhealthyServices,
+    Map<ServiceType, ServiceRecoveryState>? recoveryStates,
     bool clearCurrentService = false,
     bool clearPreviousService = false,
     bool clearTransitionStartTime = false,
@@ -195,6 +262,7 @@ class ServicePriorityState {
       lastDataTime:
           clearLastDataTime ? null : (lastDataTime ?? this.lastDataTime),
       unhealthyServices: unhealthyServices ?? this.unhealthyServices,
+      recoveryStates: recoveryStates ?? this.recoveryStates,
     );
   }
 
@@ -209,7 +277,8 @@ class ServicePriorityState {
         mapEquals(other.serviceStatuses, serviceStatuses) &&
         mapEquals(other.errorCounts, errorCounts) &&
         other.isTransitioning == isTransitioning &&
-        setEquals(other.unhealthyServices, unhealthyServices);
+        setEquals(other.unhealthyServices, unhealthyServices) &&
+        mapEquals(other.recoveryStates, recoveryStates);
   }
 
   @override
@@ -222,25 +291,39 @@ class ServicePriorityState {
         Object.hashAllUnordered(errorCounts.entries),
         isTransitioning,
         Object.hashAllUnordered(unhealthyServices),
+        Object.hashAllUnordered(recoveryStates.entries),
       );
 
   @override
   String toString() {
+    final recoveryInfo = recoveryStates.isNotEmpty
+        ? ', recovery: ${recoveryStates.keys.toList()}'
+        : '';
     return 'ServicePriorityState('
         'current: $currentService, '
         'effectiveOrder: $effectiveOrder, '
         'statuses: $serviceStatuses, '
         'errors: $errorCounts, '
         'transitioning: $isTransitioning, '
-        'unhealthy: $unhealthyServices)';
+        'unhealthy: $unhealthyServices$recoveryInfo)';
   }
 }
+
+/// Callback type for probing a service's health
+typedef ServiceProbeCallback = Future<bool> Function(ServiceType service);
 
 /// Notifier for managing service priority state
 class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
   Timer? _retryTimer;
+  Timer? _recoveryTimer;
+  ServiceProbeCallback? _probeCallback;
 
   EnvConfig get _config => ref.read(envConfigProvider);
+
+  /// Set the callback for probing service health
+  void setProbeCallback(ServiceProbeCallback callback) {
+    _probeCallback = callback;
+  }
 
   @override
   ServicePriorityState build() {
@@ -261,6 +344,7 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
 
     ref.onDispose(() {
       _retryTimer?.cancel();
+      _recoveryTimer?.cancel();
     });
 
     return ServicePriorityState(
@@ -562,6 +646,9 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       _log('[ServicePriority] Falling back from $failedService to $next');
       activateService(next);
       _startRetryTimer(failedService);
+
+      // Start recovery monitoring for the failed service if it's higher priority
+      startRecovery(failedService);
     } else {
       _log('[ServicePriority] No fallback available from $failedService');
       // All services unavailable - stay on current and retry later
@@ -710,6 +797,8 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
   /// Reset all services to initial state
   void reset() {
     _retryTimer?.cancel();
+    _recoveryTimer?.cancel();
+    _recoveryTimer = null;
     state = build();
   }
 
@@ -731,6 +820,317 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       _log('[ServicePriority] Cancelling retry timer - on primary service');
       _retryTimer?.cancel();
       _retryTimer = null;
+    }
+  }
+
+  // ============================================================
+  // Service Recovery Methods
+  // ============================================================
+
+  /// Start recovery monitoring for a failed service that is higher priority than current
+  /// Called when a service fails and we fall back to a lower-priority service
+  /// NOTE: Only directSpotify is handled client-side. Cloud services (cloudSpotify, localSonos)
+  /// have their recovery handled by the WebSocket server.
+  void startRecovery(ServiceType failedService) {
+    // Only handle directSpotify recovery client-side
+    // Cloud services (cloudSpotify, localSonos) recovery is handled by the server
+    if (failedService != ServiceType.directSpotify) {
+      _log(
+          '[ServicePriority] Skipping client-side recovery for $failedService (handled by server)');
+      return;
+    }
+
+    final currentService = state.currentService;
+    if (currentService == null) return;
+
+    // Check if failed service is higher priority than current
+    final failedIndex = state.configuredOrder.indexOf(failedService);
+    final currentIndex = state.configuredOrder.indexOf(currentService);
+
+    if (failedIndex < 0 || currentIndex < 0) return;
+    if (failedIndex >= currentIndex) {
+      // Failed service is lower priority - don't start recovery
+      return;
+    }
+
+    // Check if already in recovery
+    if (state.recoveryStates.containsKey(failedService)) {
+      _log('[ServicePriority] Recovery already active for $failedService');
+      return;
+    }
+
+    _log(
+        '[ServicePriority] Starting recovery for higher-priority service: $failedService');
+
+    // Create recovery state
+    final recoveryState = ServiceRecoveryState(
+      service: failedService,
+      windowStartTime: DateTime.now(),
+    );
+
+    final newRecoveryStates =
+        Map<ServiceType, ServiceRecoveryState>.from(state.recoveryStates);
+    newRecoveryStates[failedService] = recoveryState;
+
+    state = state.copyWith(recoveryStates: newRecoveryStates);
+
+    // Start recovery timer if not already running
+    _startRecoveryTimer();
+  }
+
+  /// Stop recovery monitoring for a service
+  void stopRecovery(ServiceType service) {
+    if (!state.recoveryStates.containsKey(service)) return;
+
+    _log('[ServicePriority] Stopping recovery for $service');
+
+    final newRecoveryStates =
+        Map<ServiceType, ServiceRecoveryState>.from(state.recoveryStates);
+    newRecoveryStates.remove(service);
+
+    state = state.copyWith(recoveryStates: newRecoveryStates);
+
+    // Stop timer if no more services need recovery
+    if (newRecoveryStates.isEmpty) {
+      _stopRecoveryTimer();
+    }
+  }
+
+  /// Clear all recovery states (e.g., when user changes settings)
+  void clearAllRecovery() {
+    if (state.recoveryStates.isEmpty) return;
+
+    _log('[ServicePriority] Clearing all recovery states');
+    _stopRecoveryTimer();
+    state =
+        state.copyWith(recoveryStates: <ServiceType, ServiceRecoveryState>{});
+  }
+
+  /// Called when a service is successfully recovered
+  /// Switches to the recovered service if it's higher priority than current
+  void onServiceRecovered(ServiceType service) {
+    if (!state.recoveryStates.containsKey(service)) return;
+
+    final currentService = state.currentService;
+    final serviceIndex = state.configuredOrder.indexOf(service);
+    final currentIndex = currentService != null
+        ? state.configuredOrder.indexOf(currentService)
+        : state.configuredOrder.length;
+
+    _log('[ServicePriority] Service $service recovered');
+
+    // Remove from recovery states
+    final newRecoveryStates =
+        Map<ServiceType, ServiceRecoveryState>.from(state.recoveryStates);
+    newRecoveryStates.remove(service);
+
+    // Reset service status
+    final newStatuses =
+        Map<ServiceType, ServiceStatus>.from(state.serviceStatuses);
+    newStatuses[service] = ServiceStatus.standby;
+
+    final newErrors = Map<ServiceType, int>.from(state.errorCounts);
+    newErrors[service] = 0;
+
+    state = state.copyWith(
+      recoveryStates: newRecoveryStates,
+      serviceStatuses: newStatuses,
+      errorCounts: newErrors,
+    );
+
+    // Switch to recovered service if it's higher priority
+    if (serviceIndex >= 0 && serviceIndex < currentIndex) {
+      _log(
+          '[ServicePriority] Switching to recovered higher-priority service: $service');
+      activateService(service);
+
+      // If we're now on the primary service, cancel retry timer
+      if (service == _getFirstEnabledService()) {
+        _cancelRetryTimer();
+      }
+    }
+
+    // Stop timer if no more services need recovery
+    if (newRecoveryStates.isEmpty) {
+      _stopRecoveryTimer();
+    }
+  }
+
+  /// Called when a recovery probe fails
+  void onRecoveryProbeFailed(ServiceType service) {
+    final recoveryState = state.recoveryStates[service];
+    if (recoveryState == null) return;
+
+    // Use service-specific fallback config
+    final fallbackConfig = _config.getFallbackConfig(service);
+    final newFailures = recoveryState.consecutiveFailures + 1;
+    final cooldownThreshold = fallbackConfig.errorThreshold;
+    final cooldownInterval = fallbackConfig.retryCooldownSec;
+
+    _log(
+        '[ServicePriority] Recovery probe failed for $service ($newFailures/$cooldownThreshold)');
+
+    ServiceRecoveryState updatedState;
+    if (newFailures >= cooldownThreshold) {
+      // Enter cooldown
+      _log('[ServicePriority] $service entering recovery cooldown');
+      updatedState = recoveryState.copyWith(
+        consecutiveFailures: 0, // Reset after entering cooldown
+        inCooldown: true,
+        cooldownEndTime:
+            DateTime.now().add(Duration(seconds: cooldownInterval)),
+        lastProbeTime: DateTime.now(),
+      );
+    } else {
+      updatedState = recoveryState.copyWith(
+        consecutiveFailures: newFailures,
+        lastProbeTime: DateTime.now(),
+      );
+    }
+
+    final newRecoveryStates =
+        Map<ServiceType, ServiceRecoveryState>.from(state.recoveryStates);
+    newRecoveryStates[service] = updatedState;
+
+    state = state.copyWith(recoveryStates: newRecoveryStates);
+  }
+
+  void _startRecoveryTimer() {
+    if (_recoveryTimer != null) return; // Already running
+
+    // Use directSpotify fallback config for recovery (only directSpotify is recovered client-side)
+    final interval = _config.spotifyDirectFallback.retryIntervalSec;
+    _log('[ServicePriority] Starting recovery timer (interval: ${interval}s)');
+
+    _recoveryTimer = Timer.periodic(
+      Duration(seconds: interval),
+      (_) => _onRecoveryTimerTick(),
+    );
+  }
+
+  void _stopRecoveryTimer() {
+    if (_recoveryTimer != null) {
+      _log('[ServicePriority] Stopping recovery timer');
+      _recoveryTimer?.cancel();
+      _recoveryTimer = null;
+    }
+  }
+
+  void _onRecoveryTimerTick() {
+    final servicesToProbe = <ServiceType>[];
+    final servicesToRemove = <ServiceType>[];
+    final updatedStates =
+        Map<ServiceType, ServiceRecoveryState>.from(state.recoveryStates);
+    final now = DateTime.now();
+
+    for (final entry in state.recoveryStates.entries) {
+      final service = entry.key;
+      var recoveryState = entry.value;
+
+      // Get service-specific config
+      final fallbackConfig = _config.getFallbackConfig(service);
+      final maxWindow = fallbackConfig.retryMaxWindowSec;
+
+      // Check max window (negative = infinite)
+      if (maxWindow >= 0) {
+        final windowElapsed =
+            now.difference(recoveryState.windowStartTime).inSeconds;
+        if (windowElapsed >= maxWindow) {
+          _log(
+              '[ServicePriority] Recovery window exceeded for $service - stopping recovery');
+          servicesToRemove.add(service);
+          continue;
+        }
+      }
+
+      // Check if in cooldown
+      if (recoveryState.inCooldown) {
+        if (recoveryState.cooldownEndTime != null &&
+            now.isAfter(recoveryState.cooldownEndTime!)) {
+          // Cooldown ended
+          _log('[ServicePriority] $service cooldown ended');
+          recoveryState = recoveryState.copyWith(
+            inCooldown: false,
+            clearCooldownEndTime: true,
+          );
+          updatedStates[service] = recoveryState;
+        } else {
+          // Still in cooldown - skip
+          continue;
+        }
+      }
+
+      // Check if service is still enabled
+      if (!state.enabledServices.contains(service)) {
+        _log(
+            '[ServicePriority] $service no longer enabled - stopping recovery');
+        servicesToRemove.add(service);
+        continue;
+      }
+
+      // Check if service is still lower priority than current
+      // (current service might have changed)
+      final currentService = state.currentService;
+      if (currentService != null) {
+        final serviceIndex = state.configuredOrder.indexOf(service);
+        final currentIndex = state.configuredOrder.indexOf(currentService);
+        if (serviceIndex >= currentIndex) {
+          // No longer higher priority - stop recovery
+          _log(
+              '[ServicePriority] $service no longer higher priority - stopping recovery');
+          servicesToRemove.add(service);
+          continue;
+        }
+      }
+
+      // Ready to probe
+      servicesToProbe.add(service);
+    }
+
+    // Remove services that no longer need recovery
+    for (final service in servicesToRemove) {
+      updatedStates.remove(service);
+    }
+
+    if (updatedStates.length != state.recoveryStates.length) {
+      state = state.copyWith(recoveryStates: updatedStates);
+    }
+
+    // Stop timer if no more services
+    if (updatedStates.isEmpty) {
+      _stopRecoveryTimer();
+      return;
+    }
+
+    // Probe services (only the highest priority one that needs probing)
+    if (servicesToProbe.isNotEmpty && _probeCallback != null) {
+      // Sort by priority order and probe highest priority first
+      servicesToProbe.sort((a, b) => state.configuredOrder
+          .indexOf(a)
+          .compareTo(state.configuredOrder.indexOf(b)));
+
+      final serviceToProbe = servicesToProbe.first;
+      _log('[ServicePriority] Probing $serviceToProbe for recovery');
+      _probeService(serviceToProbe);
+    }
+  }
+
+  Future<void> _probeService(ServiceType service) async {
+    if (_probeCallback == null) {
+      _log('[ServicePriority] No probe callback set');
+      return;
+    }
+
+    try {
+      final isHealthy = await _probeCallback!(service);
+      if (isHealthy) {
+        onServiceRecovered(service);
+      } else {
+        onRecoveryProbeFailed(service);
+      }
+    } catch (e) {
+      _log('[ServicePriority] Probe error for $service: $e');
+      onRecoveryProbeFailed(service);
     }
   }
 }

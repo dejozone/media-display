@@ -392,6 +392,31 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     connect();
   }
 
+  /// Request service health status from the server for specified providers
+  /// This is used for probing cloud-based services during recovery
+  /// @param providers List of provider names to check (e.g., ['spotify', 'sonos'])
+  /// @returns true if request was sent, false if WebSocket not connected
+  bool requestServiceStatus(List<String> providers) {
+    if (_channel == null || !_connectionConfirmed) {
+      _log('[WS] Cannot request service status - not connected');
+      return false;
+    }
+
+    final payload = jsonEncode({
+      'type': 'service_status',
+      'providers': providers,
+    });
+
+    try {
+      _channel?.sink.add(payload);
+      _log('[WS] Requested service status for: $providers');
+      return true;
+    } catch (e) {
+      _log('[WS] Error requesting service status: $e');
+      return false;
+    }
+  }
+
   /// Send config to disable all services on the server
   /// Called when user disables all services
   Future<void> sendDisableAllConfig() async {
@@ -519,8 +544,12 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   /// This is called by the ServiceOrchestrator when switching services
   /// If [keepSonosEnabled] is true, sonos will be enabled even if not in baseWsConfig
   /// (used when waiting for Sonos to resume after pause)
+  /// If [keepSpotifyPollingForRecovery] is true, spotify will be enabled even when
+  /// switching to directSpotify (used when cloudSpotify is unhealthy and we want
+  /// the server to continue retrying and emit health status when it recovers)
   Future<void> sendConfigForService(ServiceType service,
-      {bool keepSonosEnabled = false}) async {
+      {bool keepSonosEnabled = false,
+      bool keepSpotifyPollingForRecovery = false}) async {
     try {
       final baseWsConfig = service.webSocketConfig;
       final env = ref.read(envConfigProvider);
@@ -578,11 +607,15 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       // keepSonosEnabled overrides sonos to true when we need health monitoring
       // during cycling/fallback (e.g., waiting for Sonos to resume)
       //
+      // keepSpotifyPollingForRecovery overrides spotify to true when we're falling
+      // back from cloudSpotify to directSpotify, so the server continues its retry
+      // loop and can emit healthy status when it recovers.
+      //
       // NOTE: We intentionally do NOT enable Sonos when directSpotify is active,
       // even if user has Sonos enabled. Receiving Sonos data would cause the
       // orchestrator to switch away from directSpotify prematurely.
       final wsConfig = (
-        spotify: baseWsConfig.spotify,
+        spotify: baseWsConfig.spotify || keepSpotifyPollingForRecovery,
         sonos: baseWsConfig.sonos || keepSonosEnabled,
       );
 
@@ -594,6 +627,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
 
       _log('[WS] sendConfigForService: service=$service, '
           'keepSonosEnabled=$keepSonosEnabled, '
+          'keepSpotifyPollingForRecovery=$keepSpotifyPollingForRecovery, '
           'wsConfig=(spotify=${wsConfig.spotify}, sonos=${wsConfig.sonos}), '
           'needToken=$needToken (spotifyEnabled=$userSpotifyEnabled)');
 

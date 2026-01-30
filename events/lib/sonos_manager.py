@@ -445,3 +445,43 @@ class SonosManager:
             ws.application_state,
         )
         return
+
+    async def check_health(self) -> Dict[str, Any]:
+        """Check Sonos service health by discovering devices.
+        
+        Returns:
+            Health status dict (same format as HEALTH_TRACKER messages).
+        """
+        coordinator, device_count = await self.discover_coordinator()
+        
+        # The discover_coordinator method already updates HEALTH_TRACKER
+        # Just return the current status
+        status = HEALTH_TRACKER.get_status("sonos")
+        if status:
+            return status
+        
+        # Fallback if no status in tracker
+        if coordinator:
+            return {
+                "type": "service_status",
+                "provider": "sonos",
+                "status": "healthy",
+                "error_code": None,
+                "message": None,
+                "devices_count": device_count,
+                "retry_in_sec": 0,
+                "should_fallback": False,
+                "last_healthy_at": None,
+            }
+        else:
+            return {
+                "type": "service_status",
+                "provider": "sonos",
+                "status": "unavailable",
+                "error_code": "no_devices",
+                "message": "No Sonos devices found",
+                "devices_count": 0,
+                "retry_in_sec": 15,
+                "should_fallback": True,
+                "last_healthy_at": None,
+            }

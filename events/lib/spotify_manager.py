@@ -65,6 +65,8 @@ class SpotifyManager:
         retry_window = max(5, self.config.get("retryWindowSec", 20))
         # Avoid very long cooldowns so we can recover quickly once the API is back
         cooldown = min(max(5, self.config.get("cooldownSec", 30)), 120)
+        # Number of times to emit status during recovery (then only emit on healthy)
+        num_emit_status_retries = max(1, self.config.get("numOfEmitStatusRetries", 5))
 
         async def _safe_close(target_ws: SupportsWebSocket, code: int, reason: str = "") -> None:
             try:
@@ -75,11 +77,33 @@ class SpotifyManager:
 
         closer = safe_close or _safe_close
         
-        async def _report_status(status: Optional[Dict[str, Any]]) -> None:
-            """Report status if callback provided and status is not None (debounced)."""
+        async def _report_status(status: Optional[Dict[str, Any]], is_healthy: bool = False) -> None:
+            """Report status if callback provided and status is not None (debounced).
+            
+            For unhealthy statuses, only emit up to num_emit_status_retries times.
+            For healthy statuses, always emit (to signal recovery).
+            """
+            nonlocal status_emit_count
             if on_status_change and status:
                 try:
-                    await on_status_change(status)
+                    if is_healthy:
+                        # Always emit healthy status and reset counter
+                        status_emit_count = 0
+                        await on_status_change(status)
+                    elif status_emit_count < num_emit_status_retries:
+                        # Emit unhealthy status up to the limit
+                        status_emit_count += 1
+                        self.logger.info(
+                            "spotify: emitting unhealthy status %d/%d",
+                            status_emit_count, num_emit_status_retries
+                        )
+                        await on_status_change(status)
+                    else:
+                        # Limit reached - don't emit unhealthy status
+                        self.logger.debug(
+                            "spotify: suppressing unhealthy status (limit %d reached)",
+                            num_emit_status_retries
+                        )
                 except Exception:
                     pass
 
@@ -87,6 +111,7 @@ class SpotifyManager:
         last_payload: Optional[Dict[str, Any]] = None
         failure_start: Optional[float] = None
         was_healthy: bool = True  # Track if we were healthy before
+        status_emit_count: int = 0  # Track number of status emissions during recovery
 
         while not stop_event.is_set() and ws.application_state == WebSocketState.CONNECTED:
             try:
@@ -113,7 +138,7 @@ class SpotifyManager:
                     status = await HEALTH_TRACKER.report_error(
                         "spotify", ErrorCode.RATE_LIMITED, f"Rate limited, retry after {retry_after}s"
                     )
-                    await _report_status(status)
+                    await _report_status(status, is_healthy=False)
                     was_healthy = False
                     try:
                         await ws.send_json({"type": "error", "error": "spotify_rate_limited"})
@@ -129,7 +154,7 @@ class SpotifyManager:
                     # Not modified - still healthy
                     if not was_healthy:
                         status = await HEALTH_TRACKER.report_healthy("spotify")
-                        await _report_status(status)
+                        await _report_status(status, is_healthy=True)
                         was_healthy = True
                     if failure_start is not None:
                         recovered_for = time.monotonic() - failure_start
@@ -140,7 +165,7 @@ class SpotifyManager:
                     status = await HEALTH_TRACKER.report_error(
                         "spotify", ErrorCode.AUTH_ERROR, "Unauthorized - token may be expired"
                     )
-                    await _report_status(status)
+                    await _report_status(status, is_healthy=False)
                     await closer(ws, 4401, "Unauthorized")
                     break
                 elif resp.status_code >= 500:
@@ -150,7 +175,7 @@ class SpotifyManager:
                     # Success - report healthy if we weren't before
                     if not was_healthy:
                         status = await HEALTH_TRACKER.report_healthy("spotify")
-                        await _report_status(status)
+                        await _report_status(status, is_healthy=True)
                         was_healthy = True
                     
                     payload = resp.json()
@@ -184,7 +209,7 @@ class SpotifyManager:
                     status = await HEALTH_TRACKER.report_error(
                         "spotify", ErrorCode.SERVER_ERROR, f"Server error: {status_code}"
                     )
-                    await _report_status(status)
+                    await _report_status(status, is_healthy=False)
                     was_healthy = False
                 # Fall through to general error handling
                 now = time.monotonic()
@@ -220,7 +245,7 @@ class SpotifyManager:
                 status = await HEALTH_TRACKER.report_error(
                     "spotify", error_code, f"Connection error: {exc}"
                 )
-                await _report_status(status)
+                await _report_status(status, is_healthy=False)
                 was_healthy = False
                 
                 now = time.monotonic()
@@ -257,7 +282,7 @@ class SpotifyManager:
                 status = await HEALTH_TRACKER.report_error(
                     "spotify", ErrorCode.UNKNOWN, f"Unexpected error: {exc}"
                 )
-                await _report_status(status)
+                await _report_status(status, is_healthy=False)
                 try:
                     await ws.send_json({"type": "error", "error": "internal_error"})
                 finally:
@@ -267,3 +292,75 @@ class SpotifyManager:
         if close_on_stop:
             await closer(ws, 1000, "")
         self.logger.info("spotify: stream closed")
+
+    async def check_health(
+        self,
+        *,
+        token: str,
+        user_id: str,
+        http_client: httpx.AsyncClient,
+    ) -> Dict[str, Any]:
+        """Check Spotify service health by making a quick API call.
+        
+        Args:
+            token: User's auth token.
+            user_id: User ID.
+            http_client: HTTP client for API calls.
+            
+        Returns:
+            Health status dict (same format as HEALTH_TRACKER messages).
+        """
+        try:
+            headers = {"Authorization": f"Bearer {token}"}
+            resp = await http_client.get(
+                f"{self.api_base_url}/api/users/{user_id}/services/spotify/now-playing",
+                headers=headers,
+            )
+            
+            if resp.status_code == 429:
+                # Rate limited
+                status = await HEALTH_TRACKER.report_error(
+                    "spotify", ErrorCode.RATE_LIMITED, "Rate limited"
+                )
+                return status or HEALTH_TRACKER.get_status("spotify") or self._build_status("recovering", ErrorCode.RATE_LIMITED)
+            elif resp.status_code == 401:
+                # Auth error
+                status = await HEALTH_TRACKER.report_error(
+                    "spotify", ErrorCode.AUTH_ERROR, "Unauthorized"
+                )
+                return status or HEALTH_TRACKER.get_status("spotify") or self._build_status("unavailable", ErrorCode.AUTH_ERROR)
+            elif resp.status_code >= 500:
+                # Server error
+                status = await HEALTH_TRACKER.report_error(
+                    "spotify", ErrorCode.SERVER_ERROR, f"Server error: {resp.status_code}"
+                )
+                return status or HEALTH_TRACKER.get_status("spotify") or self._build_status("recovering", ErrorCode.SERVER_ERROR)
+            else:
+                # Success
+                status = await HEALTH_TRACKER.report_healthy("spotify")
+                return status or HEALTH_TRACKER.get_status("spotify") or self._build_status("healthy", None)
+                
+        except httpx.TimeoutException as exc:
+            status = await HEALTH_TRACKER.report_error(
+                "spotify", ErrorCode.TIMEOUT, f"Timeout: {exc}"
+            )
+            return status or HEALTH_TRACKER.get_status("spotify") or self._build_status("recovering", ErrorCode.TIMEOUT)
+        except (httpx.TransportError, Exception) as exc:
+            status = await HEALTH_TRACKER.report_error(
+                "spotify", ErrorCode.NETWORK_ERROR, f"Network error: {exc}"
+            )
+            return status or HEALTH_TRACKER.get_status("spotify") or self._build_status("recovering", ErrorCode.NETWORK_ERROR)
+    
+    def _build_status(self, status: str, error_code: Optional[ErrorCode]) -> Dict[str, Any]:
+        """Build a minimal status dict."""
+        return {
+            "type": "service_status",
+            "provider": "spotify",
+            "status": status,
+            "error_code": error_code.value if error_code else None,
+            "message": None,
+            "devices_count": 0,
+            "retry_in_sec": 0,
+            "should_fallback": False,
+            "last_healthy_at": None,
+        }
