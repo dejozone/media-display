@@ -17,7 +17,7 @@ Multi-platform Flutter client (web, mobile, desktop) for the Media Display backe
    ```
 3. Configure environment:
    - Copy `assets/env/.env.example` to `assets/env/.env`
-   - Set `API_BASE_URL` (default http://localhost:5001) and `EVENTS_WS_URL` (default ws://localhost:5002/events/media)
+   - Set `API_BASE_URL` (default http://localhost:5001) and `WS_BASE_URL` (default ws://localhost:5002/events/media)
 4. Run:
    - Web: `flutter run -d chrome`
    - macOS: `flutter run -d macos`

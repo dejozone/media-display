@@ -3,8 +3,8 @@ import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { getAuthToken, clearAuthToken } from '../utils/auth';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
-const EVENTS_WS_URL = import.meta.env.VITE_EVENTS_WS_URL || `${window.location.origin.replace(/^http/, 'ws')}/events/media`;
+const API_BASE_URL = import.meta.env.API_BASE_URL;
+const WS_BASE_URL = import.meta.env.WS_BASE_URL || `${window.location.origin.replace(/^http/, 'ws')}/events/media`;
 const DEFAULT_AVATAR = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none"><circle cx="32" cy="32" r="32" fill="%23e5e7eb"/><circle cx="32" cy="26" r="10" fill="%2394a3b8"/><path d="M16 54c4-8 12-12 16-12s12 4 16 12" stroke="%2394a3b8" stroke-width="4" stroke-linecap="round"/></svg>';
 
 type User = {
@@ -186,7 +186,7 @@ export default function HomePage() {
       resetRetryState();
     }
 
-    const ws = new WebSocket(`${EVENTS_WS_URL}?token=${token}`);
+    const ws = new WebSocket(`${WS_BASE_URL}?token=${token}`);
     wsRef.current = ws;
     setNowLoading(true);
 

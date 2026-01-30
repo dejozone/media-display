@@ -110292,12 +110292,12 @@ case 2:return this.dy}}}
 A.aLF.prototype={
 $1(d1){var s,r,q,p,o,n,m,l,k,j,i,h,g,f,e,d,c,b,a,a0,a1,a2,a3,a4,a5,a6,a7,a8,a9,b0,b1,b2,b3,b4,b5,b6,b7,b8,b9,c0,c1,c2,c3,c4,c5,c6,c7=null,c8="true",c9="SPOTIFY_DIRECT_RETRY_INTERVAL_SEC",d0=$.bZ().gc5().h(0,"API_BASE_URL")
 if(d0==null)d0="http://localhost:5001"
-s=$.bZ().gc5().h(0,"EVENTS_WS_URL")
+s=$.bZ().gc5().h(0,"WS_BASE_URL")
 if(s==null)s="ws://localhost:5002/events/media"
 r=$.bZ().gc5().h(0,"FLAVOR")
 if(r==null)r="dev"
 $.bZ().gc5().h(0,"API_SSL_VERIFY")
-q=$.bZ().gc5().h(0,"EVENTS_WS_SSL_VERIFY")
+q=$.bZ().gc5().h(0,"WS_SSL_VERIFY")
 if(q==null)q=c8
 p=$.bZ().gc5().h(0,"WS_RETRY_INTERVAL_MS")
 o=A.c_(p==null?"":p,c7)

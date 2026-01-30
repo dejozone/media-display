@@ -183,12 +183,12 @@ class EnvConfig {
 
 final envConfigProvider = Provider<EnvConfig>((ref) {
   final api = dotenv.env['API_BASE_URL'] ?? 'http://localhost:5001';
-  final ws = dotenv.env['EVENTS_WS_URL'] ?? 'ws://localhost:5002/events/media';
+  final ws = dotenv.env['WS_BASE_URL'] ?? 'ws://localhost:5002/events/media';
   final flavor = dotenv.env['FLAVOR'] ?? 'dev';
   final apiSslVerify =
       (dotenv.env['API_SSL_VERIFY'] ?? 'true').toLowerCase() == 'true';
   final wsSslVerify =
-      (dotenv.env['EVENTS_WS_SSL_VERIFY'] ?? 'true').toLowerCase() == 'true';
+      (dotenv.env['WS_SSL_VERIFY'] ?? 'true').toLowerCase() == 'true';
   final wsRetryIntervalMs =
       int.tryParse(dotenv.env['WS_RETRY_INTERVAL_MS'] ?? '') ?? 3000;
   final wsRetryActiveSeconds =
