@@ -671,6 +671,92 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     }
   }
 
+  /// Trigger Sonos re-discovery by sending config with enabled.sonos=true
+  /// This is called when Spotify detects playback on a "Speaker" device,
+  /// which likely means music is playing on Sonos devices but the server
+  /// may not have the correct coordinator. Re-sending the config triggers
+  /// Sonos device discovery to find the right coordinator.
+  Future<void> triggerSonosDiscovery() async {
+    try {
+      final env = ref.read(envConfigProvider);
+
+      // Get current settings
+      Map<String, dynamic>? settings = _lastSettings;
+      if (settings == null) {
+        try {
+          final user = await ref.read(userServiceProvider).fetchMe();
+          final userId = user['id']?.toString() ?? '';
+          if (userId.isNotEmpty) {
+            settings = await ref
+                .read(settingsServiceProvider)
+                .fetchSettingsForUser(userId);
+            _lastSettings = settings;
+          }
+        } catch (_) {
+          // Use defaults
+        }
+      }
+
+      // Check if Sonos is actually enabled
+      final userSonosEnabled = settings?['sonos_enabled'] == true;
+      if (!userSonosEnabled) {
+        _log('[WS] triggerSonosDiscovery: Sonos not enabled, skipping');
+        return;
+      }
+
+      int? asInt(dynamic v) {
+        if (v is int) return v;
+        if (v is double) return v.toInt();
+        if (v is String) return int.tryParse(v);
+        return null;
+      }
+
+      int? asIntOrNull(dynamic v) {
+        final val = asInt(v);
+        return (val == null || val <= 0) ? null : val;
+      }
+
+      final spotifyPoll = asInt(settings?['spotify_poll_interval_sec']) ??
+          env.spotifyPollIntervalSec;
+      final sonosPoll = asIntOrNull(settings?['sonos_poll_interval_sec']) ??
+          env.sonosPollIntervalSec;
+
+      // Keep current Spotify state, but enable Sonos to trigger discovery
+      final userSpotifyEnabled = settings?['spotify_enabled'] == true;
+      final needToken = userSpotifyEnabled;
+
+      _log('[WS] triggerSonosDiscovery: Sending config with sonos=true');
+
+      final payload = jsonEncode({
+        'type': 'config',
+        'need_spotify_token': needToken,
+        'enabled': {
+          'spotify': userSpotifyEnabled,
+          'sonos': true, // Force sonos enabled to trigger discovery
+        },
+        'poll': {
+          'spotify': spotifyPoll,
+          'sonos': sonosPoll,
+        },
+      });
+
+      if (_channel == null) {
+        final auth = ref.read(authStateProvider);
+        if (!auth.isAuthenticated || _connecting) return;
+        await _connect(auth,
+            caller: 'triggerSonosDiscovery', skipSendConfig: true);
+        if (_channel != null) {
+          _channel?.sink.add(payload);
+        }
+        return;
+      }
+
+      _channel?.sink.add(payload);
+    } catch (e) {
+      _log('[WS] triggerSonosDiscovery error: $e');
+    }
+  }
+
   /// Public method to refresh token via REST API
   /// Useful when WebSocket is unavailable
   Future<void> refreshTokenViaRestApi() async {

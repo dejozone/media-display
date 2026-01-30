@@ -126,6 +126,11 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
   // Service health tracking
   final Map<String, ServiceHealthState> _serviceHealth = {};
 
+  // Track if we've already triggered Sonos discovery for the current Speaker device
+  // Reset when device changes or when Sonos data is received
+  String? _lastSpeakerDeviceName;
+  bool _sonosDiscoveryTriggered = false;
+
   EnvConfig get _config => ref.read(envConfigProvider);
 
   @override
@@ -648,6 +653,19 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       }
     }
 
+    // Check if Spotify data is coming from a Speaker device (likely Sonos)
+    // This helps handle cases where the Sonos server has wrong coordinator
+    // by triggering Sonos re-discovery when we detect playback on a Speaker device
+    if (provider == 'spotify' && device != null) {
+      _checkForSpeakerDevice(device, isPlaying);
+    }
+
+    // If we received data from Sonos, reset the Speaker detection state
+    // This means Sonos discovery was successful
+    if (provider == 'sonos') {
+      _resetSpeakerDetectionState();
+    }
+
     // Update state with new data
     state = state.copyWith(
       isPlaying: isPlaying,
@@ -669,6 +687,69 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
     // Report success to priority manager
     ref.read(servicePriorityProvider.notifier).reportSuccess(source);
+  }
+
+  /// Check if Spotify is playing on a Speaker device (likely Sonos)
+  /// and trigger Sonos re-discovery if needed
+  void _checkForSpeakerDevice(Map<String, dynamic> device, bool isPlaying) {
+    final deviceType = device['type'] as String?;
+    final deviceName = device['name'] as String?;
+
+    // Only process Speaker devices (Sonos groups appear as "Speaker" in Spotify API)
+    if (deviceType != 'Speaker') {
+      // Not a Speaker device - reset detection state if device changed
+      if (_lastSpeakerDeviceName != null) {
+        _log(
+            '[Orchestrator] Device changed from Speaker to $deviceType - resetting Sonos discovery state');
+        _resetSpeakerDetectionState();
+      }
+      return;
+    }
+
+    // Check if this is a new Speaker device or same device we already triggered for
+    if (deviceName == _lastSpeakerDeviceName && _sonosDiscoveryTriggered) {
+      // Already triggered discovery for this device, skip
+      return;
+    }
+
+    // Check if Sonos is enabled in user settings
+    final priority = ref.read(servicePriorityProvider);
+    final sonosEnabled =
+        priority.enabledServices.contains(ServiceType.localSonos);
+
+    if (!sonosEnabled) {
+      _log(
+          '[Orchestrator] Spotify playing on Speaker "$deviceName" but Sonos is disabled - skipping discovery');
+      return;
+    }
+
+    // Only trigger if music is playing
+    if (!isPlaying) {
+      return;
+    }
+
+    _log(
+        '[Orchestrator] Spotify playing on Speaker "$deviceName" - triggering Sonos re-discovery');
+    _lastSpeakerDeviceName = deviceName;
+    _sonosDiscoveryTriggered = true;
+
+    // Send config with sonos=true to trigger Sonos discovery
+    _triggerSonosDiscovery();
+  }
+
+  /// Reset the Speaker device detection state
+  void _resetSpeakerDetectionState() {
+    if (_lastSpeakerDeviceName != null || _sonosDiscoveryTriggered) {
+      _log('[Orchestrator] Resetting Sonos discovery state');
+    }
+    _lastSpeakerDeviceName = null;
+    _sonosDiscoveryTriggered = false;
+  }
+
+  /// Trigger Sonos discovery by sending config with enabled.sonos=true
+  void _triggerSonosDiscovery() {
+    final ws = ref.read(eventsWsProvider.notifier);
+    ws.triggerSonosDiscovery();
   }
 
   /// Handle service status messages from WebSocket backend
