@@ -27,6 +27,7 @@ class _HomePageState extends ConsumerState<HomePage>
     with WidgetsBindingObserver {
   Map<String, dynamic>? user;
   Map<String, dynamic>? settings;
+  List<Map<String, dynamic>> identities = [];
   String? error;
   bool loading = true;
   bool savingSettings = false;
@@ -94,12 +95,14 @@ class _HomePageState extends ConsumerState<HomePage>
       final me = await ref.read(userServiceProvider).fetchMe();
       final userId = me['id']?.toString() ?? '';
       if (userId.isEmpty) throw Exception('User ID not found');
-      final s =
-          await ref.read(settingsServiceProvider).fetchSettingsForUser(userId);
+      final settingsService = ref.read(settingsServiceProvider);
+      final s = await settingsService.fetchSettingsForUser(userId);
+      final idents = settingsService.cachedIdentities;
       if (!mounted) return;
       setState(() {
         user = me;
         settings = s;
+        identities = idents;
       });
     } catch (e) {
       if (!mounted) return;
@@ -121,11 +124,17 @@ class _HomePageState extends ConsumerState<HomePage>
       error = null;
     });
     try {
-      final next = await ref
-          .read(settingsServiceProvider)
-          .updateSettingsForUser(userId, partial);
+      final settingsService = ref.read(settingsServiceProvider);
+      await settingsService.updateSettingsForUser(userId, partial);
+      // Fetch fresh settings (and identities) to ensure state reflects any
+      // provider link changes after toggling services.
+      final next = await settingsService.fetchSettingsForUser(userId,
+          forceRefresh: true);
       if (!mounted) return;
-      setState(() => settings = next);
+      setState(() {
+        settings = next;
+        identities = settingsService.cachedIdentities;
+      });
 
       // Update the orchestrator with new service settings
       // The orchestrator will handle activating services and sending config to WebSocket
@@ -157,6 +166,11 @@ class _HomePageState extends ConsumerState<HomePage>
   }
 
   bool _hasSpotifyIdentity() {
+    for (final identity in identities) {
+      final provider = identity['provider']?.toString().toLowerCase();
+      if (provider == 'spotify') return true;
+    }
+
     final identitiesRaw = user?['provider_avatar_list'];
     if (identitiesRaw is List) {
       for (final entry in identitiesRaw) {
@@ -170,6 +184,36 @@ class _HomePageState extends ConsumerState<HomePage>
   }
 
   Future<void> _handleSpotifyToggle(bool enable) async {
+    // When enabling, refresh identities to avoid stale cache after service removal
+    // (e.g., disabled on Account page) so we correctly prompt for OAuth.
+    if (enable) {
+      final userId = user?['id']?.toString() ?? '';
+      if (userId.isNotEmpty) {
+        try {
+          final settingsService = ref.read(settingsServiceProvider);
+          await settingsService.fetchSettingsForUser(userId,
+              forceRefresh: true);
+          if (mounted) {
+            setState(() {
+              identities = settingsService.cachedIdentities;
+            });
+          }
+          // Also refresh the user payload so any provider avatar list reflects
+          // the latest identities; stale user cache could otherwise mask the
+          // need to prompt for Spotify auth.
+          final freshUser =
+              await ref.read(userServiceProvider).fetchMe(forceRefresh: true);
+          if (mounted) {
+            setState(() {
+              user = freshUser;
+            });
+          }
+        } catch (_) {
+          // Ignore refresh failures here; we fall back to existing identities.
+        }
+      }
+    }
+
     if (enable && !_hasSpotifyIdentity()) {
       // Require OAuth linking first.
       setState(() {

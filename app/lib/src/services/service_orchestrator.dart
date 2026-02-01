@@ -130,6 +130,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
   // Reset when device changes or when Sonos data is received
   String? _lastSpeakerDeviceName;
   bool _sonosDiscoveryTriggered = false;
+  DateTime? _lastSonosDiscoveryAt;
 
   EnvConfig get _config => ref.read(envConfigProvider);
 
@@ -577,11 +578,22 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
         // If Sonos starts playing but we're on a different service, switch to Sonos
         if (isFromDifferentService &&
             effectiveService == ServiceType.localSonos) {
-          _log(
-              '[Orchestrator] Sonos started playing while on $currentService - switching to Sonos');
-          ref
-              .read(servicePriorityProvider.notifier)
-              .switchToService(effectiveService);
+          final priority = ref.read(servicePriorityProvider);
+          final shouldSwitchToSonos = _isHigherPriority(
+            candidate: effectiveService,
+            current: currentService,
+            order: priority.configuredOrder,
+          );
+          if (shouldSwitchToSonos) {
+            _log(
+                '[Orchestrator] Sonos started playing while on $currentService - switching to Sonos');
+            ref
+                .read(servicePriorityProvider.notifier)
+                .switchToService(effectiveService);
+          } else {
+            _log(
+                '[Orchestrator] Sonos playing but keeping $currentService (higher priority)');
+          }
         }
 
         // Only reset cycling state if this IS the primary service we're waiting for
@@ -597,11 +609,22 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
         // Sonos is paused with valid track info, and current service is also not playing
         // This means user switched their playback device to Sonos (even while paused)
         // Switch to show Sonos data
-        _log(
-            '[Orchestrator] Sonos has track data while $currentService is not playing - switching to Sonos');
-        ref
-            .read(servicePriorityProvider.notifier)
-            .switchToService(effectiveService);
+        final priority = ref.read(servicePriorityProvider);
+        final shouldSwitchToSonos = _isHigherPriority(
+          candidate: effectiveService,
+          current: currentService,
+          order: priority.configuredOrder,
+        );
+        if (shouldSwitchToSonos) {
+          _log(
+              '[Orchestrator] Sonos has track data while $currentService is not playing - switching to Sonos');
+          ref
+              .read(servicePriorityProvider.notifier)
+              .switchToService(effectiveService);
+        } else {
+          _log(
+              '[Orchestrator] Sonos track data but keeping $currentService (higher priority)');
+        }
       } else if (_config.enableServiceCycling && !isFromDifferentService) {
         // Not playing - check if we should cycle based on status
         // Only handle cycling logic for the CURRENT service, not background services
@@ -689,6 +712,19 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     ref.read(servicePriorityProvider.notifier).reportSuccess(source);
   }
 
+  bool _isHigherPriority({
+    required ServiceType candidate,
+    required ServiceType? current,
+    required List<ServiceType> order,
+  }) {
+    if (current == null) return true;
+    final candidateIdx = order.indexOf(candidate);
+    final currentIdx = order.indexOf(current);
+    if (candidateIdx == -1) return false;
+    if (currentIdx == -1) return true;
+    return candidateIdx < currentIdx;
+  }
+
   /// Check if Spotify is playing on a Speaker device (likely Sonos)
   /// and trigger Sonos re-discovery if needed
   void _checkForSpeakerDevice(Map<String, dynamic> device, bool isPlaying) {
@@ -718,8 +754,8 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
         priority.enabledServices.contains(ServiceType.localSonos);
 
     if (!sonosEnabled) {
-      _log(
-          '[Orchestrator] Spotify playing on Speaker "$deviceName" but Sonos is disabled - skipping discovery');
+      // _log(
+      //     '[Orchestrator] Spotify playing on Speaker "$deviceName" but Sonos is disabled - skipping discovery');
       return;
     }
 
@@ -728,10 +764,17 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       return;
     }
 
-    _log(
-        '[Orchestrator] Spotify playing on Speaker "$deviceName" - triggering Sonos re-discovery');
+    // Throttle discovery to avoid loops when staying on higher-priority Spotify
+    final now = DateTime.now();
+    if (_lastSonosDiscoveryAt != null &&
+        now.difference(_lastSonosDiscoveryAt!).inSeconds < 30) {
+      _log('[Orchestrator] Skipping Sonos discovery (cooldown active)');
+      return;
+    }
+
     _lastSpeakerDeviceName = deviceName;
     _sonosDiscoveryTriggered = true;
+    _lastSonosDiscoveryAt = now;
 
     // Send config with sonos=true to trigger Sonos discovery
     _triggerSonosDiscovery();
@@ -739,9 +782,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
   /// Reset the Speaker device detection state
   void _resetSpeakerDetectionState() {
-    if (_lastSpeakerDeviceName != null || _sonosDiscoveryTriggered) {
-      _log('[Orchestrator] Resetting Sonos discovery state');
-    }
+    // Avoid noisy resets that re-trigger discovery loops when Spotify stays active
     _lastSpeakerDeviceName = null;
     _sonosDiscoveryTriggered = false;
   }

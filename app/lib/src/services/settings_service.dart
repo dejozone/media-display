@@ -13,6 +13,12 @@ class SettingsService {
 
   Map<String, dynamic>? _cachedSettings;
   Future<Map<String, dynamic>>? _inflightFetch;
+  List<Map<String, dynamic>>? _cachedIdentities;
+
+  /// Last identities payload returned alongside settings.
+  /// Empty when not yet fetched or when API does not return identities.
+  List<Map<String, dynamic>> get cachedIdentities =>
+      _cachedIdentities ?? const [];
 
   Future<Map<String, dynamic>> fetchSettingsForUser(String userId,
       {bool forceRefresh = false}) async {
@@ -35,6 +41,9 @@ class SettingsService {
       String userId, Map<String, dynamic> partial) async {
     final updated = await _updateSettingsRemoteForUser(userId, partial);
     _cachedSettings = updated;
+    // Force next fetch to refresh identities because update response typically
+    // does not include them and they may have changed (e.g., Spotify removed).
+    _cachedIdentities = null;
     _inflightFetch = null;
     return updated;
   }
@@ -43,7 +52,30 @@ class SettingsService {
       String userId) async {
     final res =
         await _dio.get<Map<String, dynamic>>('/api/users/$userId/settings');
-    return res.data?['settings'] as Map<String, dynamic>? ?? {};
+    final data = res.data ?? {};
+
+    // Capture identities when present so other parts of the app can know
+    // which providers are already linked.
+    final identitiesRaw = data['identities'];
+    if (identitiesRaw is List) {
+      _cachedIdentities = identitiesRaw
+          .whereType<Map>()
+          .map((entry) => entry.map((k, v) => MapEntry(k.toString(), v)))
+          .toList();
+    }
+
+    return data['settings'] as Map<String, dynamic>? ?? {};
+  }
+
+  /// Prime the local caches with data fetched elsewhere to avoid extra
+  /// network calls (e.g., when Account page already retrieved settings).
+  void primeCache({
+    required Map<String, dynamic> settings,
+    List<Map<String, dynamic>>? identities,
+  }) {
+    _cachedSettings = settings;
+    _cachedIdentities = identities;
+    _inflightFetch = null;
   }
 
   Future<Map<String, dynamic>> _updateSettingsRemoteForUser(
@@ -51,6 +83,17 @@ class SettingsService {
     final res = await _dio.put<Map<String, dynamic>>(
         '/api/users/$userId/settings',
         data: partial);
-    return res.data?['settings'] as Map<String, dynamic>? ?? {};
+    final data = res.data ?? {};
+
+    // Capture identities if the API returns them on update.
+    final identitiesRaw = data['identities'];
+    if (identitiesRaw is List) {
+      _cachedIdentities = identitiesRaw
+          .whereType<Map>()
+          .map((entry) => entry.map((k, v) => MapEntry(k.toString(), v)))
+          .toList();
+    }
+
+    return data['settings'] as Map<String, dynamic>? ?? {};
   }
 }

@@ -70,6 +70,9 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   bool _wsTokenReceived =
       false; // Track if WS has sent a token (prefer WS over REST)
   bool _lastSpotifyEnabled = false; // Track previous Spotify enabled state
+  Map<String, dynamic>? _lastConfigSent; // Last config payload sent to server
+  String? _lastConfigJson;
+  DateTime? _lastConfigSentAt;
 
   /// Callback for service status updates (set by orchestrator)
   ServiceStatusCallback? onServiceStatus;
@@ -417,12 +420,30 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     }
   }
 
+  /// Send a minimal config payload to disable Spotify only.
+  /// This is used when the user removes Spotify from the account settings page
+  /// and we need to stop server-side polling immediately without touching Sonos
+  /// settings.
+  Future<void> sendSpotifyDisableOnly() async {
+    if (_channel == null) {
+      _log('[WS] Cannot send Spotify disable config - no channel');
+      return;
+    }
+
+    final payload = {
+      'type': 'config',
+      'enabled': {
+        'spotify': false,
+      },
+    };
+
+    await _sendConfigPayload(payload, logLabel: 'minimal Spotify disable');
+  }
+
   /// Send config to disable all services on the server
   /// Called when user disables all services
   Future<void> sendDisableAllConfig() async {
-    _log('[WS] Sending disable all config');
-
-    final payload = jsonEncode({
+    final payload = {
       'type': 'config',
       'need_spotify_token': false, // Explicitly cancel token refresh task
       'enabled': {
@@ -433,19 +454,9 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
         'spotify': null,
         'sonos': null,
       },
-    });
+    };
 
-    if (_channel == null) {
-      _log('[WS] No channel to send disable config - already disconnected');
-      return;
-    }
-
-    try {
-      _channel?.sink.add(payload);
-      _log('[WS] Disable all config sent');
-    } catch (e) {
-      _log('[WS] Error sending disable all config: $e');
-    }
+    await _sendConfigPayload(payload, logLabel: 'disable all');
   }
 
   /// Send config based purely on user settings (no active client-side service)
@@ -454,6 +465,15 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   /// active for those services so they can recover.
   Future<void> sendConfigForUserSettings() async {
     try {
+      // If a direct Spotify service is currently active, defer to the
+      // service-specific config to avoid re-enabling backend Spotify polling
+      // while the client is handling playback directly.
+      final priority = ref.read(servicePriorityProvider);
+      if (priority.currentService == ServiceType.directSpotify) {
+        await sendConfigForService(ServiceType.directSpotify);
+        return;
+      }
+
       final env = ref.read(envConfigProvider);
 
       // Get poll intervals from settings or defaults
@@ -477,9 +497,19 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       final userSpotifyEnabled = settings?['spotify_enabled'] == true;
       final userSonosEnabled = settings?['sonos_enabled'] == true;
 
-      // If both are disabled, delegate to sendDisableAllConfig
+      // If both are disabled, delegate to sendDisableAllConfig unless we just
+      // sent an equivalent disable payload very recently (to avoid duplicates
+      // when orchestrator falls back after a targeted disable message).
       if (!userSpotifyEnabled && !userSonosEnabled) {
-        await sendDisableAllConfig();
+        final recentlySentDisable = _isDisableConfig(_lastConfigSent) &&
+            _lastConfigSentAt != null &&
+            DateTime.now().difference(_lastConfigSentAt!) <=
+                const Duration(seconds: 2);
+        if (!recentlySentDisable) {
+          await sendDisableAllConfig();
+        } else {
+          _log('[WS] Suppressing duplicate disable-all config');
+        }
         return;
       }
 
@@ -507,7 +537,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
           'enabled=(spotify=$userSpotifyEnabled, sonos=$userSonosEnabled), '
           'needToken=$needToken');
 
-      final payload = jsonEncode({
+      final payload = {
         'type': 'config',
         'need_spotify_token': needToken,
         'enabled': {
@@ -518,7 +548,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
           'spotify': spotifyPoll,
           'sonos': sonosPoll,
         },
-      });
+      };
 
       // If no channel, try to connect first
       if (_channel == null) {
@@ -527,14 +557,15 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
         await _connect(auth,
             caller: 'sendConfigForUserSettings', skipSendConfig: true);
         if (_channel != null) {
-          _channel?.sink.add(payload);
+          await _sendConfigPayload(payload,
+              logLabel: 'user settings (post-connect)');
           _initialConfigSent = true;
         }
         return;
       }
 
       _initialConfigSent = true;
-      _channel?.sink.add(payload);
+      await _sendConfigPayload(payload, logLabel: 'user settings');
     } catch (e) {
       _log('[WS] sendConfigForUserSettings error: $e');
     }
@@ -633,7 +664,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
 
       // Always include need_spotify_token to explicitly tell server what to do
       // true = emit tokens for direct polling, false = cancel token refresh task
-      final payload = jsonEncode({
+      final payload = {
         'type': 'config',
         'need_spotify_token': needToken,
         'enabled': {
@@ -644,7 +675,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
           'spotify': spotifyPoll,
           'sonos': sonosPoll, // null = let server decide
         },
-      });
+      };
 
       // If no channel, try to connect first
       if (_channel == null) {
@@ -655,7 +686,8 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
             caller: 'sendConfigForService', skipSendConfig: true);
         // After connect, send the specific config for this service
         if (_channel != null) {
-          _channel?.sink.add(payload);
+          await _sendConfigPayload(payload,
+              logLabel: 'service config (post-connect)');
           _initialConfigSent = true;
         }
         return;
@@ -665,7 +697,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       _initialConfigSent = true;
 
       // Send the config
-      _channel?.sink.add(payload);
+      await _sendConfigPayload(payload, logLabel: 'service config');
     } catch (e) {
       _log('[WS] sendConfigForService error: $e');
     }
@@ -725,13 +757,21 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       final userSpotifyEnabled = settings?['spotify_enabled'] == true;
       final needToken = userSpotifyEnabled;
 
+      // When direct Spotify is active, keep backend spotify disabled to avoid
+      // starting server polling; we only need Sonos discovery.
+      final priority = ref.read(servicePriorityProvider);
+      final spotifyEnabledForPayload =
+          priority.currentService == ServiceType.directSpotify
+              ? false
+              : userSpotifyEnabled;
+
       _log('[WS] triggerSonosDiscovery: Sending config with sonos=true');
 
       final payload = jsonEncode({
         'type': 'config',
         'need_spotify_token': needToken,
         'enabled': {
-          'spotify': userSpotifyEnabled,
+          'spotify': spotifyEnabledForPayload,
           'sonos': true, // Force sonos enabled to trigger discovery
         },
         'poll': {
@@ -902,7 +942,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       final backendSonosEnabled = sonosEnabled &&
           (directMode == SpotifyPollingMode.fallback || !spotifyEnabled);
 
-      final payload = jsonEncode({
+      final payload = {
         'type': 'config',
         if (needToken) 'need_spotify_token': true,
         'enabled': {
@@ -913,7 +953,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
           'spotify': spotifyPoll,
           'sonos': sonosPoll,
         },
-      });
+      };
 
       // If we currently have no socket (e.g., after navigation or a tab opened), establish it first.
       if (!hasService) {
@@ -955,7 +995,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
 
       // Channel exists - send the config (even if not yet "connected" state-wise,
       // the channel is ready after awaiting channel.ready in _connect)
-      _channel?.sink.add(payload);
+      await _sendConfigPayload(payload, logLabel: 'legacy config');
 
       // Start direct polling if we have a valid token and Spotify is enabled
       if (spotifyEnabled && hasValidToken) {
@@ -967,6 +1007,43 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     } catch (_) {
       // best-effort
     }
+  }
+
+  /// Send a config payload if it's not identical to the last one sent.
+  Future<void> _sendConfigPayload(Map<String, dynamic> payload,
+      {required String logLabel}) async {
+    try {
+      final payloadJson = jsonEncode(payload);
+
+      if (payloadJson == _lastConfigJson) {
+        _log('[WS] Suppressing duplicate config: $logLabel');
+        return;
+      }
+
+      if (_channel == null) {
+        _log('[WS] No channel to send $logLabel config');
+        return;
+      }
+
+      _channel?.sink.add(payloadJson);
+      _lastConfigSent = payload;
+      _lastConfigJson = payloadJson;
+      _lastConfigSentAt = DateTime.now();
+      _log('[WS] Config sent: $logLabel');
+    } catch (e) {
+      _log('[WS] Error sending $logLabel config: $e');
+    }
+  }
+
+  bool _isDisableConfig(Map<String, dynamic>? payload) {
+    if (payload == null) return false;
+    if (payload['type'] != 'config') return false;
+    final enabled = payload['enabled'];
+    if (enabled is! Map) return false;
+    final spotifyDisabled = enabled['spotify'] == false;
+    final sonosDisabled =
+        enabled['sonos'] == false || !enabled.containsKey('sonos');
+    return spotifyDisabled && sonosDisabled;
   }
 
   bool _servicesEnabled(Map<String, dynamic>? settings) {

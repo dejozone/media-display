@@ -13,10 +13,14 @@ import 'package:media_display/src/services/account_service.dart';
 import 'package:media_display/src/services/auth_state.dart';
 import 'package:media_display/src/services/auth_service.dart';
 import 'package:media_display/src/services/avatar_service.dart';
+import 'package:media_display/src/services/events_ws_service.dart';
+import 'package:media_display/src/services/service_orchestrator.dart';
+import 'package:media_display/src/services/spotify_direct_service.dart';
 import 'package:media_display/src/services/settings_service.dart';
 import 'package:media_display/src/models/avatar.dart';
 import 'package:media_display/src/config/env.dart';
 import 'package:media_display/src/widgets/app_header.dart';
+import 'package:media_display/src/widgets/focusable_circle_button.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class AccountSettingsPage extends ConsumerStatefulWidget {
@@ -30,6 +34,7 @@ class AccountSettingsPage extends ConsumerStatefulWidget {
 class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
   Map<String, dynamic>? user;
   Map<String, dynamic>? settings;
+  List<Map<String, dynamic>> identities = [];
   bool loading = true;
   bool saving = false;
   bool showCropper = false;
@@ -73,7 +78,11 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
       final s = await service.fetchSettings(userId);
       if (!mounted) return;
       user = acc;
-      settings = s;
+      settings = s['settings'] as Map<String, dynamic>? ?? {};
+      identities = (s['identities'] as List<dynamic>? ?? const [])
+          .whereType<Map>()
+          .map((entry) => entry.map((k, v) => MapEntry(k.toString(), v)))
+          .toList();
       _emailController.text = acc['email']?.toString() ?? '';
       _usernameController.text = acc['username']?.toString() ?? '';
       _displayNameController.text = acc['display_name']?.toString() ?? '';
@@ -94,6 +103,17 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
           .toList();
     }
     return const [];
+  }
+
+  bool _hasSpotifyIdentity() {
+    for (final identity in identities) {
+      final provider = identity['provider']?.toString().toLowerCase();
+      if (provider == 'spotify') return true;
+    }
+
+    // Fallback to avatars on the user payload for backward compatibility
+    return _providerAvatarList(user)
+        .any((e) => (e['provider']?.toString().toLowerCase() == 'spotify'));
   }
 
   Future<void> _saveProfile() async {
@@ -133,12 +153,21 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
 
   Future<void> _toggleService(String serviceKey, bool enable) async {
     if (user == null || user?['id'] == null) return;
+    final isSpotifyDisable = serviceKey == 'spotify' && !enable;
+
     setState(() {
       saving = true;
       error = null;
       success = null;
     });
     try {
+      // For Spotify disable, immediately stop client activity and tell the WS
+      // before calling the REST API to prevent stale playback updates.
+      if (isSpotifyDisable) {
+        await ref.read(eventsWsProvider.notifier).sendSpotifyDisableOnly();
+        ref.read(spotifyDirectProvider.notifier).stopPolling();
+      }
+
       final service = ref.read(accountServiceProvider);
       final userId = user!['id'].toString();
       final updated = await service.updateService(
@@ -147,15 +176,40 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
         enable: enable,
       );
       final newSettings = await service.fetchSettings(userId);
+      final settingsMap =
+          newSettings['settings'] as Map<String, dynamic>? ?? {};
+      final identitiesList =
+          (newSettings['identities'] as List<dynamic>? ?? const [])
+              .whereType<Map>()
+              .map((entry) => entry.map((k, v) => MapEntry(k.toString(), v)))
+              .toList();
 
-      // Update the global settings cache so home page stays in sync
+      // Prime the global settings cache with the freshly fetched data to keep
+      // Home in sync without an extra network call.
       final settingsService = ref.read(settingsServiceProvider);
-      await settingsService.fetchSettingsForUser(userId, forceRefresh: true);
+      settingsService.primeCache(
+        settings: settingsMap,
+        identities: identitiesList,
+      );
 
       if (!mounted) return;
       user = updated.isNotEmpty ? updated : user;
-      settings = newSettings;
+      settings = settingsMap;
+      identities = identitiesList;
       success = enable ? 'Enabled $serviceKey' : 'Disabled $serviceKey';
+
+      // Push latest settings to orchestrator + WS cache so service priority
+      // and configs react immediately to disabled Spotify.
+      final updatedSettingsMap = settings ?? <String, dynamic>{};
+      final spotifyEnabled = updatedSettingsMap['spotify_enabled'] == true;
+      final sonosEnabled = updatedSettingsMap['sonos_enabled'] == true;
+      ref
+          .read(eventsWsProvider.notifier)
+          .updateCachedSettings(updatedSettingsMap);
+      ref.read(serviceOrchestratorProvider.notifier).updateServicesEnabled(
+            spotifyEnabled: spotifyEnabled,
+            sonosEnabled: sonosEnabled,
+          );
     } catch (e) {
       if (!mounted) return;
       error = e.toString();
@@ -199,8 +253,7 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
   }
 
   Future<void> _handleSpotifyToggle(bool enable) async {
-    final hasIdentity = _providerAvatarList(user)
-        .any((e) => (e['provider']?.toString().toLowerCase() == 'spotify'));
+    final hasIdentity = _hasSpotifyIdentity();
     if (enable && !hasIdentity) {
       await _startSpotifyEnable();
       return;
@@ -213,16 +266,6 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
     }
 
     await _toggleService('spotify', enable);
-  }
-
-  Future<void> _handleSonosToggle(bool enable) async {
-    // Show confirmation dialog when disabling
-    if (!enable) {
-      final confirmed = await _showDisableServiceDialog('Sonos');
-      if (confirmed != true) return;
-    }
-
-    await _toggleService('sonos', enable);
   }
 
   Future<bool?> _showDisableServiceDialog(String serviceName) async {
@@ -305,9 +348,7 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
           DirectionalFocusIntent(TraversalDirection.up),
     };
 
-    final spotifyLinked = _providerAvatarList(user)
-        .any((e) => (e['provider']?.toString().toLowerCase() == 'spotify'));
-    final sonosEnabled = settings?['sonos_enabled'] == true;
+    final spotifyLinked = _hasSpotifyIdentity();
 
     return Shortcuts(
       shortcuts: traversalShortcuts,
@@ -412,7 +453,7 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Text('Services',
+                                  const Text('Service Providers',
                                       style: TextStyle(
                                           fontSize: 18,
                                           fontWeight: FontWeight.w700)),
@@ -420,16 +461,9 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
                                   _serviceToggle(
                                     label: 'Spotify',
                                     value: spotifyLinked,
-                                    onChanged: (saving || launchingSpotify)
+                                    onToggle: (saving || launchingSpotify)
                                         ? null
                                         : _handleSpotifyToggle,
-                                  ),
-                                  const SizedBox(height: 10),
-                                  _serviceToggle(
-                                    label: 'Sonos',
-                                    value: sonosEnabled,
-                                    onChanged:
-                                        saving ? null : _handleSonosToggle,
                                   ),
                                 ],
                               ),
@@ -524,7 +558,7 @@ Widget _field(String label, TextEditingController controller) {
 Widget _serviceToggle(
     {required String label,
     required bool value,
-    required ValueChanged<bool>? onChanged}) {
+    required ValueChanged<bool>? onToggle}) {
   return FocusTraversalOrder(
     order: const NumericFocusOrder(2.0),
     child: Row(
@@ -543,21 +577,20 @@ Widget _serviceToggle(
                 FocusScope.of(node.context!).previousFocus();
                 return KeyEventResult.handled;
               }
-              if (onChanged != null &&
+              if (onToggle != null &&
                   (event.logicalKey == LogicalKeyboardKey.enter ||
                       event.logicalKey == LogicalKeyboardKey.select ||
                       event.logicalKey == LogicalKeyboardKey.space)) {
-                onChanged(!value);
+                onToggle(!value);
                 return KeyEventResult.handled;
               }
             }
             return KeyEventResult.ignored;
           },
-          child: Switch(
-            value: value,
-            onChanged: onChanged,
-            activeThumbColor: const Color(0xFF5AC8FA),
-            activeTrackColor: const Color(0xFF5AC8FA).withValues(alpha: 0.35),
+          child: FocusableCircleButton(
+            tooltip: value ? 'Remove $label' : 'Add $label',
+            onPressed: onToggle == null ? null : () => onToggle(!value),
+            child: Icon(value ? Icons.remove : Icons.add),
           ),
         ),
       ],

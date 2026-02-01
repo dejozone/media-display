@@ -250,12 +250,11 @@ def get_settings(user_id: str):
     
     settings = auth_manager.get_dashboard_settings(g.user_id) or {}
     identities = auth_manager.get_identities(g.user_id) or []
-    account = auth_manager.get_account_payload(g.user_id)
 
     return jsonify({
         'settings': settings,
-        'user': account,
         'identities': identities,
+        
     })
 
 
