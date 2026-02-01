@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_display/src/services/avatar_service.dart';
+import 'package:media_display/src/widgets/focusable_circle_button.dart';
 
 class AppHeader extends ConsumerWidget {
   const AppHeader({
@@ -54,65 +55,35 @@ class AppHeader extends ConsumerWidget {
         const Spacer(),
         const SizedBox(width: 8),
         if (onHome != null)
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: const Color(0xFF1A2333),
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-            ),
-            child: IconButton(
-              tooltip: 'Home',
-              onPressed: onHome,
-              icon: const Icon(Icons.home_outlined),
-            ),
+          FocusableCircleButton(
+            tooltip: 'Home',
+            onPressed: onHome,
+            child: const Icon(Icons.home_outlined),
           ),
         if (onLogout != null) ...[
           const SizedBox(width: 8),
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: const Color(0xFF1A2333),
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-            ),
-            child: IconButton(
-              tooltip: 'Logout',
-              onPressed: onLogout,
-              icon: const Icon(Icons.logout),
-            ),
+          FocusableCircleButton(
+            tooltip: 'Logout',
+            onPressed: onLogout,
+            child: const Icon(Icons.logout),
           ),
         ],
         const SizedBox(width: 8),
-        Tooltip(
-          message: displayName,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(24),
-            onTap: onAccount,
-            child: Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                color: const Color(0xFF1A2333),
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-              ),
-              child: Center(
-                child: CircleAvatar(
-                  radius: 16,
-                  backgroundColor: const Color(0xFF1F2A44),
-                  backgroundImage:
-                      avatarUrl.isNotEmpty ? NetworkImage(avatarUrl) : null,
-                  child: avatarUrl.isEmpty
-                      ? Text(initials,
-                          style: const TextStyle(
-                              color: Color(0xFFC2CADC),
-                              fontWeight: FontWeight.w700))
-                      : null,
-                ),
-              ),
+        FocusableCircleButton(
+          tooltip: displayName,
+          onPressed: onAccount,
+          child: ExcludeFocus(
+            child: CircleAvatar(
+              radius: 16,
+              backgroundColor: const Color(0xFF1F2A44),
+              backgroundImage:
+                  avatarUrl.isNotEmpty ? NetworkImage(avatarUrl) : null,
+              child: avatarUrl.isEmpty
+                  ? Text(initials,
+                      style: const TextStyle(
+                          color: Color(0xFFC2CADC),
+                          fontWeight: FontWeight.w700))
+                  : null,
             ),
           ),
         ),

@@ -19,7 +19,12 @@ class AccountService {
   Future<Map<String, dynamic>> fetchSettings(String userId) async {
     final res =
         await _dio.get<Map<String, dynamic>>('/api/users/$userId/settings');
-    return res.data?['settings'] as Map<String, dynamic>? ?? {};
+    final data = res.data ?? {};
+    return {
+      'settings': data['settings'] as Map<String, dynamic>? ?? {},
+      'user': data['user'] as Map<String, dynamic>? ?? {},
+      'identities': data['identities'] as List<dynamic>? ?? const [],
+    };
   }
 
   Future<Map<String, dynamic>> updateAccount(

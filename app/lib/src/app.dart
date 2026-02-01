@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_display/src/config/env.dart';
 import 'package:media_display/src/routing/router.dart';
@@ -36,11 +37,23 @@ class MediaDisplayApp extends ConsumerWidget {
       routerConfig: router,
       debugShowCheckedModeBanner: false,
       builder: (context, child) {
-        return Banner(
-          message: env.flavor,
-          location: BannerLocation.topStart,
-          color: Colors.indigo,
-          child: child ?? const SizedBox.shrink(),
+        return Shortcuts(
+          shortcuts: <LogicalKeySet, Intent>{
+            LogicalKeySet(LogicalKeyboardKey.arrowLeft):
+                const DirectionalFocusIntent(TraversalDirection.left),
+            LogicalKeySet(LogicalKeyboardKey.arrowRight):
+                const DirectionalFocusIntent(TraversalDirection.right),
+            LogicalKeySet(LogicalKeyboardKey.arrowUp):
+                const DirectionalFocusIntent(TraversalDirection.up),
+            LogicalKeySet(LogicalKeyboardKey.arrowDown):
+                const DirectionalFocusIntent(TraversalDirection.down),
+          },
+          child: Banner(
+            message: env.flavor,
+            location: BannerLocation.topStart,
+            color: Colors.indigo,
+            child: child ?? const SizedBox.shrink(),
+          ),
         );
       },
     );

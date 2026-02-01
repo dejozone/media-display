@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:go_router/go_router.dart';
@@ -73,18 +74,28 @@ class _LoginPageState extends ConsumerState<LoginPage> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text('Media Display Login', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                  const Text('Media Display Login',
+                      style:
+                          TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 12),
                   Text('API: ${env.apiBaseUrl}'),
-                  const SizedBox(height: 16),
-                  ElevatedButton(
-                    onPressed: _loading ? null : () => _startLogin(auth.getGoogleAuthUrl),
-                    child: Text(_loading ? 'Redirecting…' : 'Login with Google'),
+                  const SizedBox(height: 12),
+                  _FocusableButton(
+                    onPressed: _loading
+                        ? null
+                        : () => _startLogin(auth.getGoogleAuthUrl),
+                        isOutlined: true,
+                    child:
+                        Text(_loading ? 'Redirecting…' : 'Login with Google'),
                   ),
                   const SizedBox(height: 12),
-                  OutlinedButton(
-                    onPressed: _loading ? null : () => _startLogin(auth.getSpotifyAuthUrl),
-                    child: Text(_loading ? 'Redirecting…' : 'Enable Spotify (login)'),
+                  _FocusableButton(
+                    onPressed: _loading
+                        ? null
+                        : () => _startLogin(auth.getSpotifyAuthUrl),
+                    isOutlined: true,
+                    child: Text(
+                        _loading ? 'Redirecting…' : 'Enable Spotify (login)'),
                   ),
                   if (_error != null) ...[
                     const SizedBox(height: 12),
@@ -94,6 +105,76 @@ class _LoginPageState extends ConsumerState<LoginPage> {
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FocusableButton extends StatefulWidget {
+  const _FocusableButton({
+    required this.child,
+    this.onPressed,
+    this.isOutlined = false,
+  });
+
+  final Widget child;
+  final VoidCallback? onPressed;
+  final bool isOutlined;
+
+  @override
+  State<_FocusableButton> createState() => _FocusableButtonState();
+}
+
+class _FocusableButtonState extends State<_FocusableButton> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent &&
+            widget.onPressed != null &&
+            (event.logicalKey == LogicalKeyboardKey.enter ||
+                event.logicalKey == LogicalKeyboardKey.select ||
+                event.logicalKey == LogicalKeyboardKey.space)) {
+          widget.onPressed!();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: FocusableActionDetector(
+        enabled: widget.onPressed != null,
+        onShowFocusHighlight: (focused) {
+          setState(() => _focused = focused);
+        },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: _focused ? const Color(0xFF5AC8FA) : Colors.transparent,
+              width: 2,
+            ),
+            boxShadow: _focused
+                ? [
+                    BoxShadow(
+                      color: const Color(0xFF5AC8FA).withOpacity(0.25),
+                      blurRadius: 8,
+                      spreadRadius: 1,
+                    ),
+                  ]
+                : null,
+          ),
+          child: widget.isOutlined
+              ? OutlinedButton(
+                  onPressed: widget.onPressed,
+                  child: widget.child,
+                )
+              : ElevatedButton(
+                  onPressed: widget.onPressed,
+                  child: widget.child,
+                ),
         ),
       ),
     );

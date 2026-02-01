@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:media_display/src/services/auth_service.dart';
@@ -207,6 +208,13 @@ class _HomePageState extends ConsumerState<HomePage>
 
   @override
   Widget build(BuildContext context) {
+    final traversalShortcuts = <ShortcutActivator, Intent>{
+      const SingleActivator(LogicalKeyboardKey.arrowDown):
+          const DirectionalFocusIntent(TraversalDirection.down),
+      const SingleActivator(LogicalKeyboardKey.arrowUp):
+          const DirectionalFocusIntent(TraversalDirection.up),
+    };
+
     // Watch unified playback state from orchestrator
     final unifiedState = ref.watch(serviceOrchestratorProvider);
 
@@ -223,7 +231,6 @@ class _HomePageState extends ConsumerState<HomePage>
     final ServiceType? activeService;
 
     if (unifiedState.hasData || unifiedState.isLoading) {
-      // Use orchestrator's unified state
       effectivePayload = unifiedState.track != null
           ? {
               'track': unifiedState.track,
@@ -236,14 +243,12 @@ class _HomePageState extends ConsumerState<HomePage>
       effectiveError = unifiedState.error;
       effectiveConnected = unifiedState.isConnected;
       activeService = unifiedState.activeService;
-      // Map ServiceType to SpotifyPollingMode for backward compatibility
       effectiveMode = activeService == ServiceType.directSpotify
           ? SpotifyPollingMode.direct
           : (activeService?.isCloudService == true
               ? SpotifyPollingMode.fallback
               : SpotifyPollingMode.idle);
     } else {
-      // Fall back to old logic during transition
       effectivePayload = directState.mode == SpotifyPollingMode.direct
           ? directState.payload
           : now.payload;
@@ -260,80 +265,97 @@ class _HomePageState extends ConsumerState<HomePage>
           : (now.connected ? ServiceType.cloudSpotify : null);
     }
 
-    final scaffold = Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              Color(0xFF0E1117),
-              Color(0xFF0D1021),
-            ],
-          ),
-        ),
-        child: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                AppHeader(
-                  user: user,
-                  title: 'Media Display',
-                  subtitle: 'Now Playing • Spotify & Sonos',
-                  onHome: () => context.go('/home'),
-                  onAccount: () => context.go('/account'),
-                  onLogout: () => _logout(context),
-                ),
-                const SizedBox(height: 18),
-                if (loading) ...[
-                  _glassCard(child: _skeletonLine(width: 180)),
-                  const SizedBox(height: 12),
-                  _glassCard(child: _skeletonLine(width: 220)),
-                  const SizedBox(height: 12),
-                  _glassCard(child: _skeletonNowPlaying()),
-                ] else ...[
-                  if (error != null)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: Text(error!,
-                          style: const TextStyle(color: Color(0xFFFF8C8C))),
-                    ),
-                  _glassCard(
-                    child: _UserSummary(user: user),
-                  ),
-                  const SizedBox(height: 14),
-                  _glassCard(
-                    child: _SettingsToggles(
-                      settings: settings,
-                      saving: savingSettings || launchingSpotify,
-                      onSpotifyChanged: _handleSpotifyToggle,
-                      onSonosChanged: _handleSonosToggle,
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  _glassCard(
-                    child: _NowPlayingSection(
-                      provider: effectiveProvider,
-                      payload: effectivePayload,
-                      error: effectiveError,
-                      connected: effectiveConnected,
-                      mode: effectiveMode,
-                      settings: settings,
-                      wsRetrying: now.wsRetrying,
-                      wsInCooldown: now.wsInCooldown,
-                      activeService: activeService,
-                    ),
-                  ),
+    return Shortcuts(
+      shortcuts: traversalShortcuts,
+      child: FocusTraversalGroup(
+        policy: WidgetOrderTraversalPolicy(),
+        child: Scaffold(
+          body: Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Color(0xFF0E1117),
+                  Color(0xFF0D1021),
                 ],
-              ],
+              ),
+            ),
+            child: SafeArea(
+              child: SingleChildScrollView(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    AppHeader(
+                      user: user,
+                      title: 'Media Display',
+                      subtitle: 'Now Playing • Spotify & Sonos',
+                      onHome: () => context.go('/home'),
+                      onAccount: () => context.go('/account'),
+                      onLogout: () => _logout(context),
+                    ),
+                    const SizedBox(height: 18),
+                    if (loading) ...[
+                      _glassCard(child: _skeletonLine(width: 180)),
+                      const SizedBox(height: 12),
+                      _glassCard(child: _skeletonLine(width: 220)),
+                      const SizedBox(height: 12),
+                      _glassCard(child: _skeletonNowPlaying()),
+                    ] else ...[
+                      if (error != null)
+                        _glassCard(
+                          child: Padding(
+                            padding: const EdgeInsets.all(8),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.error_outline,
+                                    color: Color(0xFFFF8C8C)),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                    child: Text(error!,
+                                        style: const TextStyle(
+                                            color: Color(0xFFFF8C8C)))),
+                              ],
+                            ),
+                          ),
+                        ),
+                      _glassCard(
+                        child: _UserSummary(user: user),
+                      ),
+                      const SizedBox(height: 14),
+                      _glassCard(
+                        child: _SettingsToggles(
+                          settings: settings,
+                          saving: savingSettings,
+                          onSpotifyChanged: _handleSpotifyToggle,
+                          onSonosChanged: _handleSonosToggle,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      _glassCard(
+                        child: _NowPlayingSection(
+                          provider: effectiveProvider,
+                          payload: effectivePayload,
+                          error: effectiveError,
+                          connected: effectiveConnected,
+                          mode: effectiveMode,
+                          settings: settings,
+                          wsRetrying: now.wsRetrying,
+                          wsInCooldown: now.wsInCooldown,
+                          activeService: activeService,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
             ),
           ),
         ),
       ),
     );
-    return scaffold;
   }
 }
 
@@ -940,11 +962,24 @@ Widget _toggleRow(
           ],
         ),
       ),
-      Switch(
-        value: value,
-        onChanged: onChanged,
-        activeThumbColor: const Color(0xFF5AC8FA),
-        activeTrackColor: const Color(0xFF5AC8FA).withValues(alpha: 0.35),
+      Focus(
+        onKeyEvent: (node, event) {
+          if (event is KeyDownEvent &&
+              onChanged != null &&
+              (event.logicalKey == LogicalKeyboardKey.enter ||
+                  event.logicalKey == LogicalKeyboardKey.select ||
+                  event.logicalKey == LogicalKeyboardKey.space)) {
+            onChanged(!value);
+            return KeyEventResult.handled;
+          }
+          return KeyEventResult.ignored;
+        },
+        child: Switch(
+          value: value,
+          onChanged: onChanged,
+          activeThumbColor: const Color(0xFF5AC8FA),
+          activeTrackColor: const Color(0xFF5AC8FA).withValues(alpha: 0.35),
+        ),
       ),
     ],
   );

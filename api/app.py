@@ -249,7 +249,14 @@ def get_settings(user_id: str):
         return jsonify({'error': 'Forbidden'}), 403
     
     settings = auth_manager.get_dashboard_settings(g.user_id) or {}
-    return jsonify({'settings': settings})
+    identities = auth_manager.get_identities(g.user_id) or []
+    account = auth_manager.get_account_payload(g.user_id)
+
+    return jsonify({
+        'settings': settings,
+        'user': account,
+        'identities': identities,
+    })
 
 
 @app.route('/api/users/<user_id>/settings', methods=['PUT', 'PATCH'])

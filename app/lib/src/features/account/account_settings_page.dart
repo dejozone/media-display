@@ -1,6 +1,8 @@
 import 'dart:io' show File;
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image/image.dart' as img;
@@ -36,15 +38,13 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
   String? error;
   String? success;
 
+  final CropController _cropController = CropController();
+  Uint8List? _pendingImageBytes;
+  Future<void> Function(Uint8List bytes)? _onChildCropped;
+
   final _emailController = TextEditingController();
   final _usernameController = TextEditingController();
   final _displayNameController = TextEditingController();
-
-  Uint8List? _pendingImageBytes;
-  final CropController _cropController = CropController();
-
-  // Callback for when child component crops an image
-  Future<void> Function(Uint8List)? _onChildCropped;
 
   @override
   void initState() {
@@ -298,146 +298,172 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final traversalShortcuts = <ShortcutActivator, Intent>{
+      SingleActivator(LogicalKeyboardKey.arrowDown):
+          DirectionalFocusIntent(TraversalDirection.down),
+      SingleActivator(LogicalKeyboardKey.arrowUp):
+          DirectionalFocusIntent(TraversalDirection.up),
+    };
+
     final spotifyLinked = _providerAvatarList(user)
         .any((e) => (e['provider']?.toString().toLowerCase() == 'spotify'));
     final sonosEnabled = settings?['sonos_enabled'] == true;
 
-    return Scaffold(
-      body: Stack(
-        children: [
-          Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [Color(0xFF0E1117), Color(0xFF0D1021)],
-              ),
-            ),
-            child: SafeArea(
-              child: SingleChildScrollView(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    AppHeader(
-                      user: user,
-                      title: 'Account',
-                      subtitle: 'Profile, avatar, and preferences',
-                      onHome: () => context.go('/home'),
-                      onAccount: () => context.go('/account'),
-                      onLogout: () async {
-                        await ref.read(authServiceProvider).logout();
-                        await ref.read(authStateProvider.notifier).clear();
-                        if (mounted) context.go('/login');
-                      },
-                    ),
-                    const SizedBox(height: 18),
-                    if (loading)
-                      _glassCard(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: const [
-                            _SkeletonLine(width: 180),
-                            SizedBox(height: 8),
-                            _SkeletonLine(width: 220),
-                            SizedBox(height: 12),
-                            _SkeletonLine(width: 140),
-                          ],
+    return Shortcuts(
+      shortcuts: traversalShortcuts,
+      child: FocusTraversalGroup(
+        policy: OrderedTraversalPolicy(),
+        child: Scaffold(
+          body: Stack(
+            children: [
+              Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [Color(0xFF0E1117), Color(0xFF0D1021)],
+                  ),
+                ),
+                child: SafeArea(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 20, vertical: 18),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        AppHeader(
+                          user: user,
+                          title: 'Account',
+                          subtitle: 'Profile, avatar, and preferences',
+                          onHome: () {
+                            context.go('/home');
+                          },
+                          onAccount: () => context.go('/account'),
+                          onLogout: () async {
+                            await ref.read(authServiceProvider).logout();
+                            await ref.read(authStateProvider.notifier).clear();
+                            if (mounted) context.go('/login');
+                          },
                         ),
-                      )
-                    else ...[
-                      if (error != null)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: Text(error!,
-                              style: const TextStyle(color: Color(0xFFFF8C8C))),
-                        ),
-                      if (success != null)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: Text(success!,
-                              style: const TextStyle(color: Color(0xFF9FB1D0))),
-                        ),
-                      _glassCard(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text('Profile',
-                                style: TextStyle(
-                                    fontSize: 18, fontWeight: FontWeight.w700)),
-                            const SizedBox(height: 12),
-                            _field('Email', _emailController),
-                            const SizedBox(height: 12),
-                            _field('Username', _usernameController),
-                            const SizedBox(height: 12),
-                            _field('Display Name', _displayNameController),
-                            const SizedBox(height: 14),
-                            Row(
-                              children: [
-                                ElevatedButton(
-                                  onPressed: saving ? null : _saveProfile,
-                                  child: Text(saving ? 'Saving…' : 'Save'),
-                                ),
-                                // const SizedBox(width: 10),
-                                // OutlinedButton(
-                                //   onPressed: loading ? null : _load,
-                                //   child: const Text('Reload'),
-                                // ),
+                        const SizedBox(height: 18),
+                        if (loading)
+                          _glassCard(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: const [
+                                _SkeletonLine(width: 180),
+                                SizedBox(height: 8),
+                                _SkeletonLine(width: 220),
+                                SizedBox(height: 12),
+                                _SkeletonLine(width: 140),
                               ],
                             ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      _glassCard(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text('Services',
-                                style: TextStyle(
-                                    fontSize: 18, fontWeight: FontWeight.w700)),
-                            const SizedBox(height: 10),
-                            _serviceToggle(
-                              label: 'Spotify',
-                              value: spotifyLinked,
-                              onChanged: (saving || launchingSpotify)
-                                  ? null
-                                  : _handleSpotifyToggle,
+                          )
+                        else ...[
+                          if (error != null)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: Text(error!,
+                                  style: const TextStyle(
+                                      color: Color(0xFFFF8C8C))),
                             ),
-                            const SizedBox(height: 10),
-                            _serviceToggle(
-                              label: 'Sonos',
-                              value: sonosEnabled,
-                              onChanged: saving ? null : _handleSonosToggle,
+                          if (success != null)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: Text(success!,
+                                  style: const TextStyle(
+                                      color: Color(0xFF9FB1D0))),
                             ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      _AvatarManagementSection(
-                        userId: user?['user_id']?.toString() ??
-                            user?['id']?.toString() ??
-                            '',
-                        onAvatarChanged: _load,
-                      ),
-                    ],
-                  ],
+                          FocusTraversalOrder(
+                            order: const NumericFocusOrder(1),
+                            child: _glassCard(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text('Profile',
+                                      style: TextStyle(
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.w700)),
+                                  const SizedBox(height: 12),
+                                  _field('Email', _emailController),
+                                  const SizedBox(height: 12),
+                                  _field('Username', _usernameController),
+                                  const SizedBox(height: 12),
+                                  _field(
+                                      'Display Name', _displayNameController),
+                                  const SizedBox(height: 14),
+                                  Row(
+                                    children: [
+                                      _FocusableButton(
+                                        onPressed: saving ? null : _saveProfile,
+                                        child:
+                                            Text(saving ? 'Saving…' : 'Save'),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          FocusTraversalOrder(
+                            order: const NumericFocusOrder(2),
+                            child: _glassCard(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text('Services',
+                                      style: TextStyle(
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.w700)),
+                                  const SizedBox(height: 10),
+                                  _serviceToggle(
+                                    label: 'Spotify',
+                                    value: spotifyLinked,
+                                    onChanged: (saving || launchingSpotify)
+                                        ? null
+                                        : _handleSpotifyToggle,
+                                  ),
+                                  const SizedBox(height: 10),
+                                  _serviceToggle(
+                                    label: 'Sonos',
+                                    value: sonosEnabled,
+                                    onChanged:
+                                        saving ? null : _handleSonosToggle,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          FocusTraversalOrder(
+                            order: const NumericFocusOrder(3),
+                            child: _AvatarManagementSection(
+                              userId: user?['user_id']?.toString() ??
+                                  user?['id']?.toString() ??
+                                  '',
+                              onAvatarChanged: _load,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
                 ),
               ),
-            ),
+              if (showCropper && _pendingImageBytes != null)
+                Positioned.fill(
+                  child: _CropDialog(
+                    controller: _cropController,
+                    bytes: _pendingImageBytes!,
+                    onCancel: _closeCropper,
+                    onCrop: _handleCropResult,
+                    cropping: cropping,
+                  ),
+                ),
+            ],
           ),
-          if (showCropper && _pendingImageBytes != null)
-            Positioned.fill(
-              child: _CropDialog(
-                controller: _cropController,
-                bytes: _pendingImageBytes!,
-                onCancel: _closeCropper,
-                onCrop: _handleCropResult,
-                cropping: cropping,
-              ),
-            ),
-        ],
+        ),
       ),
     );
   }
@@ -465,13 +491,30 @@ Widget _field(String label, TextEditingController controller) {
     children: [
       Text(label, style: const TextStyle(color: Color(0xFF9FB1D0))),
       const SizedBox(height: 6),
-      TextField(
-        controller: controller,
-        decoration: const InputDecoration(
-          filled: true,
-          fillColor: Color(0xFF1A2333),
-          border: OutlineInputBorder(
-              borderSide: BorderSide(color: Color(0xFF2A3347))),
+      Focus(
+        onKeyEvent: (node, event) {
+          if (event is KeyDownEvent) {
+            if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+              FocusScope.of(node.context!).nextFocus();
+              return KeyEventResult.handled;
+            }
+            if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+              FocusScope.of(node.context!).previousFocus();
+              return KeyEventResult.handled;
+            }
+          }
+          // Left/right (and all other keys) fall through to the TextField so caret moves normally
+          return KeyEventResult.ignored;
+        },
+        skipTraversal: false,
+        child: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            filled: true,
+            fillColor: Color(0xFF1A2333),
+            border: OutlineInputBorder(
+                borderSide: BorderSide(color: Color(0xFF2A3347))),
+          ),
         ),
       ),
     ],
@@ -482,18 +525,43 @@ Widget _serviceToggle(
     {required String label,
     required bool value,
     required ValueChanged<bool>? onChanged}) {
-  return Row(
-    children: [
-      Expanded(
-          child:
-              Text(label, style: const TextStyle(fontWeight: FontWeight.w600))),
-      Switch(
-        value: value,
-        onChanged: onChanged,
-        activeThumbColor: const Color(0xFF5AC8FA),
-        activeTrackColor: const Color(0xFF5AC8FA).withValues(alpha: 0.35),
-      ),
-    ],
+  return FocusTraversalOrder(
+    order: const NumericFocusOrder(2.0),
+    child: Row(
+      children: [
+        Expanded(
+            child: Text(label,
+                style: const TextStyle(fontWeight: FontWeight.w600))),
+        Focus(
+          onKeyEvent: (node, event) {
+            if (event is KeyDownEvent) {
+              if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+                FocusScope.of(node.context!).nextFocus();
+                return KeyEventResult.handled;
+              }
+              if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+                FocusScope.of(node.context!).previousFocus();
+                return KeyEventResult.handled;
+              }
+              if (onChanged != null &&
+                  (event.logicalKey == LogicalKeyboardKey.enter ||
+                      event.logicalKey == LogicalKeyboardKey.select ||
+                      event.logicalKey == LogicalKeyboardKey.space)) {
+                onChanged(!value);
+                return KeyEventResult.handled;
+              }
+            }
+            return KeyEventResult.ignored;
+          },
+          child: Switch(
+            value: value,
+            onChanged: onChanged,
+            activeThumbColor: const Color(0xFF5AC8FA),
+            activeTrackColor: const Color(0xFF5AC8FA).withValues(alpha: 0.35),
+          ),
+        ),
+      ],
+    ),
   );
 }
 
@@ -545,9 +613,10 @@ class _CropDialog extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Crop avatar',
-                      style:
-                          TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                  const Text(
+                    'Crop avatar',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                  ),
                   const SizedBox(height: 12),
                   SizedBox(
                     width: 480,
@@ -675,7 +744,7 @@ class _AvatarManagementSectionState
         return;
       }
 
-      Uint8List rawBytes = await pickedFile.readAsBytes();
+      var rawBytes = await pickedFile.readAsBytes();
       if (rawBytes.isEmpty) {
         if (mounted) {
           setState(() {
@@ -996,7 +1065,69 @@ class _AvatarManagementSectionState
   }
 }
 
-class _AvatarGridItem extends StatelessWidget {
+class _FocusableButton extends StatefulWidget {
+  const _FocusableButton({
+    required this.child,
+    this.onPressed,
+  });
+
+  final Widget child;
+  final VoidCallback? onPressed;
+
+  @override
+  State<_FocusableButton> createState() => _FocusableButtonState();
+}
+
+class _FocusableButtonState extends State<_FocusableButton> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return FocusableActionDetector(
+      onShowFocusHighlight: (focused) {
+        setState(() => _focused = focused);
+      },
+      child: Focus(
+        onKeyEvent: (node, event) {
+          if (event is KeyDownEvent &&
+              widget.onPressed != null &&
+              (event.logicalKey == LogicalKeyboardKey.enter ||
+                  event.logicalKey == LogicalKeyboardKey.select ||
+                  event.logicalKey == LogicalKeyboardKey.space)) {
+            widget.onPressed!();
+            return KeyEventResult.handled;
+          }
+          return KeyEventResult.ignored;
+        },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: _focused ? const Color(0xFF5AC8FA) : Colors.transparent,
+              width: 2,
+            ),
+            boxShadow: _focused
+                ? [
+                    BoxShadow(
+                      color: const Color(0xFF5AC8FA).withValues(alpha: 0.25),
+                      blurRadius: 8,
+                      spreadRadius: 1,
+                    ),
+                  ]
+                : null,
+          ),
+          child: ElevatedButton(
+            onPressed: widget.onPressed,
+            child: widget.child,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AvatarGridItem extends StatefulWidget {
   const _AvatarGridItem({
     required this.avatar,
     required this.size,
@@ -1010,116 +1141,165 @@ class _AvatarGridItem extends StatelessWidget {
   final VoidCallback onDelete;
 
   @override
-  Widget build(BuildContext context) {
-    final iconSize = (size * 0.14).clamp(10.0, 14.0);
-    final buttonSize = (size * 0.22).clamp(18.0, 22.0);
-    final buttonPadding = (size * 0.06).clamp(4.0, 6.0);
+  State<_AvatarGridItem> createState() => _AvatarGridItemState();
+}
 
-    return InkWell(
-      onTap: onTap,
-      customBorder: const CircleBorder(),
-      child: Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: const Color(0xFF1A2333),
-          border: Border.all(
-            color: avatar.isSelected
-                ? const Color(0xFF5AC8FA)
-                : Colors.white.withValues(alpha: 0.08),
-            width: avatar.isSelected ? 2.5 : 1.5,
+class _AvatarGridItemState extends State<_AvatarGridItem> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final iconSize = (widget.size * 0.14).clamp(10.0, 14.0);
+    final buttonSize = (widget.size * 0.22).clamp(18.0, 22.0);
+    final buttonPadding = (widget.size * 0.06).clamp(4.0, 6.0);
+
+    return Focus(
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent) {
+          if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+            FocusScope.of(node.context!).nextFocus();
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+            FocusScope.of(node.context!).previousFocus();
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.enter ||
+              event.logicalKey == LogicalKeyboardKey.select ||
+              event.logicalKey == LogicalKeyboardKey.space) {
+            widget.onTap();
+            return KeyEventResult.handled;
+          }
+        }
+        return KeyEventResult.ignored;
+      },
+      child: FocusableActionDetector(
+        onShowFocusHighlight: (focused) {
+          setState(() => _focused = focused);
+        },
+        child: InkWell(
+          onTap: widget.onTap,
+          customBorder: const CircleBorder(),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            width: widget.size,
+            height: widget.size,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: const Color(0xFF1A2333),
+              border: Border.all(
+                color: _focused
+                    ? const Color(0xFF5AC8FA)
+                    : (widget.avatar.isSelected
+                        ? const Color(0xFF5AC8FA)
+                        : Colors.white.withValues(alpha: 0.08)),
+                width: _focused ? 3.0 : (widget.avatar.isSelected ? 2.5 : 1.5),
+              ),
+              boxShadow: _focused
+                  ? [
+                      BoxShadow(
+                        color: const Color(0xFF5AC8FA).withValues(alpha: 0.25),
+                        blurRadius: 12,
+                        spreadRadius: 1,
+                      ),
+                    ]
+                  : null,
+            ),
+            child: Stack(
+              children: [
+                // Avatar image
+                ClipOval(
+                  child: SizedBox.expand(
+                    child: widget.avatar.url.isNotEmpty
+                        ? Image.network(
+                            widget.avatar.url,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => Icon(
+                                Icons.broken_image,
+                                size: widget.size * 0.4,
+                                color: const Color(0xFF9FB1D0)),
+                          )
+                        : Icon(Icons.account_circle,
+                            size: widget.size * 0.5,
+                            color: const Color(0xFF9FB1D0)),
+                  ),
+                ),
+                // Provider indicator badge at bottom
+                if (widget.avatar.isProviderAvatar)
+                  Positioned(
+                    bottom: buttonPadding,
+                    left: 0,
+                    right: 0,
+                    child: Center(
+                      child: Container(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: buttonPadding * 1.5,
+                          vertical: buttonPadding * 0.5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF34D399).withValues(alpha: 0.9),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(
+                          Icons.cloud,
+                          size: iconSize,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+                // Selected indicator
+                if (widget.avatar.isSelected)
+                  Positioned(
+                    top: buttonPadding,
+                    right: buttonPadding,
+                    child: Container(
+                      width: buttonSize,
+                      height: buttonSize,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF5AC8FA),
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.3),
+                            blurRadius: 4,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Icon(Icons.check,
+                          size: iconSize, color: Colors.white),
+                    ),
+                  ),
+                // Delete button (shown for all avatars)
+                Positioned(
+                  top: buttonPadding,
+                  left: buttonPadding,
+                  child: InkWell(
+                    onTap: widget.onDelete,
+                    customBorder: const CircleBorder(),
+                    child: Container(
+                      width: buttonSize,
+                      height: buttonSize,
+                      decoration: BoxDecoration(
+                        color: Colors.red.withValues(alpha: 0.95),
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.3),
+                            blurRadius: 4,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Icon(Icons.delete,
+                          size: iconSize, color: Colors.white),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-        child: Stack(
-          children: [
-            // Avatar image
-            ClipOval(
-              child: SizedBox.expand(
-                child: avatar.url.isNotEmpty
-                    ? Image.network(
-                        avatar.url,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => Icon(Icons.broken_image,
-                            size: size * 0.4, color: const Color(0xFF9FB1D0)),
-                      )
-                    : Icon(Icons.account_circle,
-                        size: size * 0.5, color: const Color(0xFF9FB1D0)),
-              ),
-            ),
-            // Provider indicator badge at bottom
-            if (avatar.isProviderAvatar)
-              Positioned(
-                bottom: buttonPadding,
-                left: 0,
-                right: 0,
-                child: Center(
-                  child: Container(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: buttonPadding * 1.5,
-                      vertical: buttonPadding * 0.5,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF34D399).withValues(alpha: 0.9),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Icon(
-                      Icons.cloud,
-                      size: iconSize,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-              ),
-            // Selected indicator
-            if (avatar.isSelected)
-              Positioned(
-                top: buttonPadding,
-                right: buttonPadding,
-                child: Container(
-                  width: buttonSize,
-                  height: buttonSize,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF5AC8FA),
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.3),
-                        blurRadius: 4,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: Icon(Icons.check, size: iconSize, color: Colors.white),
-                ),
-              ),
-            // Delete button (shown for all avatars)
-            Positioned(
-              top: buttonPadding,
-              left: buttonPadding,
-              child: InkWell(
-                onTap: onDelete,
-                customBorder: const CircleBorder(),
-                child: Container(
-                  width: buttonSize,
-                  height: buttonSize,
-                  decoration: BoxDecoration(
-                    color: Colors.red.withValues(alpha: 0.95),
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.3),
-                        blurRadius: 4,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child:
-                      Icon(Icons.delete, size: iconSize, color: Colors.white),
-                ),
-              ),
-            ),
-          ],
         ),
       ),
     );
