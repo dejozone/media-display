@@ -182,6 +182,22 @@ class ServicePriorityState {
     return null;
   }
 
+  /// Get the next available service that comes AFTER the given service in the
+  /// configured priority order. If none is available after it, returns null.
+  ServiceType? getNextAvailableServiceAfter(ServiceType service) {
+    final startIdx = effectiveOrder.indexOf(service);
+    if (startIdx < 0) return getNextAvailableService();
+
+    for (var i = startIdx + 1; i < effectiveOrder.length; i++) {
+      final candidate = effectiveOrder[i];
+      if (isServiceAvailable(candidate)) {
+        return candidate;
+      }
+    }
+
+    return null;
+  }
+
   /// Check if we should retry a service that's in fallback
   bool shouldRetryService(ServiceType service, EnvConfig config) {
     final status = serviceStatuses[service];
@@ -620,8 +636,17 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
         retryWindowStarts: newRetryWindows,
       );
 
-      // Trigger fallback to next service
-      _triggerFallback(service);
+      // For cloud-hosted services (cloudSpotify/localSonos), do NOT trigger
+      // client-side fallback. The server already handles recovery and will emit
+      // a healthy status when ready. Avoid sending new configs that churn
+      // Sonos/Spotify enablement and cause loops. We simply wait for the
+      // server's health signal before switching.
+      if (!service.isCloudService) {
+        _triggerFallback(service);
+      } else {
+        _log(
+            '[ServicePriority] Suppressing fallback for cloud service $service; waiting for server recovery');
+      }
     } else {
       // Update error count but don't fallback yet
       newStatuses[service] = ServiceStatus.failing;
@@ -639,8 +664,17 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
   }
 
   void _triggerFallback(ServiceType failedService) {
-    // Find next available service in priority order
-    final next = state.getNextAvailableService();
+    // Cloud services are recovered server-side; avoid client-driven fallback
+    if (failedService.isCloudService) {
+      _log(
+          '[ServicePriority] _triggerFallback ignored for cloud service $failedService');
+      return;
+    }
+
+    // Prefer the next available service AFTER the failed one to avoid bouncing
+    // back to higher-priority services that were already checked/idle.
+    final next = state.getNextAvailableServiceAfter(failedService) ??
+        state.getNextAvailableService();
 
     if (next != null && next != failedService) {
       _log('[ServicePriority] Falling back from $failedService to $next');
