@@ -401,9 +401,9 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     // cannot overtake while we're in this fallback. Sonos will be
     // re-enabled when we actually switch back to it.
     final keepSonos = service == ServiceType.cloudSpotify
-      ? false
-      : (_waitingForPrimaryResume &&
-        _originalPrimaryService == ServiceType.localSonos);
+        ? false
+        : (_waitingForPrimaryResume &&
+            _originalPrimaryService == ServiceType.localSonos);
     ref.read(eventsWsProvider.notifier).connect();
     ref.read(eventsWsProvider.notifier).sendConfigForService(
           service,
@@ -948,9 +948,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
                 '[Orchestrator] $serviceType became ${healthState.status.name} (first time) - reporting error for thresholded fallback');
             // Let priority manager apply its error threshold (e.g., LOCAL_SONOS_FALLBACK_ERROR_THRESHOLD)
             // instead of immediate cycling on first error.
-            ref
-                .read(servicePriorityProvider.notifier)
-                .reportError(serviceType);
+            ref.read(servicePriorityProvider.notifier).reportError(serviceType);
           }
         } else if (!wasHealthy && isNowUnhealthy) {
           // Already unhealthy - don't switch again, stay on fallback
