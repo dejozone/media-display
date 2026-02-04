@@ -321,6 +321,14 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     _log(
         '[Orchestrator] Activating service: $service${isFallback ? ' (fallback)' : ''}');
 
+    // Avoid activating cloud services that are waiting for server recovery
+    final priorityState = ref.read(servicePriorityProvider);
+    if (service.isCloudService &&
+        priorityState.awaitingRecovery.contains(service)) {
+      _log('[Orchestrator] $service awaiting recovery - not activating');
+      return;
+    }
+
     // Clear previous health state for this service so any new failure
     // is treated as a "first time" failure, not a continuation
     // BUT don't clear during fallback - we need to keep the failed service's
@@ -330,10 +338,10 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     }
 
     if (service.isDirectPolling) {
-      _activateDirectSpotify();
+      _activateDirectSpotify(isFallback: isFallback);
     } else {
       // cloud_spotify or local_sonos
-      _activateCloudService(service);
+      _activateCloudService(service, isFallback: isFallback);
     }
   }
 
@@ -353,7 +361,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     channel.sendConfigForUserSettings();
   }
 
-  void _activateDirectSpotify() {
+  void _activateDirectSpotify({bool isFallback = false}) {
     _log('[Orchestrator] Activating direct Spotify polling');
 
     // Stop any direct polling first (in case switching from another mode)
@@ -363,8 +371,9 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     // Send WebSocket config to tell backend not to poll
     // (we're polling directly from client)
     // Keep sonos enabled if we're waiting for it to resume
-    final keepSonos = _waitingForPrimaryResume &&
-        _originalPrimaryService == ServiceType.localSonos;
+    final keepSonos = isFallback ||
+        (_waitingForPrimaryResume &&
+            _originalPrimaryService == ServiceType.localSonos);
 
     // Keep spotify polling enabled if cloudSpotify is unhealthy
     // This allows the server to continue its retry loop and emit healthy status
@@ -390,24 +399,30 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     _resetTimeoutTimer();
   }
 
-  void _activateCloudService(ServiceType service) {
+  void _activateCloudService(ServiceType service, {bool isFallback = false}) {
     _log('[Orchestrator] Activating cloud service: $service');
 
     // Stop direct polling if it was running
     ref.read(spotifyDirectProvider.notifier).stopPolling();
 
     // Connect/reconnect WebSocket and send config for this service
-    // For cloud Spotify, explicitly disable Sonos on the backend so it
-    // cannot overtake while we're in this fallback. Sonos will be
-    // re-enabled when we actually switch back to it.
+    // Keep other services enabled while we cycle, so recovering services
+    // stay active and can report health without being disabled by config.
     final keepSonos = service == ServiceType.cloudSpotify
-        ? false
-        : (_waitingForPrimaryResume &&
-            _originalPrimaryService == ServiceType.localSonos);
+        ? true
+        : (isFallback ||
+            (_waitingForPrimaryResume &&
+                _originalPrimaryService == ServiceType.localSonos));
+
+    // When running on Sonos during fallback, keep Spotify polling so it can
+    // recover and take over when healthy (higher priority rules apply).
+    final keepSpotifyForRecovery =
+        isFallback && service == ServiceType.localSonos;
     ref.read(eventsWsProvider.notifier).connect();
     ref.read(eventsWsProvider.notifier).sendConfigForService(
           service,
           keepSonosEnabled: keepSonos,
+          keepSpotifyPollingForRecovery: keepSpotifyForRecovery,
         );
 
     // Reset timeout timer
@@ -733,6 +748,26 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
     // Report success to priority manager
     ref.read(servicePriorityProvider.notifier).reportSuccess(source);
+
+    // If a cloud service was marked awaiting recovery, receiving any data means
+    // the backend is responsive again. Clear awaiting-recovery so we can use it.
+    final priorityState = ref.read(servicePriorityProvider);
+    if (source.isCloudService &&
+        priorityState.awaitingRecovery.contains(source)) {
+      _log(
+          '[Orchestrator] Data received from $source while awaiting recovery - marking healthy');
+
+      final providerKey =
+          source == ServiceType.localSonos ? 'sonos' : 'spotify';
+      _serviceHealth[providerKey] = ServiceHealthState(
+        provider: providerKey,
+        status: HealthStatus.healthy,
+        lastHealthyAt: DateTime.now(),
+      );
+
+      ref.read(servicePriorityProvider.notifier).onServiceRecovered(source);
+      _syncUnhealthyServices();
+    }
   }
 
   /// Check if Spotify is playing on a Speaker device (likely Sonos)
@@ -818,6 +853,17 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       _lastSpeakerDeviceName = deviceName;
       _sonosDiscoveryTriggered = true;
       _triggerSonosDiscovery();
+
+      // If we're on cloud Spotify and Sonos is available, switch immediately to
+      // Sonos to align with user expectation of playing on speakers.
+      if (currentService == ServiceType.cloudSpotify &&
+          priority.isServiceAvailable(ServiceType.localSonos)) {
+        _log(
+            '[Orchestrator] Speaker device detected on cloudSpotify - switching to Sonos');
+        ref
+            .read(servicePriorityProvider.notifier)
+            .switchToService(ServiceType.localSonos);
+      }
     }
   }
 
@@ -911,12 +957,19 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       return;
     }
 
-    final currentService = ref.read(servicePriorityProvider).currentService;
-
     // Check if this is a NEW unhealthy state (status changed from healthy to unhealthy)
     final wasHealthy =
         previousHealth == null || previousHealth.status.isHealthy;
     final isNowUnhealthy = !healthState.status.isHealthy;
+
+    final currentService = ref.read(servicePriorityProvider).currentService;
+
+    // If service is now unhealthy, mark awaiting-recovery for cloud services
+    if (isNowUnhealthy && serviceType.isCloudService) {
+      ref
+          .read(servicePriorityProvider.notifier)
+          .markAwaitingRecovery(serviceType);
+    }
 
     // Handle based on status
     switch (healthState.status) {
@@ -951,9 +1004,21 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
             ref.read(servicePriorityProvider.notifier).reportError(serviceType);
           }
         } else if (!wasHealthy && isNowUnhealthy) {
-          // Already unhealthy - don't switch again, stay on fallback
-          _log(
-              '[Orchestrator] $serviceType still ${healthState.status.name} - staying on current fallback');
+          // Still unhealthy. If this is the active service and shouldFallback
+          // is true (or status is unavailable), keep incrementing the error
+          // count so we eventually fall through to the next priority service.
+          final shouldFallback =
+              healthState.status == HealthStatus.unavailable ||
+                  healthState.shouldFallback;
+
+          if (currentService == serviceType && shouldFallback) {
+            _log(
+                '[Orchestrator] $serviceType still ${healthState.status.name} - reporting error toward fallback');
+            ref.read(servicePriorityProvider.notifier).reportError(serviceType);
+          } else {
+            _log(
+                '[Orchestrator] $serviceType still ${healthState.status.name} - staying on current fallback');
+          }
         }
 
         // Handle auth error specially - no auto-retry
@@ -982,6 +1047,9 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     _log(
         '[Orchestrator] $service recovered with ${health.devicesCount} devices');
 
+    // Clear awaiting-recovery state and reset status in priority manager
+    ref.read(servicePriorityProvider.notifier).onServiceRecovered(service);
+
     // If this service is higher priority than current, switch back to it
     final currentService = ref.read(servicePriorityProvider).currentService;
     if (currentService != null && currentService != service) {
@@ -999,6 +1067,10 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
         // Reset cycling state so the recovered service gets a fresh evaluation
         // This ensures that if it has no playback, it will cycle to the next service
         _resetCyclingState();
+
+        // Stop any pending pause/cycle timers and retry timers from lower-priority services.
+        _cancelPauseTimer();
+        ref.read(servicePriorityProvider.notifier).stopRetryTimers();
 
         // Set original primary to the recovered service
         _originalPrimaryService = service;
@@ -1188,10 +1260,10 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     }
 
     // Remember the original primary service if not set
-    if (_originalPrimaryService == null) {
-      _originalPrimaryService = _getHighestPriorityEnabledService();
-      _log(
-          '[Orchestrator] Remembering primary service: $_originalPrimaryService');
+    final primaryService =
+        _originalPrimaryService ??= _getHighestPriorityEnabledService();
+    if (primaryService != null) {
+      _log('[Orchestrator] Remembering primary service: $primaryService');
     }
 
     // Find next service to try
@@ -1241,9 +1313,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     _cancelPauseTimer();
 
     // Remember the original primary service if not set
-    if (_originalPrimaryService == null) {
-      _originalPrimaryService = _getHighestPriorityEnabledService();
-    }
+    _originalPrimaryService ??= _getHighestPriorityEnabledService();
 
     // Find next service to try
     final nextService = _getNextServiceToTry();
@@ -1294,6 +1364,13 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     for (final service in _config.priorityOrderOfServices) {
       // Skip if not enabled
       if (!priority.enabledServices.contains(service)) continue;
+
+      // Skip services that have already failed and are under recovery/probing;
+      // the recovery loop will promote them when healthy. This avoids cycling
+      // back to a failed service and resetting state unnecessarily.
+      final status = priority.serviceStatuses[service];
+      final inRecovery = priority.recoveryStates.containsKey(service);
+      if (status == ServiceStatus.failing || inRecovery) continue;
 
       // Skip if already checked this cycle
       if (_checkedNotPlaying.contains(service)) continue;

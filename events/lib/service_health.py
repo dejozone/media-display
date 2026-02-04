@@ -62,6 +62,8 @@ class ServiceHealthState:
     consecutive_errors: int = 0
     last_healthy_at: Optional[float] = None
     recovery_started_at: Optional[float] = None
+    max_status_emits: int = 3  # max error status messages before entering silent health-check mode
+    emit_suppressed: bool = False  # when True, only recovery/healthy statuses are sent
     # Debounce tracking
     _last_sent_status: Optional[ServiceStatus] = field(default=None, repr=False)
     _last_sent_error_code: Optional[ErrorCode] = field(default=None, repr=False)
@@ -86,6 +88,11 @@ class ServiceHealthState:
     def set_health_status_window(self, window_sec: float) -> None:
         """Set the debounce window for health status messages."""
         self._health_status_window_sec = window_sec
+
+    def set_status_emit_limit(self, emit_limit: int) -> None:
+        """Set how many error statuses to emit before going quiet and only probing."""
+        if emit_limit > 0:
+            self.max_status_emits = emit_limit
     
     def _get_retry_sec(self, error_code: ErrorCode) -> int:
         """Get retry timing for an error code."""
@@ -106,6 +113,10 @@ class ServiceHealthState:
         4. After window: only send on actual changes (rules 1 & 2)
         """
         now = time.time()
+
+        # If we've entered suppression, only allow recovery/healthy to be sent
+        if self.emit_suppressed and new_status != ServiceStatus.HEALTHY:
+            return False
         
         # Always send on status change
         if new_status != self._last_sent_status:
@@ -156,6 +167,10 @@ class ServiceHealthState:
                 self.status = ServiceStatus.RECOVERING
                 if self.recovery_started_at is None:
                     self.recovery_started_at = time.time()
+
+            # After exceeding the emit limit, enter suppression (quiet) mode
+            if self.consecutive_errors > self.max_status_emits:
+                self.emit_suppressed = True
             
             # Check if we should send this status (debounce)
             if not self._should_send_status(self.status, error_code):
@@ -191,6 +206,7 @@ class ServiceHealthState:
             self.error_code = None
             self.message = None
             self.consecutive_errors = 0
+            self.emit_suppressed = False
             self.devices_count = devices_count
             self.last_healthy_at = time.time()
             self.recovery_started_at = None
@@ -266,7 +282,9 @@ class ServiceHealthTracker:
         for provider, state in self._services.items():
             provider_cfg = self._config.get(provider, {})
             window_sec = provider_cfg.get("sendHealthStatusWindowSec", DEFAULT_HEALTH_STATUS_WINDOW_SEC)
+            emit_limit = provider_cfg.get("numOfEmitStatusRetries", 3)
             state.set_health_status_window(window_sec)
+            state.set_status_emit_limit(emit_limit)
     
     def get_or_create(self, provider: str) -> ServiceHealthState:
         """Get or create a health state tracker for a provider."""
@@ -275,7 +293,9 @@ class ServiceHealthTracker:
             # Apply config for this provider
             provider_cfg = self._config.get(provider, {})
             window_sec = provider_cfg.get("sendHealthStatusWindowSec", DEFAULT_HEALTH_STATUS_WINDOW_SEC)
+            emit_limit = provider_cfg.get("numOfEmitStatusRetries", 3)
             state.set_health_status_window(window_sec)
+            state.set_status_emit_limit(emit_limit)
             self._services[provider] = state
         return self._services[provider]
     
@@ -326,6 +346,11 @@ class ServiceHealthTracker:
         if not state:
             return True  # Unknown services assumed healthy
         return state.status == ServiceStatus.HEALTHY
+
+    def is_suppressed(self, provider: str) -> bool:
+        """Check if a provider has stopped emitting after exceeding its error emit limit."""
+        state = self._services.get(provider)
+        return bool(state and state.emit_suppressed)
     
     def reset(self, provider: str) -> None:
         """Reset the debounce state for a service (call on new client connection).

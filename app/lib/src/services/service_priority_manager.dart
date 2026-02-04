@@ -97,6 +97,7 @@ class ServicePriorityState {
     this.transitionStartTime,
     this.lastDataTime,
     this.unhealthyServices = const {},
+    this.awaitingRecovery = const {},
     this.recoveryStates = const {},
   });
 
@@ -130,6 +131,11 @@ class ServicePriorityState {
   /// Services that are known to be unhealthy (from orchestrator health tracking)
   /// Used during fallback to skip services that are recovering/failing
   final Set<ServiceType> unhealthyServices;
+
+  /// Cloud services that have exceeded error emit threshold and are waiting
+  /// for server-side recovery. While present here, client should not churn
+  /// configs or force fallback; just wait for healthy status.
+  final Set<ServiceType> awaitingRecovery;
 
   /// Recovery states for failed higher-priority services
   /// Key: service type, Value: recovery state
@@ -167,9 +173,12 @@ class ServicePriorityState {
   bool isServiceAvailable(ServiceType service) {
     final status = serviceStatuses[service];
     final isUnhealthy = unhealthyServices.contains(service);
+    final awaiting =
+        awaitingRecovery.contains(service) && service.isCloudService;
     return status != ServiceStatus.cooldown &&
         status != ServiceStatus.disabled &&
-        !isUnhealthy;
+        !isUnhealthy &&
+        !awaiting;
   }
 
   /// Get the next available service based on priority
@@ -252,6 +261,7 @@ class ServicePriorityState {
     DateTime? transitionStartTime,
     DateTime? lastDataTime,
     Set<ServiceType>? unhealthyServices,
+    Set<ServiceType>? awaitingRecovery,
     Map<ServiceType, ServiceRecoveryState>? recoveryStates,
     bool clearCurrentService = false,
     bool clearPreviousService = false,
@@ -278,6 +288,7 @@ class ServicePriorityState {
       lastDataTime:
           clearLastDataTime ? null : (lastDataTime ?? this.lastDataTime),
       unhealthyServices: unhealthyServices ?? this.unhealthyServices,
+      awaitingRecovery: awaitingRecovery ?? this.awaitingRecovery,
       recoveryStates: recoveryStates ?? this.recoveryStates,
     );
   }
@@ -294,6 +305,7 @@ class ServicePriorityState {
         mapEquals(other.errorCounts, errorCounts) &&
         other.isTransitioning == isTransitioning &&
         setEquals(other.unhealthyServices, unhealthyServices) &&
+        setEquals(other.awaitingRecovery, awaitingRecovery) &&
         mapEquals(other.recoveryStates, recoveryStates);
   }
 
@@ -307,6 +319,7 @@ class ServicePriorityState {
         Object.hashAllUnordered(errorCounts.entries),
         isTransitioning,
         Object.hashAllUnordered(unhealthyServices),
+        Object.hashAllUnordered(awaitingRecovery),
         Object.hashAllUnordered(recoveryStates.entries),
       );
 
@@ -372,6 +385,7 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       cooldownEnds: initialCooldowns,
       lastRetryAttempts: initialRetries,
       retryWindowStarts: initialRetryWindows,
+      awaitingRecovery: {},
     );
   }
 
@@ -466,6 +480,18 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       _log('[ServicePriority] Updated unhealthy services: $unhealthy');
       state = state.copyWith(unhealthyServices: unhealthy);
     }
+  }
+
+  /// Mark a cloud service as awaiting server-side recovery to avoid churn
+  /// while backend reports failures. Cleared when a healthy status is received.
+  void markAwaitingRecovery(ServiceType service) {
+    if (!service.isCloudService) return;
+    if (state.awaitingRecovery.contains(service)) return;
+
+    final awaiting = Set<ServiceType>.from(state.awaitingRecovery)
+      ..add(service);
+    state = state.copyWith(awaitingRecovery: awaiting);
+    _log('[ServicePriority] Marked $service as awaiting server recovery');
   }
 
   /// Activate a specific service
@@ -593,7 +619,28 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       return;
     }
 
+    // If cloud service is already marked awaiting recovery, only ignore errors
+    // when it is NOT the active service. When it's the active service we still
+    // need to count errors so we can fall back to the next priority service.
+    if (service.isCloudService && state.awaitingRecovery.contains(service)) {
+      if (state.currentService != service) {
+        _log(
+            '[ServicePriority] Error ignored for $service (awaiting recovery, not active)');
+        return;
+      }
+
+      _log(
+          '[ServicePriority] Error on active $service while awaiting recovery - counting toward fallback');
+    }
+
     final fallbackConfig = _config.getFallbackConfig(service);
+    final isPrimary = state.effectiveOrder.isNotEmpty &&
+        state.effectiveOrder.first == service;
+    // When running on a fallback (non-primary) service, cap the threshold to 3
+    // so we move down the priority list instead of lingering on repeated failures.
+    final effectiveThreshold = (!isPrimary && state.currentService == service)
+        ? fallbackConfig.errorThreshold.clamp(1, 3).toInt()
+        : fallbackConfig.errorThreshold;
 
     if (!fallbackConfig.onError) {
       _log('[ServicePriority] Fallback on error disabled for $service');
@@ -604,13 +651,23 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     final currentCount = newErrors[service] ?? 0;
     newErrors[service] = currentCount + 1;
 
-    _log(
-        '[ServicePriority] Error on $service (${newErrors[service]}/${fallbackConfig.errorThreshold})');
+    _log('[ServicePriority] Error on $service '
+        '(${newErrors[service]}/$effectiveThreshold)');
 
     final newStatuses =
         Map<ServiceType, ServiceStatus>.from(state.serviceStatuses);
 
-    if (newErrors[service]! >= fallbackConfig.errorThreshold) {
+    // For cloud-hosted services, immediately enter awaiting-recovery state to
+    // avoid config churn while the server is still unhealthy. Recovery will be
+    // cleared when a healthy status is received.
+    if (service.isCloudService && !state.awaitingRecovery.contains(service)) {
+      final awaiting = Set<ServiceType>.from(state.awaitingRecovery)
+        ..add(service);
+      state = state.copyWith(awaitingRecovery: awaiting);
+      _log('[ServicePriority] Marked $service as awaiting server recovery');
+    }
+
+    if (newErrors[service]! >= effectiveThreshold) {
       // Threshold reached - enter cooldown and trigger fallback
       _log(
           '[ServicePriority] Error threshold reached for $service - entering cooldown');
@@ -636,17 +693,10 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
         retryWindowStarts: newRetryWindows,
       );
 
-      // For cloud-hosted services (cloudSpotify/localSonos), do NOT trigger
-      // client-side fallback. The server already handles recovery and will emit
-      // a healthy status when ready. Avoid sending new configs that churn
-      // Sonos/Spotify enablement and cause loops. We simply wait for the
-      // server's health signal before switching.
-      if (!service.isCloudService) {
-        _triggerFallback(service);
-      } else {
-        _log(
-            '[ServicePriority] Suppressing fallback for cloud service $service; waiting for server recovery');
-      }
+      // Trigger fallback to the next available service. For cloud services we
+      // stay in awaiting-recovery so we won't churn back until the server is
+      // healthy again.
+      _triggerFallback(service);
     } else {
       // Update error count but don't fallback yet
       newStatuses[service] = ServiceStatus.failing;
@@ -664,13 +714,6 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
   }
 
   void _triggerFallback(ServiceType failedService) {
-    // Cloud services are recovered server-side; avoid client-driven fallback
-    if (failedService.isCloudService) {
-      _log(
-          '[ServicePriority] _triggerFallback ignored for cloud service $failedService');
-      return;
-    }
-
     // Prefer the next available service AFTER the failed one to avoid bouncing
     // back to higher-priority services that were already checked/idle.
     final next = state.getNextAvailableServiceAfter(failedService) ??
@@ -709,6 +752,15 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       return;
     }
 
+    // If current cloud service is awaiting server recovery, do not churn
+    if (state.currentService != null &&
+        state.currentService!.isCloudService &&
+        state.awaitingRecovery.contains(state.currentService)) {
+      _log(
+          '[ServicePriority] Awaiting recovery for ${state.currentService}; skipping retry');
+      return;
+    }
+
     // Only attempt retry if the current service is failing or in cooldown
     // Don't switch away from a service that's still working (active status with low error count)
     final currentStatus = state.serviceStatuses[state.currentService];
@@ -725,6 +777,20 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
 
     // Find the highest priority service that's in cooldown/standby and ready for retry
     for (final service in state.effectiveOrder) {
+      if (state.awaitingRecovery.contains(service) && service.isCloudService) {
+        // Wait for server-side health recovery for cloud services
+        continue;
+      }
+
+      // If a service is already in active recovery probing (e.g., directSpotify),
+      // let the recovery loop promote it on success instead of force-switching
+      // here. This avoids churn away from a healthy fallback while probes run.
+      if (state.recoveryStates.containsKey(service)) {
+        // _log(
+        //     '[ServicePriority] Recovery probe active for $service; letting probe drive switch');
+        continue;
+      }
+
       if (service == state.currentService) continue;
 
       if (state.shouldRetryService(service, _config)) {
@@ -781,6 +847,7 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     final newCooldowns = Map<ServiceType, DateTime?>.from(state.cooldownEnds);
     final newRetryWindows =
         Map<ServiceType, DateTime?>.from(state.retryWindowStarts);
+    var clearedAwaiting = state.awaitingRecovery;
 
     for (final service in ServiceType.values) {
       if (service.isCloudService && state.enabledServices.contains(service)) {
@@ -797,11 +864,19 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       }
     }
 
+    // Clearing awaiting-recovery lets the client retry cloud services after
+    // a fresh WebSocket connection instead of being stuck on direct Spotify.
+    if (clearedAwaiting.isNotEmpty) {
+      _log('[ServicePriority] Clearing awaiting-recovery flags on reconnect');
+      clearedAwaiting = <ServiceType>{};
+    }
+
     state = state.copyWith(
       serviceStatuses: newStatuses,
       errorCounts: newErrors,
       cooldownEnds: newCooldowns,
       retryWindowStarts: newRetryWindows,
+      awaitingRecovery: clearedAwaiting,
     );
 
     // Check if a higher-priority cloud service should be activated
@@ -943,7 +1018,10 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
   /// Called when a service is successfully recovered
   /// Switches to the recovered service if it's higher priority than current
   void onServiceRecovered(ServiceType service) {
-    if (!state.recoveryStates.containsKey(service)) return;
+    if (!state.recoveryStates.containsKey(service) &&
+        !state.awaitingRecovery.contains(service)) {
+      return;
+    }
 
     final currentService = state.currentService;
     final serviceIndex = state.configuredOrder.indexOf(service);
@@ -958,6 +1036,10 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
         Map<ServiceType, ServiceRecoveryState>.from(state.recoveryStates);
     newRecoveryStates.remove(service);
 
+    // Clear awaiting recovery flag
+    final newAwaiting = Set<ServiceType>.from(state.awaitingRecovery)
+      ..remove(service);
+
     // Reset service status
     final newStatuses =
         Map<ServiceType, ServiceStatus>.from(state.serviceStatuses);
@@ -970,6 +1052,7 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       recoveryStates: newRecoveryStates,
       serviceStatuses: newStatuses,
       errorCounts: newErrors,
+      awaitingRecovery: newAwaiting,
     );
 
     // Switch to recovered service if it's higher priority

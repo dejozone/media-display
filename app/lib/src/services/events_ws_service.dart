@@ -1015,10 +1015,10 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     try {
       final payloadJson = jsonEncode(payload);
 
-      if (payloadJson == _lastConfigJson) {
-        _log('[WS] Suppressing duplicate config: $logLabel');
-        return;
-      }
+      // if (payloadJson == _lastConfigJson) {
+      //   _log('[WS] Suppressing duplicate config: $logLabel');
+      //   return;
+      // }
 
       if (_channel == null) {
         _log('[WS] No channel to send $logLabel config');

@@ -34,7 +34,9 @@
     "resumeDiscoveryIntervalSec": 10,
     "idleStuckTimeoutSec": 10,
     "noDeviceRetryIntervalSec": 15,
-    "sendHealthStatusWindowSec": 30
+    "sendHealthStatusWindowSec": 30,
+    "numOfEmitStatusRetries": 3,
+    "fallbackToSpotifyOnError": false
   },
   "server": {
     "timeoutGracefulShutdownSec": 1

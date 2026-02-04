@@ -37,6 +37,7 @@ SONOS_CFG = CONFIG.get("sonos", {})
 SERVER_CFG = CONFIG.get("server", {})
 TOKEN_REFRESH_LEAD = int(SPOTIFY_CFG.get("tokenRefreshLeadTimeSec", 300) or 300)
 TOKEN_REFRESH_JITTER = int(SPOTIFY_CFG.get("tokenRefreshJitterSec", 30) or 30)
+DEFAULT_FALLBACK_TO_SPOTIFY = bool(SONOS_CFG.get("fallbackToSpotifyOnError", True))
 
 SONOS_MANAGER = SonosManager(SONOS_CFG)
 SPOTIFY_MANAGER = SpotifyManager(SPOTIFY_CFG, API_BASE_URL)
@@ -129,6 +130,7 @@ class UserContext:
         self.config: Dict[str, Any] = {
             "enabled": {"spotify": False, "sonos": False},
             "poll": {"spotify": None, "sonos": None},
+            "fallback": {"spotify": DEFAULT_FALLBACK_TO_SPOTIFY},
         }
         self.config_event = asyncio.Event()
         self.lock = asyncio.Lock()
@@ -613,6 +615,9 @@ async def _user_driver(ctx: UserContext) -> None:
                     current_stop.set()
                     break
 
+                fallback_cfg = ctx.config.get("fallback") or {}
+                allow_spotify_fallback = bool(fallback_cfg.get("spotify", DEFAULT_FALLBACK_TO_SPOTIFY))
+
                 allow_sonos = sonos_enabled and not defer_sonos
                 sonos_task: Optional[asyncio.Task] = None
 
@@ -652,16 +657,34 @@ async def _user_driver(ctx: UserContext) -> None:
                         logger.info("sonos: breaking due to channel disconnected (user=%s)", ctx.user_id)
                         break
                     
-                    # Sonos completed (possibly due to timeout/no devices) - defer to Spotify if enabled
-                    defer_sonos = True
-                    logger.info("sonos: completed, deferring to spotify (defer=True, user=%s)", ctx.user_id)
+                    # Sonos completed (possibly due to timeout/no devices)
+                    # Defer to Spotify only if allowed and Spotify is enabled.
+                    if allow_spotify_fallback and spotify_enabled:
+                        defer_sonos = True
+                        logger.info(
+                            "sonos: completed, deferring to spotify (defer=True, user=%s)", ctx.user_id
+                        )
+                    else:
+                        defer_sonos = False
+                        logger.info(
+                            "sonos: completed; spotify fallback %s, spotify_enabled=%s (user=%s)",
+                            "disabled" if not allow_spotify_fallback else "unavailable",
+                            spotify_enabled,
+                            ctx.user_id,
+                        )
+                        await asyncio.sleep(1)
                 else:
                     if sonos_enabled and defer_sonos:
                         logger.info(
                             "skipping sonos this loop to allow spotify (deferred) user=%s", ctx.user_id
                         )
 
-                if spotify_enabled and not ctx.stop_event.is_set() and not current_stop.is_set():
+                if (
+                    spotify_enabled
+                    and allow_spotify_fallback
+                    and not ctx.stop_event.is_set()
+                    and not current_stop.is_set()
+                ):
                     if ctx.channel.application_state != WebSocketState.CONNECTED:
                         logger.info("spotify: channel disconnected before start (user=%s)", ctx.user_id)
                         break
@@ -709,6 +732,11 @@ async def _user_driver(ctx: UserContext) -> None:
                             continue
                         logger.info("spotify: breaking due to stop/disconnect (user=%s)", ctx.user_id)
                         break
+                elif spotify_enabled and not allow_spotify_fallback:
+                    logger.info(
+                        "spotify fallback disabled; skipping spotify loop (user=%s)", ctx.user_id
+                    )
+                    await asyncio.sleep(1)
                 
                 # If we get here and neither service ran, break out of inner loop
                 # This happens when spotify is disabled or already stopped
@@ -802,14 +830,30 @@ async def media_events(ws: WebSocket) -> None:
         # Process the config (enabled services and poll intervals)
         enabled_cfg = msg.get("enabled") or {}
         poll_cfg = msg.get("poll") or {}
-        enabled = {
-            "spotify": enabled_cfg.get("spotify", False) is True,
-            "sonos": enabled_cfg.get("sonos", False) is True,
-        }
-        poll = {
-            "spotify": poll_cfg.get("spotify") if isinstance(poll_cfg.get("spotify"), (int, float)) else None,
-            "sonos": poll_cfg.get("sonos") if isinstance(poll_cfg.get("sonos"), (int, float)) else None,
-        }
+        fallback_cfg = msg.get("fallback") or {}
+
+        # Start from existing config; only update keys provided by the client.
+        enabled: Dict[str, bool] = dict(
+            ctx.config.get("enabled") or {"spotify": False, "sonos": False}
+        )
+        if "spotify" in enabled_cfg:
+            enabled["spotify"] = enabled_cfg.get("spotify") is True
+        if "sonos" in enabled_cfg:
+            enabled["sonos"] = enabled_cfg.get("sonos") is True
+
+        poll: Dict[str, Optional[float]] = dict(
+            ctx.config.get("poll") or {"spotify": None, "sonos": None}
+        )
+        if "spotify" in poll_cfg:
+            val = poll_cfg.get("spotify")
+            poll["spotify"] = val if isinstance(val, (int, float)) else None
+        if "sonos" in poll_cfg:
+            val = poll_cfg.get("sonos")
+            poll["sonos"] = val if isinstance(val, (int, float)) else None
+
+        fallback = dict(ctx.config.get("fallback") or {"spotify": DEFAULT_FALLBACK_TO_SPOTIFY})
+        if "spotify" in fallback_cfg and isinstance(fallback_cfg.get("spotify"), bool):
+            fallback["spotify"] = bool(fallback_cfg.get("spotify"))
 
         # Manage token refresh task based on need_token flag or Spotify enabled state
         # Token refresh task should run when:
@@ -849,14 +893,15 @@ async def media_events(ws: WebSocket) -> None:
                 return default_val
             return raw
 
-        poll["spotify"] = _apply_min(
-            poll.get("spotify"),
-            SPOTIFY_CFG.get("minPollIntervalSec"),
-            SPOTIFY_CFG.get("pollIntervalSec"),
-        )
+        if "spotify" in poll_cfg:
+            poll["spotify"] = _apply_min(
+                poll.get("spotify"),
+                SPOTIFY_CFG.get("minPollIntervalSec"),
+                SPOTIFY_CFG.get("pollIntervalSec"),
+            )
 
         # Sonos: if client sends None, honor None (no polling). Otherwise enforce minimum and default.
-        if poll.get("sonos") is not None:
+        if "sonos" in poll_cfg and poll.get("sonos") is not None:
             poll["sonos"] = _apply_min(
                 poll.get("sonos"),
                 SONOS_CFG.get("minPollIntervalSec"),
@@ -864,18 +909,19 @@ async def media_events(ws: WebSocket) -> None:
             )
 
         async with ctx.lock:
-            ctx.config = {"enabled": enabled, "poll": poll}
+            ctx.config = {"enabled": enabled, "poll": poll, "fallback": fallback}
             # Signal current streams to stop when config flips services off, then prepare a fresh stop event.
             ctx.service_stop_event.set()
             ctx.service_stop_event = asyncio.Event()
         ctx.config_event.set()
         logger.info(
-            "config updated user=%s enable_spotify=%s enable_sonos=%s poll_spotify=%s poll_sonos=%s sessions=%d raw_config=%s",
+            "config updated user=%s enable_spotify=%s enable_sonos=%s poll_spotify=%s poll_sonos=%s fallback_spotify=%s sessions=%d raw_config=%s",
             user_id,
             enabled["spotify"],
             enabled["sonos"],
             poll["spotify"],
             poll["sonos"],
+            fallback["spotify"],
             len(ctx.channel.sessions),
             msg,
         )
@@ -937,18 +983,37 @@ async def media_events(ws: WebSocket) -> None:
         await ctx.channel.remove(session_id)
         if not ctx.channel.has_sessions():
             ctx.stop_event.set()
-            await ctx.channel.close(code=1012, reason="No active sessions")
-            if ctx.driver_task:
-                ctx.driver_task.cancel()
-                with contextlib.suppress(BaseException):
-                    await ctx.driver_task
-                _discard_task(ctx.driver_task)
-            USER_CONTEXTS.pop(user_id, None)
+            ctx.service_stop_event.set()
+            ctx.config_event.set()
+
+            # Cancel driver task
+            driver = ctx.driver_task
+            if driver and not driver.done():
+                driver.cancel()
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(driver, timeout=2.0)
+
+            # Cancel token refresh/cache for this user
             cache_key = (ctx.user_id, "spotify")
-            token_task = TOKEN_TASKS.pop(cache_key, None)
-            if token_task:
-                token_task.cancel()
+            ttask = TOKEN_TASKS.pop(cache_key, None)
+            if ttask and not ttask.done():
+                ttask.cancel()
             TOKEN_CACHE.pop(cache_key, None)
+
+            # Reset health tracker so next login emits fresh status
+            HEALTH_TRACKER.reset("sonos")
+            HEALTH_TRACKER.reset("spotify")
+
+            # Clear config and remove context for this user only
+            ctx.config = {
+                "enabled": {"spotify": False, "sonos": False},
+                "poll": {"spotify": None, "sonos": None},
+                "fallback": {"spotify": DEFAULT_FALLBACK_TO_SPOTIFY},
+            }
+            USER_CONTEXTS.pop(user_id, None)
+
+            await ctx.channel.close(code=1012, reason="No active sessions")
+
         await _safe_close_ws(ws, code=1012, reason="Server shutting down")
 
 
