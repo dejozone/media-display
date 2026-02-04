@@ -1305,57 +1305,57 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
   }
 
   /// Immediately cycle to next service (called when service becomes unavailable)
-  void _cycleToNextService(ServiceType fromService) {
-    // Mark the current service as checked
-    _checkedNotPlaying.add(fromService);
+  // void _cycleToNextService(ServiceType fromService) {
+  //   // Mark the current service as checked
+  //   _checkedNotPlaying.add(fromService);
 
-    // Cancel any existing pause timer
-    _cancelPauseTimer();
+  //   // Cancel any existing pause timer
+  //   _cancelPauseTimer();
 
-    // Remember the original primary service if not set
-    _originalPrimaryService ??= _getHighestPriorityEnabledService();
+  //   // Remember the original primary service if not set
+  //   _originalPrimaryService ??= _getHighestPriorityEnabledService();
 
-    // Find next service to try
-    final nextService = _getNextServiceToTry();
+  //   // Find next service to try
+  //   final nextService = _getNextServiceToTry();
 
-    if (nextService != null) {
-      _log(
-          '[Orchestrator] Cycling to next service: $nextService (from $fromService)');
-      _waitingForPrimaryResume = true;
+  //   if (nextService != null) {
+  //     _log(
+  //         '[Orchestrator] Cycling to next service: $nextService (from $fromService)');
+  //     _waitingForPrimaryResume = true;
 
-      // switchToService will trigger _handleServicePriorityChange which calls
-      // _activateService -> sendConfigForService, so no need to send config here
-      ref.read(servicePriorityProvider.notifier).switchToService(nextService);
+  //     // switchToService will trigger _handleServicePriorityChange which calls
+  //     // _activateService -> sendConfigForService, so no need to send config here
+  //     ref.read(servicePriorityProvider.notifier).switchToService(nextService);
 
-      // Start recovery monitoring for the failed service
-      ref.read(servicePriorityProvider.notifier).startRecovery(fromService);
-    } else {
-      // All services checked - none available
-      _log('[Orchestrator] All services checked - none available');
-      _startCycleResetTimer();
+  //     // Start recovery monitoring for the failed service
+  //     ref.read(servicePriorityProvider.notifier).startRecovery(fromService);
+  //   } else {
+  //     // All services checked - none available
+  //     _log('[Orchestrator] All services checked - none available');
+  //     _startCycleResetTimer();
 
-      // Try to switch to the best available (healthy) service
-      // This ensures we don't stay stuck on an unhealthy service
-      final bestService = _getHighestPriorityAvailableService();
-      if (bestService != null) {
-        final current = ref.read(servicePriorityProvider).currentService;
-        if (current != bestService) {
-          _log(
-              '[Orchestrator] Switching to best available service: $bestService');
-          ref
-              .read(servicePriorityProvider.notifier)
-              .switchToService(bestService);
-        }
-      } else {
-        // No available services - keep current or clear
-        _log('[Orchestrator] No available services after cycling');
-      }
+  //     // Try to switch to the best available (healthy) service
+  //     // This ensures we don't stay stuck on an unhealthy service
+  //     final bestService = _getHighestPriorityAvailableService();
+  //     if (bestService != null) {
+  //       final current = ref.read(servicePriorityProvider).currentService;
+  //       if (current != bestService) {
+  //         _log(
+  //             '[Orchestrator] Switching to best available service: $bestService');
+  //         ref
+  //             .read(servicePriorityProvider.notifier)
+  //             .switchToService(bestService);
+  //       }
+  //     } else {
+  //       // No available services - keep current or clear
+  //       _log('[Orchestrator] No available services after cycling');
+  //     }
 
-      // Reset waiting state since we've exhausted options
-      _waitingForPrimaryResume = false;
-      _originalPrimaryService = null;
-    }
-  }
+  //     // Reset waiting state since we've exhausted options
+  //     _waitingForPrimaryResume = false;
+  //     _originalPrimaryService = null;
+  //   }
+  // }
 
   /// Get the next service to try (respecting priority, skipping checked services)
   ServiceType? _getNextServiceToTry() {

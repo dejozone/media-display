@@ -71,7 +71,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       false; // Track if WS has sent a token (prefer WS over REST)
   bool _lastSpotifyEnabled = false; // Track previous Spotify enabled state
   Map<String, dynamic>? _lastConfigSent; // Last config payload sent to server
-  String? _lastConfigJson;
+  // String? _lastConfigJson;
   DateTime? _lastConfigSentAt;
 
   /// Callback for service status updates (set by orchestrator)
@@ -1027,7 +1027,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
 
       _channel?.sink.add(payloadJson);
       _lastConfigSent = payload;
-      _lastConfigJson = payloadJson;
+      // _lastConfigJson = payloadJson;
       _lastConfigSentAt = DateTime.now();
       _log('[WS] Config sent: $logLabel');
     } catch (e) {
