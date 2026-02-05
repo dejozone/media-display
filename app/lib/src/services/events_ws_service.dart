@@ -70,6 +70,9 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   bool _wsTokenReceived =
       false; // Track if WS has sent a token (prefer WS over REST)
   bool _lastSpotifyEnabled = false; // Track previous Spotify enabled state
+  // Track last enabled states sent during the current WebSocket connection
+  // to avoid re-sending redundant enabled=true toggles. Reset on disconnect.
+  final Map<String, bool> _lastEnabledSent = {};
   Map<String, dynamic>? _lastConfigSent; // Last config payload sent to server
   // String? _lastConfigJson;
   DateTime? _lastConfigSentAt;
@@ -358,6 +361,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     _lastTokenRequestTime =
         null; // Reset debounce - any pending token request was lost
     _lastSpotifyEnabled = false; // Reset so next enable triggers token request
+    _lastEnabledSent.clear(); // Reset per-connection enable tracking
 
     // If not scheduling retry (intentional disconnect), reset retry policy
     // so future manual reconnection attempts can proceed
@@ -548,6 +552,10 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
           'spotify': spotifyPoll,
           'sonos': sonosPoll,
         },
+        if (userSpotifyEnabled)
+          'fallback': {
+            'spotify': false,
+          },
       };
 
       // If no channel, try to connect first
@@ -627,11 +635,12 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
 
       // Get user's enabled settings
       final userSpotifyEnabled = settings?['spotify_enabled'] == true;
-      // final userSonosEnabled = settings?['sonos_enabled'] == true;  // Not used - see below
+      final userSonosEnabled = settings?['sonos_enabled'] == true;
 
       // Use base WebSocket config for the active service
       // Each service type defines exactly what the server should stream:
-      // - directSpotify: spotify=false, sonos=false (client polls Spotify directly)
+      // - directSpotify: spotify=false, sonos=false (client polls Spotify directly;
+      //   we still keep server Spotify polling if user enabled to allow recovery)
       // - cloudSpotify: spotify=true, sonos=false (server polls Spotify)
       // - localSonos: spotify=false, sonos=true (server streams Sonos)
       //
@@ -640,7 +649,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       //
       // keepSpotifyPollingForRecovery overrides spotify to true when we're falling
       // back from cloudSpotify to directSpotify, so the server continues its retry
-      // loop and can emit healthy status when it recovers.
+      // loop and can emit healthy status when it recovers (still gated by user setting).
       //
       // NOTE: We intentionally do NOT enable Sonos when directSpotify is active,
       // even if user has Sonos enabled. Receiving Sonos data would cause the
@@ -656,26 +665,89 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       // When Spotify is disabled, explicitly send false to cancel token task on server.
       final needToken = userSpotifyEnabled;
 
+      // Build minimal enabled/poll maps so unspecified services remain untouched
+      // on the server. Only include the service being switched (and any explicitly
+      // kept-for-recovery flags).
+      final enabled = <String, bool>{};
+      final poll = <String, int?>{};
+
+      void setSpotify(bool value) {
+        enabled['spotify'] = value;
+        poll['spotify'] = spotifyPoll;
+      }
+
+      void setSonos(bool value) {
+        enabled['sonos'] = value;
+        poll['sonos'] = sonosPoll;
+      }
+
+      // Helper to decide whether to explicitly set spotify enabled/disabled.
+      // We avoid sending "disable" when switching away from cloud Spotify so the
+      // server can keep retrying; we only send true for recovery, or false if the
+      // user disabled Spotify in settings.
+      bool shouldExplicitlyEnableSpotifyForRecovery() =>
+          keepSpotifyPollingForRecovery && userSpotifyEnabled;
+      bool shouldExplicitlyDisableSpotify() => !userSpotifyEnabled;
+
+      if (service == ServiceType.directSpotify) {
+        // Do not disable server Spotify polling; let it keep retrying.
+        // Only send enable if explicitly keeping for recovery, and send disable
+        // if the user turned Spotify off in settings.
+        if (shouldExplicitlyEnableSpotifyForRecovery()) {
+          setSpotify(true);
+        } else if (shouldExplicitlyDisableSpotify()) {
+          setSpotify(false);
+        }
+
+        // Keep Sonos enabled only when explicitly requested and user has Sonos enabled.
+        if (wsConfig.sonos && userSonosEnabled) setSonos(true);
+        if (!userSonosEnabled) setSonos(false);
+      } else if (service == ServiceType.cloudSpotify) {
+        // Enable backend Spotify polling; Sonos only if explicitly kept and user enabled.
+        setSpotify(userSpotifyEnabled);
+        if (wsConfig.sonos && userSonosEnabled) {
+          setSonos(true);
+        } else if (!userSonosEnabled) {
+          setSonos(false);
+        }
+      } else if (service == ServiceType.localSonos) {
+        // Enable Sonos streaming. Disable Spotify on the server unless we are
+        // explicitly keeping it for recovery. This ensures lower-priority
+        // cloud_spotify stops when Sonos takes over.
+        // When not keeping Spotify for recovery, also drop spotify poll entry
+        // to avoid emitting any temporary spotify=true configs.
+        setSonos(userSonosEnabled);
+        if (shouldExplicitlyEnableSpotifyForRecovery()) {
+          setSpotify(true);
+        } else {
+          setSpotify(false);
+          poll.remove('spotify');
+        }
+      }
+
+      // _log('[WS] sendConfigForService: service=$service, '
+      //     'keepSonosEnabled=$keepSonosEnabled, '
+      //     'keepSpotifyPollingForRecovery=$keepSpotifyPollingForRecovery, '
+      //     'wsConfig=(spotify=${wsConfig.spotify}, sonos=${wsConfig.sonos}), '
+      //     'enabled=$enabled, poll=$poll, needToken=$needToken (spotifyEnabled=$userSpotifyEnabled)');
+
+      final payload = {
+        'type': 'config',
+        'need_spotify_token': needToken,
+        'enabled': enabled,
+        'poll': poll,
+        if (enabled['spotify'] == true)
+          'fallback': {
+            'spotify': false,
+          },
+      };
+
       _log('[WS] sendConfigForService: service=$service, '
           'keepSonosEnabled=$keepSonosEnabled, '
           'keepSpotifyPollingForRecovery=$keepSpotifyPollingForRecovery, '
           'wsConfig=(spotify=${wsConfig.spotify}, sonos=${wsConfig.sonos}), '
-          'needToken=$needToken (spotifyEnabled=$userSpotifyEnabled)');
+          '(spotifyEnabled=$userSpotifyEnabled), payload=$payload');
 
-      // Always include need_spotify_token to explicitly tell server what to do
-      // true = emit tokens for direct polling, false = cancel token refresh task
-      final payload = {
-        'type': 'config',
-        'need_spotify_token': needToken,
-        'enabled': {
-          'spotify': wsConfig.spotify,
-          'sonos': wsConfig.sonos,
-        },
-        'poll': {
-          'spotify': spotifyPoll,
-          'sonos': sonosPoll, // null = let server decide
-        },
-      };
 
       // If no channel, try to connect first
       if (_channel == null) {
@@ -778,6 +850,10 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
           'spotify': spotifyPoll,
           'sonos': sonosPoll,
         },
+        if (spotifyEnabledForPayload)
+          'fallback': {
+            'spotify': false,
+          },
       });
 
       if (_channel == null) {
@@ -953,6 +1029,10 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
           'spotify': spotifyPoll,
           'sonos': sonosPoll,
         },
+        if (backendSpotifyEnabled)
+          'fallback': {
+            'spotify': false,
+          },
       };
 
       // If we currently have no socket (e.g., after navigation or a tab opened), establish it first.
@@ -1013,7 +1093,28 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   Future<void> _sendConfigPayload(Map<String, dynamic> payload,
       {required String logLabel}) async {
     try {
-      final payloadJson = jsonEncode(payload);
+      // Drop redundant enabled=true toggles while the WebSocket stays alive.
+      // Server keeps services enabled until explicitly disabled, so re-sending
+      // true is unnecessary and causes noisy config churn.
+      final mutable = Map<String, dynamic>.from(payload);
+      final enabled = (mutable['enabled'] as Map?)?.cast<String, bool>();
+      if (enabled != null) {
+        final filtered = <String, bool>{};
+        enabled.forEach((key, value) {
+          final prev = _lastEnabledSent[key];
+          // Only skip when re-sending true that we've already sent in this connection.
+          if (value == true && prev == true) return;
+          filtered[key] = value;
+        });
+
+        if (filtered.isEmpty) {
+          mutable.remove('enabled');
+        } else {
+          mutable['enabled'] = filtered;
+        }
+      }
+
+      final payloadJson = jsonEncode(mutable);
 
       // if (payloadJson == _lastConfigJson) {
       //   _log('[WS] Suppressing duplicate config: $logLabel');
@@ -1026,9 +1127,14 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       }
 
       _channel?.sink.add(payloadJson);
-      _lastConfigSent = payload;
+      _lastConfigSent = mutable;
       // _lastConfigJson = payloadJson;
       _lastConfigSentAt = DateTime.now();
+      // Update enabled tracking only with what we actually sent
+      final sentEnabled = (mutable['enabled'] as Map?)?.cast<String, bool>();
+      if (sentEnabled != null) {
+        _lastEnabledSent.addAll(sentEnabled);
+      }
       _log('[WS] Config sent: $logLabel');
     } catch (e) {
       _log('[WS] Error sending $logLabel config: $e');

@@ -38,7 +38,7 @@
     "noDeviceRetryIntervalSec": 15,
     "sendHealthStatusWindowSec": 30,
     "numOfEmitStatusRetries": 3,
-    "fallbackToSpotifyOnError": true
+    "fallbackToSpotifyOnError": false
   },
   "server": {
     "timeoutGracefulShutdownSec": 1

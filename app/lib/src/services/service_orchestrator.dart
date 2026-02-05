@@ -371,9 +371,14 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     // Send WebSocket config to tell backend not to poll
     // (we're polling directly from client)
     // Keep sonos enabled if we're waiting for it to resume
-    final keepSonos = isFallback ||
+    final keepSonosBase = isFallback ||
         (_waitingForPrimaryResume &&
             _originalPrimaryService == ServiceType.localSonos);
+    final keepSonos = keepSonosBase && isServiceHealthy(ServiceType.localSonos);
+    if (keepSonosBase && !keepSonos) {
+      _log(
+          '[Orchestrator] Sonos unhealthy - not keeping sonos enabled while on directSpotify');
+    }
 
     // Keep spotify polling enabled if cloudSpotify is unhealthy
     // This allows the server to continue its retry loop and emit healthy status
@@ -406,13 +411,17 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     ref.read(spotifyDirectProvider.notifier).stopPolling();
 
     // Connect/reconnect WebSocket and send config for this service
-    // Keep other services enabled while we cycle, so recovering services
-    // stay active and can report health without being disabled by config.
-    final keepSonos = service == ServiceType.cloudSpotify
-        ? true
-        : (isFallback ||
-            (_waitingForPrimaryResume &&
-                _originalPrimaryService == ServiceType.localSonos));
+    // Keep other services enabled only when explicitly cycling/fallback. When
+    // cloudSpotify is active, do NOT keep Sonos enabled by default to avoid
+    // churny configs; Sonos will be enabled only when explicitly requested.
+    final keepSonosBase = (isFallback ||
+        (_waitingForPrimaryResume &&
+          _originalPrimaryService == ServiceType.localSonos));
+    final keepSonos = keepSonosBase && isServiceHealthy(ServiceType.localSonos);
+    if (keepSonosBase && !keepSonos) {
+      _log(
+          '[Orchestrator] Sonos unhealthy - not keeping sonos enabled while on $service');
+    }
 
     // When running on Sonos during fallback, keep Spotify polling so it can
     // recover and take over when healthy (higher priority rules apply).
@@ -748,6 +757,17 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
     // Report success to priority manager
     ref.read(servicePriorityProvider.notifier).reportSuccess(source);
+
+    // When a higher-priority service is actively playing with valid track data,
+    // stop all lower-priority retry/recovery activity to avoid churn.
+    final priority = ref.read(servicePriorityProvider);
+    final hasTrackInfo = _hasValidTrackInfo(track);
+    final isCurrent = priority.currentService == source;
+    if (isCurrent && isPlaying && hasTrackInfo) {
+      ref
+          .read(servicePriorityProvider.notifier)
+          .quiesceLowerPriorityServices(source);
+    }
 
     // If a cloud service was marked awaiting recovery, receiving any data means
     // the backend is responsive again. Clear awaiting-recovery so we can use it.

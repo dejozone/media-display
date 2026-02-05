@@ -917,6 +917,57 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     _retryTimer = null;
   }
 
+  /// Stop all retry/recovery activity for services below the active one.
+  /// Used when a higher-priority service is confirmed playing so we don't churn.
+  void quiesceLowerPriorityServices(ServiceType activeService) {
+    final activeIndex = state.configuredOrder.indexOf(activeService);
+    if (activeIndex < 0) {
+      return;
+    }
+
+    final newStatuses = Map<ServiceType, ServiceStatus>.from(state.serviceStatuses);
+    final newErrors = Map<ServiceType, int>.from(state.errorCounts);
+    final newCooldowns = Map<ServiceType, DateTime?>.from(state.cooldownEnds);
+    final newRetryWindows = Map<ServiceType, DateTime?>.from(state.retryWindowStarts);
+    final newLastRetries = Map<ServiceType, DateTime?>.from(state.lastRetryAttempts);
+    final newAwaiting = Set<ServiceType>.from(state.awaitingRecovery);
+    final newRecoveryStates = Map<ServiceType, ServiceRecoveryState>.from(state.recoveryStates);
+
+    for (final service in ServiceType.values) {
+      final idx = state.configuredOrder.indexOf(service);
+      if (idx <= activeIndex || idx < 0) continue;
+
+      // Clear retry/error state for lower-priority services.
+      newErrors[service] = 0;
+      newCooldowns[service] = null;
+      newRetryWindows[service] = null;
+      newLastRetries[service] = null;
+      newAwaiting.remove(service);
+      newRecoveryStates.remove(service);
+
+      // Keep them in standby/disabled; do not allow them to re-activate via timers.
+      if (newStatuses[service] != ServiceStatus.disabled) {
+        newStatuses[service] = ServiceStatus.standby;
+      }
+    }
+
+    state = state.copyWith(
+      serviceStatuses: newStatuses,
+      errorCounts: newErrors,
+      cooldownEnds: newCooldowns,
+      retryWindowStarts: newRetryWindows,
+      lastRetryAttempts: newLastRetries,
+      awaitingRecovery: newAwaiting,
+      recoveryStates: newRecoveryStates,
+    );
+
+    // Cancel timers if no services are under retry/recovery.
+    _cancelRetryTimer();
+    if (state.recoveryStates.isEmpty) {
+      _stopRecoveryTimer();
+    }
+  }
+
   /// Get the first (highest priority) enabled service
   ServiceType? _getFirstEnabledService() {
     final order = state.effectiveOrder;
