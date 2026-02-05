@@ -782,92 +782,12 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   /// Sonos device discovery to find the right coordinator.
   Future<void> triggerSonosDiscovery() async {
     try {
-      final env = ref.read(envConfigProvider);
-
-      // Get current settings
-      Map<String, dynamic>? settings = _lastSettings;
-      if (settings == null) {
-        try {
-          final user = await ref.read(userServiceProvider).fetchMe();
-          final userId = user['id']?.toString() ?? '';
-          if (userId.isNotEmpty) {
-            settings = await ref
-                .read(settingsServiceProvider)
-                .fetchSettingsForUser(userId);
-            _lastSettings = settings;
-          }
-        } catch (_) {
-          // Use defaults
-        }
-      }
-
-      // Check if Sonos is actually enabled
-      final userSonosEnabled = settings?['sonos_enabled'] == true;
-      if (!userSonosEnabled) {
-        _log('[WS] triggerSonosDiscovery: Sonos not enabled, skipping');
-        return;
-      }
-
-      int? asInt(dynamic v) {
-        if (v is int) return v;
-        if (v is double) return v.toInt();
-        if (v is String) return int.tryParse(v);
-        return null;
-      }
-
-      int? asIntOrNull(dynamic v) {
-        final val = asInt(v);
-        return (val == null || val <= 0) ? null : val;
-      }
-
-      final spotifyPoll = asInt(settings?['spotify_poll_interval_sec']) ??
-          env.spotifyPollIntervalSec;
-      final sonosPoll = asIntOrNull(settings?['sonos_poll_interval_sec']) ??
-          env.sonosPollIntervalSec;
-
-      // Keep current Spotify state, but enable Sonos to trigger discovery
-      final userSpotifyEnabled = settings?['spotify_enabled'] == true;
-      final needToken = userSpotifyEnabled;
-
-      // When direct Spotify is active, keep backend spotify disabled to avoid
-      // starting server polling; we only need Sonos discovery.
-      final priority = ref.read(servicePriorityProvider);
-      final spotifyEnabledForPayload =
-          priority.currentService == ServiceType.directSpotify
-              ? false
-              : userSpotifyEnabled;
-
-      _log('[WS] triggerSonosDiscovery: Sending config with sonos=true');
-
-      final payload = jsonEncode({
-        'type': 'config',
-        'need_spotify_token': needToken,
-        'enabled': {
-          'spotify': spotifyEnabledForPayload,
-          'sonos': true, // Force sonos enabled to trigger discovery
-        },
-        'poll': {
-          'spotify': spotifyPoll,
-          'sonos': sonosPoll,
-        },
-        if (spotifyEnabledForPayload)
-          'fallback': {
-            'spotify': false,
-          },
-      });
-
-      if (_channel == null) {
-        final auth = ref.read(authStateProvider);
-        if (!auth.isAuthenticated || _connecting) return;
-        await _connect(auth,
-            caller: 'triggerSonosDiscovery', skipSendConfig: true);
-        if (_channel != null) {
-          _channel?.sink.add(payload);
-        }
-        return;
-      }
-
-      _channel?.sink.add(payload);
+      // Reuse the standard service config path to avoid divergent payloads.
+      // This enables Sonos and disables Spotify unless explicitly kept for
+      // recovery. Discovery runs via the normal Sonos service config.
+      _log('[WS] triggerSonosDiscovery: delegating to sendConfigForService(localSonos)');
+      await sendConfigForService(ServiceType.localSonos,
+          keepSpotifyPollingForRecovery: false);
     } catch (e) {
       _log('[WS] triggerSonosDiscovery error: $e');
     }
