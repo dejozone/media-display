@@ -113771,29 +113771,28 @@ l=b===B.D?"sonos":"spotify"
 k.cy.l(0,l,A.aXa(0,j,new A.bM(Date.now(),0,!1),j,l,0,!1,B.cB))
 A.V(k).V(s.gbk(),p).R1(b)
 k.a0Y()}},
-aiz(a,b){var s,r,q,p,o=this,n=A.bw(a.h(0,"type")),m=A.bw(a.h(0,"name")),l=A.V(o),k=$.dK(),j=l.V(k,t.c),i=j.b.p(0,B.D),h=j.c
-l=h!=null
-s=l&&o.arq(B.D,h)
-if(!(!l||h===B.a5||h===B.a6))return
-r=h===B.a5
-q=r&&i&&s
+aiz(a,b){var s,r,q,p,o,n=this,m=A.bw(a.h(0,"type")),l=A.bw(a.h(0,"name")),k=A.V(n),j=$.dK(),i=k.V(j,t.c),h=i.b.p(0,B.D),g=i.c
+k=g!=null
+s=k&&n.arq(B.D,g)
+if(!(!k||g===B.a5||g===B.a6))return
+r=g===B.a5
+q=r&&h&&s
 if(r&&!q){A.aW("[Orchestrator] Speaker detected while on directSpotify - keeping Sonos disabled")
-o.KD()
-o.Mx()
-return}if(r&&q)o.alg()
-if(n!=="Speaker"){if(o.db!=null){A.aW("[Orchestrator] Device changed from Speaker to "+A.k(n)+" - resetting Sonos discovery state")
-o.Mx()}return}if(m==o.db&&o.dx)return
-if(!i)return
+n.KD()
+n.Mx()
+return}if(r&&q)n.alg()
+if(m!=="Speaker"){if(n.db!=null){A.aW("[Orchestrator] Device changed from Speaker to "+A.k(m)+" - resetting Sonos discovery state")
+n.Mx()}return}if(l==n.db&&n.dx)return
+if(!h)return
 if(!b)return
 p=!0
-if(l)if(h!==B.a6)l=r&&q
-else l=p
-else l=p
-if(l){o.db=m
-o.dx=!0
-A.V(o).V($.j8().gbk(),t.bb).Ib()
-if(h===B.a6&&j.Ao(B.D)){A.aW("[Orchestrator] Speaker device detected on cloudSpotify - switching to Sonos")
-A.V(o).V(k.gbk(),t.Q).pb(B.D)}}},
+if(k)if(g!==B.a6){k=r&&q
+p=k}if(p){n.db=l
+n.dx=!0
+o=g===B.a6&&i.Ao(B.D)
+if(!o)A.V(n).V($.j8().gbk(),t.bb).Ib()
+if(o){A.aW("[Orchestrator] Speaker device detected on cloudSpotify - switching to Sonos")
+A.V(n).V(j.gbk(),t.Q).pb(B.D)}}},
 Mx(){var s=this
 if(s.db!=null||s.dx)A.aW("[Orchestrator] Resetting Sonos discovery state")
 s.db=null

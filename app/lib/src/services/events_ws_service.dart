@@ -748,7 +748,6 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
           'wsConfig=(spotify=${wsConfig.spotify}, sonos=${wsConfig.sonos}), '
           '(spotifyEnabled=$userSpotifyEnabled), payload=$payload');
 
-
       // If no channel, try to connect first
       if (_channel == null) {
         final auth = ref.read(authStateProvider);
@@ -785,7 +784,8 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       // Reuse the standard service config path to avoid divergent payloads.
       // This enables Sonos and disables Spotify unless explicitly kept for
       // recovery. Discovery runs via the normal Sonos service config.
-      _log('[WS] triggerSonosDiscovery: delegating to sendConfigForService(localSonos)');
+      _log(
+          '[WS] triggerSonosDiscovery: delegating to sendConfigForService(localSonos)');
       await sendConfigForService(ServiceType.localSonos,
           keepSpotifyPollingForRecovery: false);
     } catch (e) {

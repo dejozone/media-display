@@ -416,7 +416,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     // churny configs; Sonos will be enabled only when explicitly requested.
     final keepSonosBase = (isFallback ||
         (_waitingForPrimaryResume &&
-          _originalPrimaryService == ServiceType.localSonos));
+            _originalPrimaryService == ServiceType.localSonos));
     final keepSonos = keepSonosBase && isServiceHealthy(ServiceType.localSonos);
     if (keepSonosBase && !keepSonos) {
       _log(
@@ -866,18 +866,25 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
     // Trigger discovery when cloud Spotify is active, or when direct Spotify is active
     // but Sonos is higher priority (so we can switch up).
-    if (currentService == null ||
+    final shouldTriggerDiscovery = currentService == null ||
         currentService == ServiceType.cloudSpotify ||
         (currentService == ServiceType.directSpotify &&
-            allowDirectSpotifyDiscovery)) {
+            allowDirectSpotifyDiscovery);
+
+    if (shouldTriggerDiscovery) {
       _lastSpeakerDeviceName = deviceName;
       _sonosDiscoveryTriggered = true;
-      _triggerSonosDiscovery();
 
-      // If we're on cloud Spotify and Sonos is available, switch immediately to
-      // Sonos to align with user expectation of playing on speakers.
-      if (currentService == ServiceType.cloudSpotify &&
-          priority.isServiceAvailable(ServiceType.localSonos)) {
+      // If we're about to switch to Sonos immediately, let the normal service
+      // activation send the config to avoid duplicate configs from discovery.
+      final willSwitchToSonos = currentService == ServiceType.cloudSpotify &&
+          priority.isServiceAvailable(ServiceType.localSonos);
+
+      if (!willSwitchToSonos) {
+        _triggerSonosDiscovery();
+      }
+
+      if (willSwitchToSonos) {
         _log(
             '[Orchestrator] Speaker device detected on cloudSpotify - switching to Sonos');
         ref

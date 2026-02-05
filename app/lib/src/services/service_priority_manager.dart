@@ -925,13 +925,17 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       return;
     }
 
-    final newStatuses = Map<ServiceType, ServiceStatus>.from(state.serviceStatuses);
+    final newStatuses =
+        Map<ServiceType, ServiceStatus>.from(state.serviceStatuses);
     final newErrors = Map<ServiceType, int>.from(state.errorCounts);
     final newCooldowns = Map<ServiceType, DateTime?>.from(state.cooldownEnds);
-    final newRetryWindows = Map<ServiceType, DateTime?>.from(state.retryWindowStarts);
-    final newLastRetries = Map<ServiceType, DateTime?>.from(state.lastRetryAttempts);
+    final newRetryWindows =
+        Map<ServiceType, DateTime?>.from(state.retryWindowStarts);
+    final newLastRetries =
+        Map<ServiceType, DateTime?>.from(state.lastRetryAttempts);
     final newAwaiting = Set<ServiceType>.from(state.awaitingRecovery);
-    final newRecoveryStates = Map<ServiceType, ServiceRecoveryState>.from(state.recoveryStates);
+    final newRecoveryStates =
+        Map<ServiceType, ServiceRecoveryState>.from(state.recoveryStates);
 
     for (final service in ServiceType.values) {
       final idx = state.configuredOrder.indexOf(service);
