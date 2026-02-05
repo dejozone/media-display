@@ -110,7 +110,7 @@ class EnvConfig {
     required this.wsRetryActiveSeconds,
     required this.wsRetryCooldownSeconds,
     required this.wsRetryMaxTotalSeconds,
-    required this.spotifyPollIntervalSec,
+    required this.cloudSpotifyPollIntervalSec,
     required this.maxAvatarsPerUser,
     required this.spotifyDirectPollIntervalSec,
     required this.spotifyDirectRetryIntervalSec,
@@ -143,7 +143,7 @@ class EnvConfig {
   final int wsRetryActiveSeconds;
   final int wsRetryCooldownSeconds;
   final int wsRetryMaxTotalSeconds;
-  final int spotifyPollIntervalSec;
+  final int cloudSpotifyPollIntervalSec;
   final int? sonosPollIntervalSec;
   final int maxAvatarsPerUser;
   final int spotifyDirectPollIntervalSec;
@@ -197,11 +197,11 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
       int.tryParse(dotenv.env['WS_RETRY_COOLDOWN_SECONDS'] ?? '') ?? 60;
   final wsRetryMaxTotalSeconds =
       int.tryParse(dotenv.env['WS_RETRY_MAX_TOTAL_SECONDS'] ?? '') ?? 1800;
-  final spotifyPollIntervalSec =
-      int.tryParse(dotenv.env['SPOTIFY_POLL_INTERVAL_SEC'] ?? '') ?? 3;
+  final cloudSpotifyPollIntervalSec =
+      int.tryParse(dotenv.env['CLOUD_SPOTIFY_POLL_INTERVAL_SEC'] ?? '') ?? 3;
   // Sonos poll interval: null or 0 means let the server decide
   final sonosPollIntervalSecRaw =
-      int.tryParse(dotenv.env['SONOS_POLL_INTERVAL_SEC'] ?? '');
+      int.tryParse(dotenv.env['LOCAL_SONOS_POLL_INTERVAL_SEC'] ?? '');
   final sonosPollIntervalSec =
       (sonosPollIntervalSecRaw == null || sonosPollIntervalSecRaw <= 0)
           ? null
@@ -346,7 +346,7 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
     wsRetryActiveSeconds: wsRetryActiveSeconds,
     wsRetryCooldownSeconds: wsRetryCooldownSeconds,
     wsRetryMaxTotalSeconds: wsRetryMaxTotalSeconds,
-    spotifyPollIntervalSec: spotifyPollIntervalSec,
+    cloudSpotifyPollIntervalSec: cloudSpotifyPollIntervalSec,
     sonosPollIntervalSec: sonosPollIntervalSec,
     maxAvatarsPerUser: maxAvatarsPerUser,
     spotifyDirectPollIntervalSec: spotifyDirectPollIntervalSec,

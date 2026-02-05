@@ -530,7 +530,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       }
 
       final spotifyPoll = asInt(settings?['spotify_poll_interval_sec']) ??
-          env.spotifyPollIntervalSec;
+          env.cloudSpotifyPollIntervalSec;
       final sonosPoll = asIntOrNull(settings?['sonos_poll_interval_sec']) ??
           env.sonosPollIntervalSec;
 
@@ -628,7 +628,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       }
 
       final spotifyPoll = asInt(settings?['spotify_poll_interval_sec']) ??
-          env.spotifyPollIntervalSec;
+          env.cloudSpotifyPollIntervalSec;
       // Sonos poll: null or 0 = let server decide
       final sonosPoll = asIntOrNull(settings?['sonos_poll_interval_sec']) ??
           env.sonosPollIntervalSec;
@@ -879,7 +879,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
             final ms = asInt(settings?['spotify_poll_interval_ms']);
             return ms != null ? (ms / 1000).round() : null;
           })() ??
-          env.spotifyPollIntervalSec;
+          env.cloudSpotifyPollIntervalSec;
 
       // Sonos poll: null or 0 = let server decide
       final sonosPoll = asIntOrNull(
