@@ -283,7 +283,7 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
         3,
     fallbackTimeThresholdSec: int.tryParse(
             dotenv.env['CLOUD_SPOTIFY_FALLBACK_TIME_THRESHOLD_SEC'] ?? '') ??
-        0,
+        10,
     retryIntervalSec:
         int.tryParse(dotenv.env['CLOUD_SPOTIFY_RETRY_INTERVAL_SEC'] ?? '') ??
             10,
@@ -311,7 +311,7 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
         3,
     fallbackTimeThresholdSec: int.tryParse(
             dotenv.env['LOCAL_SONOS_FALLBACK_TIME_THRESHOLD_SEC'] ?? '') ??
-        0,
+        10,
     retryIntervalSec:
         int.tryParse(dotenv.env['LOCAL_SONOS_RETRY_INTERVAL_SEC'] ?? '') ?? 10,
     retryCooldownSec:
