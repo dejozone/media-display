@@ -223,10 +223,10 @@ class ServicePriorityState {
     final fallbackConfig = _getFallbackConfig(service, config);
 
     // Check if we've exceeded the max retry window
-    if (retryWindowStart != null) {
+    if (retryWindowStart != null && fallbackConfig.retryWindowSec > 0) {
       final windowElapsed =
           DateTime.now().difference(retryWindowStart).inSeconds;
-      if (windowElapsed > fallbackConfig.retryMaxWindowSec) {
+      if (windowElapsed > fallbackConfig.retryWindowSec) {
         return false; // Exceeded retry window
       }
     }
@@ -651,6 +651,19 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     final currentCount = newErrors[service] ?? 0;
     newErrors[service] = currentCount + 1;
 
+    // Track when the first error in the current window occurred for time-based fallback
+    final newRetryWindows =
+        Map<ServiceType, DateTime?>.from(state.retryWindowStarts);
+    final now = DateTime.now();
+    newRetryWindows[service] = newRetryWindows[service] ?? now;
+
+    final timeThreshold = fallbackConfig.fallbackTimeThresholdSec;
+    final elapsedSinceFirstError = newRetryWindows[service] != null
+        ? now.difference(newRetryWindows[service]!).inSeconds
+        : 0;
+    final timeThresholdReached =
+        timeThreshold > 0 && elapsedSinceFirstError >= timeThreshold;
+
     _log('[ServicePriority] Error on $service '
         '(${newErrors[service]}/$effectiveThreshold)');
 
@@ -667,10 +680,16 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       _log('[ServicePriority] Marked $service as awaiting server recovery');
     }
 
-    if (newErrors[service]! >= effectiveThreshold) {
-      // Threshold reached - enter cooldown and trigger fallback
+    final thresholdReached =
+        newErrors[service]! >= effectiveThreshold || timeThresholdReached;
+
+    if (thresholdReached) {
+      // Threshold reached (by count or time) - enter cooldown and trigger fallback
+      final reason = newErrors[service]! >= effectiveThreshold
+          ? 'error-threshold'
+          : 'time-threshold';
       _log(
-          '[ServicePriority] Error threshold reached for $service - entering cooldown');
+          '[ServicePriority] Threshold reached for $service ($reason) - entering cooldown');
 
       newStatuses[service] = ServiceStatus.cooldown;
 
@@ -678,13 +697,6 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       newCooldowns[service] = DateTime.now().add(
         Duration(seconds: fallbackConfig.retryCooldownSec),
       );
-
-      // Start retry window if not already started
-      final newRetryWindows =
-          Map<ServiceType, DateTime?>.from(state.retryWindowStarts);
-      if (newRetryWindows[service] == null) {
-        newRetryWindows[service] = DateTime.now();
-      }
 
       state = state.copyWith(
         errorCounts: newErrors,
@@ -703,6 +715,7 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       state = state.copyWith(
         errorCounts: newErrors,
         serviceStatuses: newStatuses,
+        retryWindowStarts: newRetryWindows,
       );
     }
   }
@@ -1201,10 +1214,10 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
 
       // Get service-specific config
       final fallbackConfig = _config.getFallbackConfig(service);
-      final maxWindow = fallbackConfig.retryMaxWindowSec;
+      final maxWindow = fallbackConfig.retryWindowSec;
 
-      // Check max window (negative = infinite)
-      if (maxWindow >= 0) {
+      // Check max window (0 or negative = infinite)
+      if (maxWindow > 0) {
         final windowElapsed =
             now.difference(recoveryState.windowStartTime).inSeconds;
         if (windowElapsed >= maxWindow) {

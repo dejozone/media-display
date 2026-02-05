@@ -65,6 +65,7 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
     _apiClient = SpotifyApiClient(
       sslVerify: env.spotifyDirectApiSslVerify,
       baseUrl: env.spotifyDirectApiBaseUrl,
+      timeoutSec: env.spotifyDirectTimeoutSec,
     );
 
     ref.onDispose(() {
@@ -351,11 +352,14 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
     final env = ref.read(envConfigProvider);
     final now = DateTime.now();
 
-    // Check if we've been failing for longer than retry window
+    // Check if we've been failing for longer than retry window (0 = unlimited)
     _fallbackStartTime ??= now;
 
     final failureDuration = now.difference(_fallbackStartTime!);
-    if (failureDuration.inSeconds >= env.spotifyDirectRetryWindowSec) {
+    final retryWindowSec = env.spotifyDirectRetryWindowSec;
+    final windowExceeded =
+        retryWindowSec > 0 && failureDuration.inSeconds >= retryWindowSec;
+    if (windowExceeded) {
       // debugPrint(
       //     '[SPOTIFY] Direct poll failed for ${failureDuration.inSeconds}s (retry 3/3) - entering fallback mode');
       _enterFallbackMode(errorMessage);
@@ -416,7 +420,7 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
     // Check if we need cooldown
     if (_lastCooldownTime != null) {
       final sinceLastCooldown = now.difference(_lastCooldownTime!);
-      if (sinceLastCooldown.inSeconds < env.spotifyDirectCooldownSec) {
+      if (sinceLastCooldown.inSeconds < env.spotifyDirectRetryCooldownSec) {
         return; // Still in cooldown
       }
       _lastCooldownTime = null;
@@ -447,12 +451,15 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
 
       _poll(); // Start regular polling
     } catch (e) {
-      // If retry window exceeded, trigger cooldown
+      // If retry window exceeded (0 = unlimited), trigger cooldown
       if (_fallbackStartTime != null) {
         final failureDuration = now.difference(_fallbackStartTime!);
-        if (failureDuration.inSeconds >= env.spotifyDirectRetryWindowSec) {
+        final retryWindowSec = env.spotifyDirectRetryWindowSec;
+        final windowExceeded =
+            retryWindowSec > 0 && failureDuration.inSeconds >= retryWindowSec;
+        if (windowExceeded) {
           // debugPrint(
-          //     '[SPOTIFY] Retry window exhausted - entering cooldown (${env.spotifyDirectCooldownSec}s)');
+          //     '[SPOTIFY] Retry window exhausted - entering cooldown (${env.spotifyDirectRetryCooldownSec}s)');
           _lastCooldownTime = now;
           _fallbackStartTime = now; // Reset for next window
         }

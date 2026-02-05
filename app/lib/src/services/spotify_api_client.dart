@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
@@ -9,11 +10,14 @@ class SpotifyApiClient {
     http.Client? httpClient,
     bool sslVerify = true,
     String baseUrl = 'https://api.spotify.com/v1',
+    int timeoutSec = 10,
   })  : _client = httpClient ?? _createClient(sslVerify),
-        _baseUrl = baseUrl;
+        _baseUrl = baseUrl,
+        _timeout = Duration(seconds: timeoutSec);
 
   final http.Client _client;
   final String _baseUrl;
+  final Duration _timeout;
 
   static http.Client _createClient(bool sslVerify) {
     if (sslVerify) {
@@ -34,7 +38,7 @@ class SpotifyApiClient {
         'Authorization': 'Bearer $accessToken',
         'Content-Type': 'application/json',
       },
-    );
+    ).timeout(_timeout);
 
     if (response.statusCode == 204) {
       // No active playback
