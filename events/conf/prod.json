@@ -20,7 +20,10 @@
     "retryIntervalSec": 2,
     "retryWindowSec": 120,
     "cooldownSec": 30,
-    "numOfEmitStatusRetries": 5,
+    "numOfEmitStatusRetries": 3,
+    "sendHealthStatusIntervalSec": 30,
+    "tokenRefreshLeadTimeSec": 300,
+    "tokenRefreshJitterSec": 30,
     "sendHealthStatusWindowSec": 30
   },
   "sonos": {
@@ -35,6 +38,7 @@
     "idleStuckTimeoutSec": 10,
     "noDeviceRetryIntervalSec": 15,
     "sendHealthStatusWindowSec": 30,
+    "sendHealthStatusIntervalSec": 30,
     "numOfEmitStatusRetries": 3,
     "fallbackToSpotifyOnError": false
   },

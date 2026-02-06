@@ -133,7 +133,6 @@ class EnvConfig {
     required this.enableServiceCycling,
     required this.serviceCycleResetSec,
     required this.serviceTransitionGraceSec,
-    required this.tokenWaitTimeoutSec,
     this.sonosPollIntervalSec,
   });
 
@@ -170,7 +169,6 @@ class EnvConfig {
   final bool enableServiceCycling;
   final int serviceCycleResetSec;
   final int serviceTransitionGraceSec;
-  final int tokenWaitTimeoutSec;
 
   /// Get the fallback config for a specific service type
   ServiceFallbackConfig getFallbackConfig(ServiceType service) {
@@ -345,8 +343,6 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
   // Parse global service settings
   final serviceTransitionGraceSec =
       int.tryParse(dotenv.env['SERVICE_TRANSITION_GRACE_SEC'] ?? '') ?? 2;
-  final tokenWaitTimeoutSec =
-      int.tryParse(dotenv.env['TOKEN_WAIT_TIMEOUT_SEC'] ?? '') ?? 10;
 
   return EnvConfig(
     apiBaseUrl: api,
@@ -380,7 +376,6 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
     enableServiceCycling: enableServiceCycling,
     serviceCycleResetSec: serviceCycleResetSec,
     serviceTransitionGraceSec: serviceTransitionGraceSec,
-    tokenWaitTimeoutSec: tokenWaitTimeoutSec,
   );
 });
 
