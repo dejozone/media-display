@@ -114,14 +114,14 @@ class EnvConfig {
     required this.wsRetryMaxTotalSeconds,
     required this.cloudSpotifyPollIntervalSec,
     required this.maxAvatarsPerUser,
-    required this.spotifyDirectPollIntervalSec,
-    required this.spotifyDirectTimeoutSec,
-    required this.spotifyDirectRetryIntervalSec,
-    required this.spotifyDirectRetryWindowSec,
-    required this.spotifyDirectRetryCooldownSec,
+    required this.directSpotifyPollIntervalSec,
+    required this.directSpotifyTimeoutSec,
+    required this.directSpotifyRetryIntervalSec,
+    required this.directSpotifyRetryWindowSec,
+    required this.directSpotifyRetryCooldownSec,
     required this.wsForceReconnIdleSec,
-    required this.spotifyDirectApiSslVerify,
-    required this.spotifyDirectApiBaseUrl,
+    required this.directSpotifyApiSslVerify,
+    required this.directSpotifyApiBaseUrl,
     required this.priorityOrderOfServices,
     required this.spotifyDirectFallback,
     required this.cloudSpotifyFallback,
@@ -146,17 +146,17 @@ class EnvConfig {
   final int wsRetryActiveSeconds;
   final int wsRetryCooldownSeconds;
   final int wsRetryMaxTotalSeconds;
-  final int spotifyDirectTimeoutSec;
+  final int directSpotifyTimeoutSec;
   final int cloudSpotifyPollIntervalSec;
   final int? sonosPollIntervalSec;
   final int maxAvatarsPerUser;
-  final int spotifyDirectPollIntervalSec;
-  final int spotifyDirectRetryIntervalSec;
-  final int spotifyDirectRetryWindowSec;
-  final int spotifyDirectRetryCooldownSec;
+  final int directSpotifyPollIntervalSec;
+  final int directSpotifyRetryIntervalSec;
+  final int directSpotifyRetryWindowSec;
+  final int directSpotifyRetryCooldownSec;
   final int wsForceReconnIdleSec;
-  final bool spotifyDirectApiSslVerify;
-  final String spotifyDirectApiBaseUrl;
+  final bool directSpotifyApiSslVerify;
+  final String directSpotifyApiBaseUrl;
 
   // Service priority configuration
   final List<ServiceType> priorityOrderOfServices;
@@ -201,8 +201,8 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
       int.tryParse(dotenv.env['WS_RETRY_COOLDOWN_SECONDS'] ?? '') ?? 60;
   final wsRetryMaxTotalSeconds =
       int.tryParse(dotenv.env['WS_RETRY_MAX_TOTAL_SECONDS'] ?? '') ?? 1800;
-  final spotifyDirectTimeoutSec =
-      int.tryParse(dotenv.env['SPOTIFY_DIRECT_TIMEOUT_SEC'] ?? '') ?? 3;
+  final directSpotifyTimeoutSec =
+      int.tryParse(dotenv.env['DIRECT_SPOTIFY_TIMEOUT_SEC'] ?? '') ?? 3;
   final cloudSpotifyPollIntervalSec =
       int.tryParse(dotenv.env['CLOUD_SPOTIFY_POLL_INTERVAL_SEC'] ?? '') ?? 3;
   // Sonos poll interval: null or 0 means let the server decide
@@ -214,24 +214,22 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
           : sonosPollIntervalSecRaw;
   final maxAvatarsPerUser =
       int.tryParse(dotenv.env['MAX_AVATARS_PER_USER'] ?? '') ?? 5;
-  final spotifyDirectPollIntervalSec =
-      int.tryParse(dotenv.env['SPOTIFY_DIRECT_POLL_INTERVAL_SEC'] ?? '') ?? 3;
-  final spotifyDirectRetryIntervalSec =
-      int.tryParse(dotenv.env['SPOTIFY_DIRECT_RETRY_INTERVAL_SEC'] ?? '') ?? 3;
-  final spotifyDirectRetryWindowSec =
-      int.tryParse(dotenv.env['SPOTIFY_DIRECT_RETRY_WINDOW_SEC'] ?? '') ?? 0;
-  // Prefer new retry cooldown key; fall back to legacy SPOTIFY_DIRECT_COOLDOWN_SEC
-  final spotifyDirectRetryCooldownSec =
-      int.tryParse(dotenv.env['SPOTIFY_DIRECT_RETRY_COOLDOWN_SEC'] ?? '') ??
-          int.tryParse(dotenv.env['SPOTIFY_DIRECT_COOLDOWN_SEC'] ?? '') ??
-          30;
+  final directSpotifyPollIntervalSec =
+      int.tryParse(dotenv.env['DIRECT_SPOTIFY_POLL_INTERVAL_SEC'] ?? '') ?? 3;
+  final directSpotifyRetryIntervalSec =
+      int.tryParse(dotenv.env['DIRECT_SPOTIFY_RETRY_INTERVAL_SEC'] ?? '') ?? 3;
+  final directSpotifyRetryWindowSec =
+      int.tryParse(dotenv.env['DIRECT_SPOTIFY_RETRY_WINDOW_SEC'] ?? '') ?? 0;
+  // Prefer new retry cooldown key; fall back to legacy DIRECT_SPOTIFY_RETRY_COOLDOWN_SEC
+  final directSpotifyRetryCooldownSec =
+      int.tryParse(dotenv.env['DIRECT_SPOTIFY_RETRY_COOLDOWN_SEC'] ?? '') ?? 30;
   final wsForceReconnIdleSec =
       int.tryParse(dotenv.env['WS_FORCE_RECONN_IDLE_SEC'] ?? '') ?? 30;
-  final spotifyDirectApiSslVerify =
-      (dotenv.env['SPOTIFY_DIRECT_API_SSL_VERIFY'] ?? 'true').toLowerCase() ==
+  final directSpotifyApiSslVerify =
+      (dotenv.env['DIRECT_SPOTIFY_API_SSL_VERIFY'] ?? 'true').toLowerCase() ==
           'true';
-  final spotifyDirectApiBaseUrl =
-      dotenv.env['SPOTIFY_DIRECT_API_BASE_URL'] ?? 'https://api.spotify.com/v1';
+  final directSpotifyApiBaseUrl =
+      dotenv.env['DIRECT_SPOTIFY_API_BASE_URL'] ?? 'https://api.spotify.com/v1';
 
   // Parse service priority order
   // Default: Sonos is primary when both are enabled, then direct Spotify, then cloud Spotify
@@ -254,20 +252,20 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
   // Parse Spotify Direct fallback config
   final spotifyDirectFallback = ServiceFallbackConfig(
     timeoutSec:
-        int.tryParse(dotenv.env['SPOTIFY_DIRECT_FALLBACK_TIMEOUT_SEC'] ?? '') ??
+        int.tryParse(dotenv.env['DIRECT_SPOTIFY_FALLBACK_TIMEOUT_SEC'] ?? '') ??
             5,
-    onError: (dotenv.env['SPOTIFY_DIRECT_FALLBACK_ON_ERROR'] ?? 'true')
+    onError: (dotenv.env['DIRECT_SPOTIFY_FALLBACK_ON_ERROR'] ?? 'true')
             .toLowerCase() ==
         'true',
     errorThreshold: int.tryParse(
-            dotenv.env['SPOTIFY_DIRECT_FALLBACK_ERROR_THRESHOLD'] ?? '') ??
+            dotenv.env['DIRECT_SPOTIFY_FALLBACK_ERROR_THRESHOLD'] ?? '') ??
         3,
     fallbackTimeThresholdSec: int.tryParse(
-            dotenv.env['SPOTIFY_DIRECT_FALLBACK_TIME_THRESHOLD_SEC'] ?? '') ??
+            dotenv.env['DIRECT_SPOTIFY_FALLBACK_TIME_THRESHOLD_SEC'] ?? '') ??
         10,
-    retryIntervalSec: spotifyDirectRetryIntervalSec,
-    retryCooldownSec: spotifyDirectRetryCooldownSec,
-    retryWindowSec: spotifyDirectRetryWindowSec,
+    retryIntervalSec: directSpotifyRetryIntervalSec,
+    retryCooldownSec: directSpotifyRetryCooldownSec,
+    retryWindowSec: directSpotifyRetryWindowSec,
   );
 
   // Parse Cloud Spotify fallback config
@@ -360,17 +358,17 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
     wsRetryActiveSeconds: wsRetryActiveSeconds,
     wsRetryCooldownSeconds: wsRetryCooldownSeconds,
     wsRetryMaxTotalSeconds: wsRetryMaxTotalSeconds,
-    spotifyDirectTimeoutSec: spotifyDirectTimeoutSec,
+    directSpotifyTimeoutSec: directSpotifyTimeoutSec,
     cloudSpotifyPollIntervalSec: cloudSpotifyPollIntervalSec,
     sonosPollIntervalSec: sonosPollIntervalSec,
     maxAvatarsPerUser: maxAvatarsPerUser,
-    spotifyDirectPollIntervalSec: spotifyDirectPollIntervalSec,
-    spotifyDirectRetryIntervalSec: spotifyDirectRetryIntervalSec,
-    spotifyDirectRetryWindowSec: spotifyDirectRetryWindowSec,
-    spotifyDirectRetryCooldownSec: spotifyDirectRetryCooldownSec,
+    directSpotifyPollIntervalSec: directSpotifyPollIntervalSec,
+    directSpotifyRetryIntervalSec: directSpotifyRetryIntervalSec,
+    directSpotifyRetryWindowSec: directSpotifyRetryWindowSec,
+    directSpotifyRetryCooldownSec: directSpotifyRetryCooldownSec,
     wsForceReconnIdleSec: wsForceReconnIdleSec,
-    spotifyDirectApiSslVerify: spotifyDirectApiSslVerify,
-    spotifyDirectApiBaseUrl: spotifyDirectApiBaseUrl,
+    directSpotifyApiSslVerify: directSpotifyApiSslVerify,
+    directSpotifyApiBaseUrl: directSpotifyApiBaseUrl,
     priorityOrderOfServices: priorityOrderOfServices,
     spotifyDirectFallback: spotifyDirectFallback,
     cloudSpotifyFallback: cloudSpotifyFallback,
