@@ -898,25 +898,6 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     _restartInitialActivationAfterReconnect();
   }
 
-  /// Activate the highest-priority available service if different from current.
-  /// When [force] is true, will activate even if a lower-priority service is
-  /// currently active.
-  void _activateHighestPriorityAvailable({bool force = false}) {
-    final best = state.getNextAvailableService();
-    if (best == null) return;
-
-    if (force || state.currentService == null || state.currentService != best) {
-      _log('[ServicePriority] Activating highest-priority available: $best'
-          '${state.currentService != null ? ' (was ${state.currentService})' : ''}');
-      activateService(best);
-
-      // If we land on the primary, cancel retry timer
-      if (best == _getFirstEnabledService()) {
-        _cancelRetryTimer();
-      }
-    }
-  }
-
   /// Reset current service and transition state, then activate the first
   /// available service using the priority order (like a cold start).
   void _restartInitialActivationAfterReconnect() {
