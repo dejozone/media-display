@@ -184,9 +184,17 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       // Don't reset retry policy or mark connected yet - wait for 'ready' message
       _connectionConfirmed = false;
 
+      // On reconnects, defer sending config until after the socket is fully ready
+      // and the priority manager has re-run initial activation. This prevents
+      // sending a stale config for the previous (fallback) service before the
+      // reconnect cold-start selects the highest-priority service.
+      final deferConfigForReconnect = _hasConnectedOnce;
+
       // Send current service enablement to the server (unless skipped by caller)
-      if (!skipSendConfig) {
+      if (!skipSendConfig && !deferConfigForReconnect) {
         await sendConfig();
+      } else if (deferConfigForReconnect) {
+        _log('[WS] Skipping initial config on reconnect; will send after priority reset');
       }
 
       _channel?.stream.listen(
@@ -256,8 +264,13 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
                   ref
                       .read(servicePriorityProvider.notifier)
                       .onWebSocketReconnected();
+                  // After priority resets and re-activates, send config for the
+                  // newly selected highest-priority service.
+                  Future.microtask(() => sendConfig());
                 } else {
                   _hasConnectedOnce = true;
+                  // First connection: send config now to start services.
+                  Future.microtask(() => sendConfig());
                 }
               }
             } else if (type == 'service_status') {

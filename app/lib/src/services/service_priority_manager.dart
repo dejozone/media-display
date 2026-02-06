@@ -955,10 +955,11 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       retryWindowStarts: resetRetryWindows,
       lastRetryAttempts: resetLastRetries,
       awaitingRecovery: const {},
+      // Clear unhealthy flags so reconnect can re-evaluate full priority order
+      // instead of sticking to a previous fallback (e.g., directSpotify).
+      unhealthyServices: const {},
       recoveryStates: const {},
       isTransitioning: false,
-      clearCurrentService: true,
-      clearPreviousService: true,
       clearTransitionStartTime: true,
       clearLastDataTime: true,
     );
