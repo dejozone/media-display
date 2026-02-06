@@ -801,13 +801,29 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   /// Sonos device discovery to find the right coordinator.
   Future<void> triggerSonosDiscovery() async {
     try {
-      // Reuse the standard service config path to avoid divergent payloads.
-      // This enables Sonos and disables Spotify unless explicitly kept for
-      // recovery. Discovery runs via the normal Sonos service config.
+      // If Sonos is waiting for recovery and we are not on Sonos, avoid
+      // toggling configs that would disable the active Spotify service.
+      final priority = ref.read(servicePriorityProvider);
+      final current = priority.currentService;
+      final sonosAwaiting =
+          priority.awaitingRecovery.contains(ServiceType.localSonos);
+
+      if (sonosAwaiting && current != ServiceType.localSonos) {
+        _log(
+            '[WS] triggerSonosDiscovery: skipping because Sonos awaiting recovery while on $current');
+        return;
+      }
+
+      // Keep Spotify enabled when the active service is not Sonos so we don't
+      // drop the current fallback (e.g., cloudSpotify) during discovery.
+      final keepSpotify = current != ServiceType.localSonos;
+
       _log(
-          '[WS] triggerSonosDiscovery: delegating to sendConfigForService(localSonos)');
-      await sendConfigForService(ServiceType.localSonos,
-          keepSpotifyPollingForRecovery: false);
+          '[WS] triggerSonosDiscovery: delegating to sendConfigForService(localSonos) (keepSpotify=$keepSpotify)');
+      await sendConfigForService(
+        ServiceType.localSonos,
+        keepSpotifyPollingForRecovery: keepSpotify,
+      );
     } catch (e) {
       _log('[WS] triggerSonosDiscovery error: $e');
     }

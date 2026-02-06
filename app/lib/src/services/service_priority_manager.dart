@@ -181,10 +181,29 @@ class ServicePriorityState {
         !awaiting;
   }
 
+  /// Check availability while ignoring awaiting-recovery flags (used as a last resort).
+  bool isServiceAvailableIgnoringAwaiting(ServiceType service) {
+    final status = serviceStatuses[service];
+    final isUnhealthy = unhealthyServices.contains(service);
+    return status != ServiceStatus.cooldown &&
+        status != ServiceStatus.disabled &&
+        !isUnhealthy;
+  }
+
   /// Get the next available service based on priority
   ServiceType? getNextAvailableService() {
     for (final service in effectiveOrder) {
       if (isServiceAvailable(service)) {
+        return service;
+      }
+    }
+    return null;
+  }
+
+  /// Get the next available service even if it's marked awaiting-recovery (last resort).
+  ServiceType? getNextAvailableServiceIgnoringAwaiting() {
+    for (final service in effectiveOrder) {
+      if (isServiceAvailableIgnoringAwaiting(service)) {
         return service;
       }
     }
@@ -740,9 +759,19 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       // Start recovery monitoring for the failed service if it's higher priority
       startRecovery(failedService);
     } else {
-      _log('[ServicePriority] No fallback available from $failedService');
-      // All services unavailable - stay on current and retry later
-      _startRetryTimer(failedService);
+      // As a last resort, allow a service that's awaiting-recovery (but not disabled/cooldown)
+      final lastResort = state.getNextAvailableServiceIgnoringAwaiting();
+      if (lastResort != null && lastResort != failedService) {
+        _log(
+            '[ServicePriority] No standard fallback from $failedService; using awaiting-recovery service $lastResort');
+        activateService(lastResort);
+        _startRetryTimer(failedService);
+        startRecovery(failedService);
+      } else {
+        _log('[ServicePriority] No fallback available from $failedService');
+        // All services unavailable - stay on current and retry later
+        _startRetryTimer(failedService);
+      }
     }
   }
 

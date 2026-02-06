@@ -325,8 +325,21 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     final priorityState = ref.read(servicePriorityProvider);
     if (service.isCloudService &&
         priorityState.awaitingRecovery.contains(service)) {
-      _log('[Orchestrator] $service awaiting recovery - not activating');
-      return;
+      // Allow activation if we're in a fallback path OR if no other available
+      // enabled service exists (last resort so we don't get stuck).
+      final hasOtherAvailable = _config.priorityOrderOfServices.any((s) {
+        if (s == service) return false;
+        if (!priorityState.enabledServices.contains(s)) return false;
+        return priorityState.isServiceAvailable(s);
+      });
+
+      if (!isFallback && hasOtherAvailable) {
+        _log('[Orchestrator] $service awaiting recovery - not activating');
+        return;
+      } else {
+        _log(
+            '[Orchestrator] $service awaiting recovery but activating (fallback/last resort)');
+      }
     }
 
     // Clear previous health state for this service so any new failure
@@ -767,12 +780,13 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       ref
           .read(servicePriorityProvider.notifier)
           .quiesceLowerPriorityServices(source);
+    }
 
-      // Ensure direct polling is stopped when a cloud/local service takes over
-      // to avoid background Spotify API retries once Sonos/Cloud is healthy again.
-      if (source.isCloudService) {
-        ref.read(spotifyDirectProvider.notifier).stopPolling();
-      }
+    // If a higher-priority cloud/local service is active but not playing and has
+    // no track info (idle/empty), pause direct Spotify retry activity to avoid
+    // unnecessary calls while we wait out the stopped/idle window.
+    if (isCurrent && !isPlaying && !hasTrackInfo && source.isCloudService) {
+      ref.read(spotifyDirectProvider.notifier).stopPolling();
     }
 
     // If a cloud service was marked awaiting recovery, receiving any data means
