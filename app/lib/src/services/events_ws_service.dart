@@ -56,6 +56,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   late final WsRetryPolicy _retryPolicy;
   bool _connecting = false;
   bool _connectionConfirmed = false;
+  bool _hasConnectedOnce = false; // Track first successful WS ready in this auth session
   bool _initialConfigSent = false; // Track if initial config sent after connect
   Map<String, dynamic>? _lastSettings;
   bool _useDirectPolling = false;
@@ -109,7 +110,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       if (!next.isAuthenticated) {
         // Stop direct polling on logout
         ref.read(spotifyDirectProvider.notifier).stopPolling();
-        _disconnect();
+        _disconnect(resetFirstConnectFlag: true);
       }
     });
 
@@ -250,11 +251,14 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
                   wsInCooldown: false,
                 );
 
-                // Notify service priority manager that WebSocket is back
-                // This allows re-evaluation of cloud services that may have been in cooldown
-                ref
-                    .read(servicePriorityProvider.notifier)
-                    .onWebSocketReconnected();
+                // Only treat as reconnect after we've had a prior successful ready
+                if (_hasConnectedOnce) {
+                  ref
+                      .read(servicePriorityProvider.notifier)
+                      .onWebSocketReconnected();
+                } else {
+                  _hasConnectedOnce = true;
+                }
               }
             } else if (type == 'service_status') {
               // Service health status update from backend
@@ -351,11 +355,14 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     });
   }
 
-  void _disconnect({bool scheduleRetry = true}) {
+  void _disconnect({bool scheduleRetry = true, bool resetFirstConnectFlag = false}) {
     _retryTimer?.cancel();
     _channel?.sink.close();
     _channel = null;
     _connectionConfirmed = false;
+    if (resetFirstConnectFlag) {
+      _hasConnectedOnce = false;
+    }
     _initialConfigSent = false; // Reset so next connect requests token
     _wsTokenReceived = false; // Reset so REST API can be used as fallback
     _lastTokenRequestTime =

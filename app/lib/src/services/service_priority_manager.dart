@@ -846,6 +846,24 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     return service;
   }
 
+  /// Activate the highest-priority available service.
+  /// If [force] is false and we're already on that service, do nothing.
+  ServiceType? _activateHighestPriorityAvailable({bool force = false}) {
+    final service = state.getNextAvailableService();
+    if (service == null) {
+      _log('[ServicePriority] No available service to activate');
+      return null;
+    }
+
+    if (!force && state.currentService == service) {
+      _log('[ServicePriority] Already on highest-priority service: $service');
+      return service;
+    }
+
+    activateService(service);
+    return service;
+  }
+
   /// Called when WebSocket successfully reconnects
   /// Resets cooldowns for cloud services so they can be retried
   /// and re-evaluates if we should switch back to a higher-priority cloud service
@@ -901,26 +919,53 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
   /// Reset current service and transition state, then activate the first
   /// available service using the priority order (like a cold start).
   void _restartInitialActivationAfterReconnect() {
+    // Stop any retry/recovery timers so the fresh start isn't racing timers
+    _retryTimer?.cancel();
+    _retryTimer = null;
+    _recoveryTimer?.cancel();
+    _recoveryTimer = null;
+
     // Reset statuses for enabled services back to standby (keep disabled as-is)
-    final resetStatuses = Map<ServiceType, ServiceStatus>.from(state.serviceStatuses);
+    final resetStatuses =
+        Map<ServiceType, ServiceStatus>.from(state.serviceStatuses);
     for (final entry in resetStatuses.entries.toList()) {
       if (entry.value != ServiceStatus.disabled) {
         resetStatuses[entry.key] = ServiceStatus.standby;
       }
     }
 
+    // Clear error/cooldown/retry bookkeeping so retries don't immediately fire
+    final resetErrors = <ServiceType, int>{
+      for (final s in ServiceType.values) s: 0,
+    };
+    final resetCooldowns = <ServiceType, DateTime?>{
+      for (final s in ServiceType.values) s: null,
+    };
+    final resetRetryWindows = <ServiceType, DateTime?>{
+      for (final s in ServiceType.values) s: null,
+    };
+    final resetLastRetries = <ServiceType, DateTime?>{
+      for (final s in ServiceType.values) s: null,
+    };
+
     state = state.copyWith(
       serviceStatuses: resetStatuses,
+      errorCounts: resetErrors,
+      cooldownEnds: resetCooldowns,
+      retryWindowStarts: resetRetryWindows,
+      lastRetryAttempts: resetLastRetries,
+      awaitingRecovery: const {},
+      recoveryStates: const {},
+      isTransitioning: false,
       clearCurrentService: true,
       clearPreviousService: true,
-      isTransitioning: false,
       clearTransitionStartTime: true,
       clearLastDataTime: true,
     );
 
     _log('[ServicePriority] Re-running initial activation after reconnect');
-    final activated = activateFirstAvailable();
-    if (activated != null && activated == _getFirstEnabledService()) {
+    _activateHighestPriorityAvailable(force: true);
+    if (state.currentService == _getFirstEnabledService()) {
       _cancelRetryTimer();
     }
   }
