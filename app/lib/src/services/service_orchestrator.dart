@@ -759,7 +759,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     ref.read(servicePriorityProvider.notifier).reportSuccess(source);
 
     // When a higher-priority service is actively playing with valid track data,
-    // stop all lower-priority retry/recovery activity to avoid churn.
+    // stop all lower-priority activity and polling.
     final priority = ref.read(servicePriorityProvider);
     final hasTrackInfo = _hasValidTrackInfo(track);
     final isCurrent = priority.currentService == source;
@@ -767,6 +767,12 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       ref
           .read(servicePriorityProvider.notifier)
           .quiesceLowerPriorityServices(source);
+
+      // Ensure direct polling is stopped when a cloud/local service takes over
+      // to avoid background Spotify API retries once Sonos/Cloud is healthy again.
+      if (source.isCloudService) {
+        ref.read(spotifyDirectProvider.notifier).stopPolling();
+      }
     }
 
     // If a cloud service was marked awaiting recovery, receiving any data means
@@ -1082,6 +1088,13 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
     _log(
         '[Orchestrator] $service recovered with ${health.devicesCount} devices');
+
+    // If we're currently on direct Spotify and a higher-priority cloud/local service
+    // has recovered, stop direct polling so it doesn't keep retrying once we switch.
+    final currentBeforeRecovery = ref.read(servicePriorityProvider).currentService;
+    if (currentBeforeRecovery == ServiceType.directSpotify && service.isCloudService) {
+      ref.read(spotifyDirectProvider.notifier).stopPolling();
+    }
 
     // Clear awaiting-recovery state and reset status in priority manager
     ref.read(servicePriorityProvider.notifier).onServiceRecovered(service);
