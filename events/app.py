@@ -835,18 +835,16 @@ async def media_events(ws: WebSocket) -> None:
         poll_cfg = msg.get("poll") or {}
         fallback_cfg = msg.get("fallback") or {}
 
-        # Start from existing config; only update keys provided by the client.
-        enabled: Dict[str, bool] = dict(
-            ctx.config.get("enabled") or {"spotify": False, "sonos": False}
-        )
+        # Start from existing config; only mutate keys present in the payload.
+        current_enabled = ctx.config.get("enabled") or {"spotify": False, "sonos": False}
+        enabled: Dict[str, bool] = dict(current_enabled)
         if "spotify" in enabled_cfg:
             enabled["spotify"] = enabled_cfg.get("spotify") is True
         if "sonos" in enabled_cfg:
             enabled["sonos"] = enabled_cfg.get("sonos") is True
 
-        poll: Dict[str, Optional[float]] = dict(
-            ctx.config.get("poll") or {"spotify": None, "sonos": None}
-        )
+        current_poll = ctx.config.get("poll") or {"spotify": None, "sonos": None}
+        poll: Dict[str, Optional[float]] = dict(current_poll)
         if "spotify" in poll_cfg:
             val = poll_cfg.get("spotify")
             poll["spotify"] = val if isinstance(val, (int, float)) else None
@@ -854,11 +852,11 @@ async def media_events(ws: WebSocket) -> None:
             val = poll_cfg.get("sonos")
             poll["sonos"] = val if isinstance(val, (int, float)) else None
 
-        # Fallback handling: default to server config unless client explicitly sets.
-        fallback = {"spotify": DEFAULT_FALLBACK_TO_SPOTIFY}
-        client_fallback_spotify = fallback_cfg.get("spotify")
-        if isinstance(client_fallback_spotify, bool):
-            fallback["spotify"] = client_fallback_spotify
+        # Fallback handling: start from current; only override provided keys.
+        current_fallback = ctx.config.get("fallback") or {"spotify": DEFAULT_FALLBACK_TO_SPOTIFY}
+        fallback = dict(current_fallback)
+        if "spotify" in fallback_cfg and isinstance(fallback_cfg.get("spotify"), bool):
+            fallback["spotify"] = fallback_cfg.get("spotify") is True
 
         # Manage token refresh task based on need_token flag or Spotify enabled state
         # Token refresh task should run when:
@@ -913,26 +911,35 @@ async def media_events(ws: WebSocket) -> None:
                 SONOS_CFG.get("pollIntervalSec"),
             )
 
-        async with ctx.lock:
-            ctx.config = {"enabled": enabled, "poll": poll, "fallback": fallback}
-            # Signal current streams to stop when config flips services off, then prepare a fresh stop event.
-            ctx.service_stop_event.set()
-            ctx.service_stop_event = asyncio.Event()
-        ctx.config_event.set()
-        logger.info(
-            "config updated user=%s enable_spotify=%s enable_sonos=%s poll_spotify=%s poll_sonos=%s fallback_spotify=%s sessions=%d raw_config=%s",
-            user_id,
-            enabled["spotify"],
-            enabled["sonos"],
-            poll["spotify"],
-            poll["sonos"],
-            fallback["spotify"],
-            len(ctx.channel.sessions),
-            msg,
+        config_changed = (
+            enabled != current_enabled
+            or poll != current_poll
+            or fallback != current_fallback
         )
 
+        if config_changed:
+            async with ctx.lock:
+                ctx.config = {"enabled": enabled, "poll": poll, "fallback": fallback}
+                # Signal current streams to stop when config actually changes; prepare fresh stop event.
+                ctx.service_stop_event.set()
+                ctx.service_stop_event = asyncio.Event()
+            ctx.config_event.set()
+            logger.info(
+                "config updated user=%s enable_spotify=%s enable_sonos=%s poll_spotify=%s poll_sonos=%s fallback_spotify=%s sessions=%d raw_config=%s",
+                user_id,
+                enabled["spotify"],
+                enabled["sonos"],
+                poll["spotify"],
+                poll["sonos"],
+                fallback["spotify"],
+                len(ctx.channel.sessions),
+                msg,
+            )
+        else:
+            logger.info("config received with no changes user=%s raw_config=%s", user_id, msg)
+
         # Start driver task if not running and at least one service is enabled
-        if (enabled["spotify"] or enabled["sonos"]) and (ctx.driver_task is None or ctx.driver_task.done()):
+        if config_changed and (enabled["spotify"] or enabled["sonos"]) and (ctx.driver_task is None or ctx.driver_task.done()):
             ctx.stop_event.clear()
             ctx.driver_task = asyncio.create_task(_user_driver(ctx))
             ACTIVE_TASKS.add(ctx.driver_task)

@@ -892,27 +892,55 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       awaitingRecovery: clearedAwaiting,
     );
 
-    // Check if a higher-priority cloud service should be activated
-    final currentService = state.currentService;
-    final nextAvailable = state.getNextAvailableService();
+    // After reconnect, force a fresh initial activation cycle just like first
+    // login. This resets the current service so we re-evaluate the configured
+    // priority order (even if a fallback like directSpotify was active).
+    _restartInitialActivationAfterReconnect();
+  }
 
-    if (nextAvailable != null && nextAvailable != currentService) {
-      // Check if the next available is higher priority than current
-      final currentIndex = currentService != null
-          ? state.effectiveOrder.indexOf(currentService)
-          : state.effectiveOrder.length;
-      final nextIndex = state.effectiveOrder.indexOf(nextAvailable);
+  /// Activate the highest-priority available service if different from current.
+  /// When [force] is true, will activate even if a lower-priority service is
+  /// currently active.
+  void _activateHighestPriorityAvailable({bool force = false}) {
+    final best = state.getNextAvailableService();
+    if (best == null) return;
 
-      if (nextIndex < currentIndex) {
-        _log(
-            '[ServicePriority] Switching to higher-priority service: $nextAvailable (was $currentService)');
-        activateService(nextAvailable);
+    if (force || state.currentService == null || state.currentService != best) {
+      _log('[ServicePriority] Activating highest-priority available: $best'
+          '${state.currentService != null ? ' (was ${state.currentService})' : ''}');
+      activateService(best);
 
-        // If switching to primary service, cancel retry timer
-        if (nextAvailable == _getFirstEnabledService()) {
-          _cancelRetryTimer();
-        }
+      // If we land on the primary, cancel retry timer
+      if (best == _getFirstEnabledService()) {
+        _cancelRetryTimer();
       }
+    }
+  }
+
+  /// Reset current service and transition state, then activate the first
+  /// available service using the priority order (like a cold start).
+  void _restartInitialActivationAfterReconnect() {
+    // Reset statuses for enabled services back to standby (keep disabled as-is)
+    final resetStatuses = Map<ServiceType, ServiceStatus>.from(state.serviceStatuses);
+    for (final entry in resetStatuses.entries.toList()) {
+      if (entry.value != ServiceStatus.disabled) {
+        resetStatuses[entry.key] = ServiceStatus.standby;
+      }
+    }
+
+    state = state.copyWith(
+      serviceStatuses: resetStatuses,
+      clearCurrentService: true,
+      clearPreviousService: true,
+      isTransitioning: false,
+      clearTransitionStartTime: true,
+      clearLastDataTime: true,
+    );
+
+    _log('[ServicePriority] Re-running initial activation after reconnect');
+    final activated = activateFirstAvailable();
+    if (activated != null && activated == _getFirstEnabledService()) {
+      _cancelRetryTimer();
     }
   }
 

@@ -1055,7 +1055,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       if (sentEnabled != null) {
         _lastEnabledSent.addAll(sentEnabled);
       }
-      _log('[WS] Config sent: $logLabel');
+      _log('[WS] Config sent: $logLabel, raw=$payloadJson');
     } catch (e) {
       _log('[WS] Error sending $logLabel config: $e');
     }

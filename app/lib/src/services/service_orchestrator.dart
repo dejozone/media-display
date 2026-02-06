@@ -880,8 +880,17 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       final willSwitchToSonos = currentService == ServiceType.cloudSpotify &&
           priority.isServiceAvailable(ServiceType.localSonos);
 
-      if (!willSwitchToSonos) {
+      // When directSpotify is active and we've already enabled Sonos on the
+      // backend for speaker detection, avoid sending an extra discovery config.
+      final skipDiscoveryBecauseBackendEnabled =
+          currentService == ServiceType.directSpotify &&
+              _sonosBackendEnabledForSpeaker;
+
+      if (!willSwitchToSonos && !skipDiscoveryBecauseBackendEnabled) {
         _triggerSonosDiscovery();
+      } else if (skipDiscoveryBecauseBackendEnabled) {
+        _log(
+            '[Orchestrator] Speaker detected while Sonos backend already enabled - skipping duplicate discovery config');
       }
 
       if (willSwitchToSonos) {
