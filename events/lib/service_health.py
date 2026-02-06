@@ -48,6 +48,8 @@ RETRY_TIMING = {
 
 # Default debounce window for health status messages (seconds)
 DEFAULT_HEALTH_STATUS_WINDOW_SEC = 30
+# Default interval for emitting suppressed statuses (seconds). 0 = disable periodic emits.
+DEFAULT_HEALTH_STATUS_INTERVAL_SEC = 0
 
 
 @dataclass
@@ -64,6 +66,10 @@ class ServiceHealthState:
     recovery_started_at: Optional[float] = None
     max_status_emits: int = 3  # max error status messages before entering silent health-check mode
     emit_suppressed: bool = False  # when True, only recovery/healthy statuses are sent
+    _health_status_interval_sec: float = field(
+        default=DEFAULT_HEALTH_STATUS_INTERVAL_SEC, repr=False
+    )
+    _last_status_sent_at: Optional[float] = field(default=None, repr=False)
     # Debounce tracking
     _last_sent_status: Optional[ServiceStatus] = field(default=None, repr=False)
     _last_sent_error_code: Optional[ErrorCode] = field(default=None, repr=False)
@@ -93,6 +99,12 @@ class ServiceHealthState:
         """Set how many error statuses to emit before going quiet and only probing."""
         if emit_limit > 0:
             self.max_status_emits = emit_limit
+
+    def set_health_status_interval(self, interval_sec: float) -> None:
+        """Set periodic emit interval once unhealthy emits are suppressed."""
+        if interval_sec is None:
+            return
+        self._health_status_interval_sec = max(0.0, float(interval_sec))
     
     def _get_retry_sec(self, error_code: ErrorCode) -> int:
         """Get retry timing for an error code."""
@@ -116,7 +128,12 @@ class ServiceHealthState:
 
         # If we've entered suppression, only allow recovery/healthy to be sent
         if self.emit_suppressed and new_status != ServiceStatus.HEALTHY:
-            return False
+            if self._health_status_interval_sec <= 0:
+                return False
+            # Allow periodic emits while continuing health checks
+            if self._last_status_sent_at is None:
+                return True
+            return (now - self._last_status_sent_at) >= self._health_status_interval_sec
         
         # Always send on status change
         if new_status != self._last_sent_status:
@@ -148,6 +165,7 @@ class ServiceHealthState:
             # Reset when healthy
             self._first_unhealthy_time = None
         
+        self._last_status_sent_at = now
         self._last_sent_status = new_status
         self._last_sent_error_code = new_error_code
     
@@ -283,8 +301,10 @@ class ServiceHealthTracker:
             provider_cfg = self._config.get(provider, {})
             window_sec = provider_cfg.get("sendHealthStatusWindowSec", DEFAULT_HEALTH_STATUS_WINDOW_SEC)
             emit_limit = provider_cfg.get("numOfEmitStatusRetries", 3)
+            interval_sec = provider_cfg.get("sendHealthStatusIntervalSec", DEFAULT_HEALTH_STATUS_INTERVAL_SEC)
             state.set_health_status_window(window_sec)
             state.set_status_emit_limit(emit_limit)
+            state.set_health_status_interval(interval_sec)
     
     def get_or_create(self, provider: str) -> ServiceHealthState:
         """Get or create a health state tracker for a provider."""
@@ -294,8 +314,10 @@ class ServiceHealthTracker:
             provider_cfg = self._config.get(provider, {})
             window_sec = provider_cfg.get("sendHealthStatusWindowSec", DEFAULT_HEALTH_STATUS_WINDOW_SEC)
             emit_limit = provider_cfg.get("numOfEmitStatusRetries", 3)
+            interval_sec = provider_cfg.get("sendHealthStatusIntervalSec", DEFAULT_HEALTH_STATUS_INTERVAL_SEC)
             state.set_health_status_window(window_sec)
             state.set_status_emit_limit(emit_limit)
+            state.set_health_status_interval(interval_sec)
             self._services[provider] = state
         return self._services[provider]
     

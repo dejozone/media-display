@@ -65,8 +65,6 @@ class SpotifyManager:
         retry_window = max(5, self.config.get("retryWindowSec", 20))
         # Avoid very long cooldowns so we can recover quickly once the API is back
         cooldown = min(max(5, self.config.get("cooldownSec", 30)), 120)
-        # Number of times to emit status during recovery (then only emit on healthy)
-        num_emit_status_retries = max(1, self.config.get("numOfEmitStatusRetries", 5))
 
         async def _safe_close(target_ws: SupportsWebSocket, code: int, reason: str = "") -> None:
             try:
@@ -79,31 +77,14 @@ class SpotifyManager:
         
         async def _report_status(status: Optional[Dict[str, Any]], is_healthy: bool = False) -> None:
             """Report status if callback provided and status is not None (debounced).
-            
-            For unhealthy statuses, only emit up to num_emit_status_retries times.
-            For healthy statuses, always emit (to signal recovery).
+
+            HealthTracker now handles suppression/intervals; always forward what it emits.
             """
-            nonlocal status_emit_count
             if on_status_change and status:
                 try:
+                    await on_status_change(status)
                     if is_healthy:
-                        # Always emit healthy status and reset counter
-                        status_emit_count = 0
-                        await on_status_change(status)
-                    elif status_emit_count < num_emit_status_retries:
-                        # Emit unhealthy status up to the limit
-                        status_emit_count += 1
-                        self.logger.info(
-                            "spotify: emitting unhealthy status %d/%d",
-                            status_emit_count, num_emit_status_retries
-                        )
-                        await on_status_change(status)
-                    else:
-                        # Limit reached - don't emit unhealthy status
-                        self.logger.debug(
-                            "spotify: suppressing unhealthy status (limit %d reached)",
-                            num_emit_status_retries
-                        )
+                        self.logger.info("spotify: emitted healthy status")
                 except Exception:
                     pass
 
@@ -111,7 +92,7 @@ class SpotifyManager:
         last_payload: Optional[Dict[str, Any]] = None
         failure_start: Optional[float] = None
         was_healthy: bool = True  # Track if we were healthy before
-        status_emit_count: int = 0  # Track number of status emissions during recovery
+        # HealthTracker handles suppression/interval cadence; no local counter needed
 
         while not stop_event.is_set() and ws.application_state == WebSocketState.CONNECTED:
             try:
