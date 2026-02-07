@@ -133,6 +133,8 @@ class EnvConfig {
     required this.enableServiceCycling,
     required this.serviceCycleResetSec,
     required this.serviceTransitionGraceSec,
+    required this.offlineGuardBaseSec,
+    required this.offlineGuardMaxSec,
     this.sonosPollIntervalSec,
   });
 
@@ -169,6 +171,8 @@ class EnvConfig {
   final bool enableServiceCycling;
   final int serviceCycleResetSec;
   final int serviceTransitionGraceSec;
+  final int offlineGuardBaseSec;
+  final int offlineGuardMaxSec;
 
   /// Get the fallback config for a specific service type
   ServiceFallbackConfig getFallbackConfig(ServiceType service) {
@@ -344,6 +348,12 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
   final serviceTransitionGraceSec =
       int.tryParse(dotenv.env['SERVICE_TRANSITION_GRACE_SEC'] ?? '') ?? 2;
 
+    // Parse offline guard backoff settings (used when all services are offline)
+    final offlineGuardBaseSec =
+      int.tryParse(dotenv.env['OFFLINE_GUARD_BASE_SEC'] ?? '') ?? 30;
+    final offlineGuardMaxSec =
+      int.tryParse(dotenv.env['OFFLINE_GUARD_MAX_SEC'] ?? '') ?? 300;
+
   return EnvConfig(
     apiBaseUrl: api,
     eventsWsUrl: ws,
@@ -376,6 +386,8 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
     enableServiceCycling: enableServiceCycling,
     serviceCycleResetSec: serviceCycleResetSec,
     serviceTransitionGraceSec: serviceTransitionGraceSec,
+    offlineGuardBaseSec: offlineGuardBaseSec,
+    offlineGuardMaxSec: offlineGuardMaxSec,
   );
 });
 

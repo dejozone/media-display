@@ -56,7 +56,8 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   late final WsRetryPolicy _retryPolicy;
   bool _connecting = false;
   bool _connectionConfirmed = false;
-  bool _hasConnectedOnce = false; // Track first successful WS ready in this auth session
+  bool _hasConnectedOnce =
+      false; // Track first successful WS ready in this auth session
   bool _initialConfigSent = false; // Track if initial config sent after connect
   Map<String, dynamic>? _lastSettings;
   bool _useDirectPolling = false;
@@ -211,12 +212,14 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       if (!skipSendConfig && !deferConfigForReconnect) {
         final currentService = ref.read(servicePriorityProvider).currentService;
         if (currentService != null) {
-          _log('[WS] Skipping initial config in _connect; currentService=$currentService will send its config');
+          _log(
+              '[WS] Skipping initial config in _connect; currentService=$currentService will send its config');
         } else {
           await sendConfig();
         }
       } else if (deferConfigForReconnect) {
-        _log('[WS] Skipping initial config on reconnect; will send after priority reset');
+        _log(
+            '[WS] Skipping initial config on reconnect; will send after priority reset');
       }
 
       _channel?.stream.listen(
@@ -390,7 +393,8 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     });
   }
 
-  void _disconnect({bool scheduleRetry = true, bool resetFirstConnectFlag = false}) {
+  void _disconnect(
+      {bool scheduleRetry = true, bool resetFirstConnectFlag = false}) {
     _retryTimer?.cancel();
     _channel?.sink.close();
     _channel = null;

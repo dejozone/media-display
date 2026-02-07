@@ -110,7 +110,10 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
   Timer? _dataWatchTimer;
   Timer? _servicePausedTimer;
   Timer? _cycleResetTimer;
+  Timer? _offlineGuardTimer;
   DateTime? _lastDataTime;
+  DateTime? _offlineGuardUntil;
+  String? _offlineGuardReason;
 
   bool _initialized = false;
 
@@ -141,6 +144,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       _dataWatchTimer?.cancel();
       _servicePausedTimer?.cancel();
       _cycleResetTimer?.cancel();
+      _offlineGuardTimer?.cancel();
     });
 
     // Initialize asynchronously
@@ -250,8 +254,74 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     _startDataTimeoutWatcher();
   }
 
+  void _enterOfflineGuard(String? reason, DateTime until) {
+    if (_offlineGuardUntil != null && _offlineGuardUntil == until) {
+      return;
+    }
+
+    _offlineGuardTimer?.cancel();
+    _offlineGuardUntil = until;
+    _offlineGuardReason = reason;
+
+    final remaining = until.difference(DateTime.now());
+    _log(
+        '[Orchestrator] Offline guard active for ${remaining.inSeconds}s (${reason ?? 'no reason'})');
+
+    // Stop churny activity while offline guard is active.
+    _timeoutTimer?.cancel();
+    _dataWatchTimer?.cancel();
+    _dataWatchTimer = null;
+    ref.read(spotifyDirectProvider.notifier).stopPolling();
+
+    // Do not force WebSocket logout semantics; simply avoid sending configs.
+    state = state.copyWith(
+      isConnected: false,
+      isLoading: false,
+      clearActiveService: true,
+      error: reason ?? 'Services temporarily offline',
+    );
+
+    final remainingMs = remaining.inMilliseconds;
+    if (remainingMs > 0) {
+      _offlineGuardTimer = Timer(Duration(milliseconds: remainingMs), () {
+        _log('[Orchestrator] Offline guard expired - re-evaluating services');
+        _offlineGuardTimer = null;
+        _offlineGuardUntil = null;
+        _offlineGuardReason = null;
+        ref
+            .read(servicePriorityProvider.notifier)
+            .clearOfflineGuard(resetAttempts: true);
+        _startDataTimeoutWatcher();
+        ref.read(servicePriorityProvider.notifier).activateFirstAvailable();
+      });
+    }
+  }
+
+  void _clearOfflineGuardState() {
+    if (_offlineGuardUntil != null) {
+      _log('[Orchestrator] Clearing offline guard');
+    }
+    _offlineGuardTimer?.cancel();
+    _offlineGuardTimer = null;
+    _offlineGuardUntil = null;
+    _offlineGuardReason = null;
+  }
+
   void _handleServicePriorityChange(
       ServicePriorityState? prev, ServicePriorityState next) {
+    final now = DateTime.now();
+    final wasOffline = prev?.offlineGuardUntil != null &&
+        now.isBefore(prev!.offlineGuardUntil!);
+    final isOffline = next.offlineGuardUntil != null &&
+        now.isBefore(next.offlineGuardUntil!);
+
+    if (isOffline) {
+      _enterOfflineGuard(next.offlineGuardReason, next.offlineGuardUntil!);
+      return;
+    } else if (wasOffline && !isOffline) {
+      _clearOfflineGuardState();
+    }
+
     final currentService = next.currentService;
     final prevService = prev?.currentService;
 
@@ -1105,8 +1175,10 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
     // If we're currently on direct Spotify and a higher-priority cloud/local service
     // has recovered, stop direct polling so it doesn't keep retrying once we switch.
-    final currentBeforeRecovery = ref.read(servicePriorityProvider).currentService;
-    if (currentBeforeRecovery == ServiceType.directSpotify && service.isCloudService) {
+    final currentBeforeRecovery =
+        ref.read(servicePriorityProvider).currentService;
+    if (currentBeforeRecovery == ServiceType.directSpotify &&
+        service.isCloudService) {
       ref.read(spotifyDirectProvider.notifier).stopPolling();
     }
 
@@ -1366,59 +1438,6 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       _originalPrimaryService = null;
     }
   }
-
-  /// Immediately cycle to next service (called when service becomes unavailable)
-  // void _cycleToNextService(ServiceType fromService) {
-  //   // Mark the current service as checked
-  //   _checkedNotPlaying.add(fromService);
-
-  //   // Cancel any existing pause timer
-  //   _cancelPauseTimer();
-
-  //   // Remember the original primary service if not set
-  //   _originalPrimaryService ??= _getHighestPriorityEnabledService();
-
-  //   // Find next service to try
-  //   final nextService = _getNextServiceToTry();
-
-  //   if (nextService != null) {
-  //     _log(
-  //         '[Orchestrator] Cycling to next service: $nextService (from $fromService)');
-  //     _waitingForPrimaryResume = true;
-
-  //     // switchToService will trigger _handleServicePriorityChange which calls
-  //     // _activateService -> sendConfigForService, so no need to send config here
-  //     ref.read(servicePriorityProvider.notifier).switchToService(nextService);
-
-  //     // Start recovery monitoring for the failed service
-  //     ref.read(servicePriorityProvider.notifier).startRecovery(fromService);
-  //   } else {
-  //     // All services checked - none available
-  //     _log('[Orchestrator] All services checked - none available');
-  //     _startCycleResetTimer();
-
-  //     // Try to switch to the best available (healthy) service
-  //     // This ensures we don't stay stuck on an unhealthy service
-  //     final bestService = _getHighestPriorityAvailableService();
-  //     if (bestService != null) {
-  //       final current = ref.read(servicePriorityProvider).currentService;
-  //       if (current != bestService) {
-  //         _log(
-  //             '[Orchestrator] Switching to best available service: $bestService');
-  //         ref
-  //             .read(servicePriorityProvider.notifier)
-  //             .switchToService(bestService);
-  //       }
-  //     } else {
-  //       // No available services - keep current or clear
-  //       _log('[Orchestrator] No available services after cycling');
-  //     }
-
-  //     // Reset waiting state since we've exhausted options
-  //     _waitingForPrimaryResume = false;
-  //     _originalPrimaryService = null;
-  //   }
-  // }
 
   /// Get the next service to try (respecting priority, skipping checked services)
   ServiceType? _getNextServiceToTry() {
@@ -1739,7 +1758,10 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     _dataWatchTimer?.cancel();
     _cancelPauseTimer();
     _cycleResetTimer?.cancel();
+    _offlineGuardTimer?.cancel();
     _lastDataTime = null;
+    _offlineGuardUntil = null;
+    _offlineGuardReason = null;
     _initialized = false;
 
     // Reset cycling state
@@ -1770,6 +1792,10 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     _cancelPauseTimer();
     _cycleResetTimer?.cancel();
     _cycleResetTimer = null;
+    _offlineGuardTimer?.cancel();
+    _offlineGuardTimer = null;
+    _offlineGuardUntil = null;
+    _offlineGuardReason = null;
 
     // Reset state
     _lastDataTime = null;
