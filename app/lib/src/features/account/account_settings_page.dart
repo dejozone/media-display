@@ -16,6 +16,7 @@ import 'package:media_display/src/services/events_ws_service.dart';
 import 'package:media_display/src/services/service_orchestrator.dart';
 import 'package:media_display/src/services/spotify_direct_service.dart';
 import 'package:media_display/src/services/settings_service.dart';
+import 'package:media_display/src/services/user_service.dart';
 import 'package:media_display/src/models/avatar.dart';
 import 'package:media_display/src/config/env.dart';
 import 'package:media_display/src/widgets/app_header.dart';
@@ -139,8 +140,13 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
             ? null
             : _displayNameController.text.trim(),
       });
+      // Refresh global user cache so other pages reflect the new profile info.
+      final userService = ref.read(userServiceProvider);
+      userService.clearCache();
+      final refreshed = await userService.fetchMe(forceRefresh: true);
+
       if (!mounted) return;
-      user = updated;
+      user = refreshed.isNotEmpty ? refreshed : updated;
       success = 'Saved';
     } catch (e) {
       if (!mounted) return;
@@ -878,12 +884,16 @@ class _AvatarManagementSectionState
         _pendingFilename,
       );
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Avatar uploaded successfully')),
-        );
-        widget.onAvatarChanged();
-      }
+      // Refresh global user cache so other pages (e.g., Home) pick up the new avatar.
+      final userService = ref.read(userServiceProvider);
+      userService.clearCache();
+      await userService.fetchMe(forceRefresh: true);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Avatar uploaded successfully')),
+      );
+      widget.onAvatarChanged();
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -899,12 +909,15 @@ class _AvatarManagementSectionState
     try {
       final operations = ref.read(avatarOperationsProvider);
       await operations.selectAvatar(widget.userId, avatar.id);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Avatar selected')),
-        );
-        widget.onAvatarChanged();
-      }
+      final userService = ref.read(userServiceProvider);
+      userService.clearCache();
+      await userService.fetchMe(forceRefresh: true);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Avatar selected')),
+      );
+      widget.onAvatarChanged();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -943,12 +956,15 @@ class _AvatarManagementSectionState
     try {
       final operations = ref.read(avatarOperationsProvider);
       await operations.deleteAvatar(widget.userId, avatar.id);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Avatar deleted')),
-        );
-        widget.onAvatarChanged();
-      }
+      final userService = ref.read(userServiceProvider);
+      userService.clearCache();
+      await userService.fetchMe(forceRefresh: true);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Avatar deleted')),
+      );
+      widget.onAvatarChanged();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
