@@ -451,15 +451,22 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
 
       _poll(); // Start regular polling
     } catch (e) {
-      // If retry window exceeded (0 = unlimited), trigger cooldown
+      // If retry window exceeded (0 = unlimited), trigger cooldown or stop retries
       if (_fallbackStartTime != null) {
         final failureDuration = now.difference(_fallbackStartTime!);
         final retryWindowSec = env.directSpotifyRetryWindowSec;
         final windowExceeded =
             retryWindowSec > 0 && failureDuration.inSeconds >= retryWindowSec;
         if (windowExceeded) {
-          // debugPrint(
-          //     '[SPOTIFY] Retry window exhausted - entering cooldown (${env.directSpotifyRetryCooldownSec}s)');
+          final cooldownSec = env.directSpotifyRetryCooldownSec;
+          if (cooldownSec <= 0) {
+            // No cooldown configured: stop retrying to avoid noisy fetch errors
+            _retryTimer?.cancel();
+            state = state.copyWith(mode: SpotifyPollingMode.offline);
+            return;
+          }
+
+          // Enter cooldown; timer will skip polls until cooldown elapses
           _lastCooldownTime = now;
           _fallbackStartTime = now; // Reset for next window
         }

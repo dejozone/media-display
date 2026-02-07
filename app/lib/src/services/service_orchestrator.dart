@@ -1783,6 +1783,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     // Stop services
     ref.read(servicePriorityProvider.notifier).reset();
     ref.read(spotifyDirectProvider.notifier).stopPolling();
+    ref.read(eventsWsProvider.notifier).disconnectOnLogout();
 
     // Clear playback state
     state = const UnifiedPlaybackState();

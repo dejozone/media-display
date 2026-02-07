@@ -66,6 +66,21 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     _lastSettings = settings;
   }
 
+  /// Clean shutdown used on logout: no retries, clear cached settings/state,
+  /// and prevent fallback direct polling from being triggered.
+  void disconnectOnLogout() {
+    _log('[WS] Disconnecting due to logout');
+    _useDirectPolling = false;
+    _lastSettings = null;
+    _lastConfigSent = null;
+    _lastConfigSentAt = null;
+    _tokenRequested = false;
+    _lastTokenRequestTime = null;
+    _wsTokenReceived = false;
+    _lastEnabledSent.clear();
+    _disconnect(scheduleRetry: false, resetFirstConnectFlag: true);
+  }
+
   bool _tokenRequested = false;
   DateTime? _lastTokenRequestTime;
   bool _wsTokenReceived =
@@ -190,9 +205,16 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       // reconnect cold-start selects the highest-priority service.
       final deferConfigForReconnect = _hasConnectedOnce;
 
-      // Send current service enablement to the server (unless skipped by caller)
+      // Send current service enablement to the server (unless skipped by caller).
+      // If a service is already selected, let the orchestrator-driven config
+      // send (or the caller) handle it to avoid duplicate configs on first login.
       if (!skipSendConfig && !deferConfigForReconnect) {
-        await sendConfig();
+        final currentService = ref.read(servicePriorityProvider).currentService;
+        if (currentService != null) {
+          _log('[WS] Skipping initial config in _connect; currentService=$currentService will send its config');
+        } else {
+          await sendConfig();
+        }
       } else if (deferConfigForReconnect) {
         _log('[WS] Skipping initial config on reconnect; will send after priority reset');
       }
@@ -488,6 +510,12 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   /// (e.g., all enabled services are unhealthy). This keeps server-side polling
   /// active for those services so they can recover.
   Future<void> sendConfigForUserSettings() async {
+    // Skip sending config when not authenticated (logout path)
+    if (!ref.read(authStateProvider).isAuthenticated) {
+      _log('[WS] sendConfigForUserSettings skipped - not authenticated');
+      return;
+    }
+
     try {
       // If a direct Spotify service is currently active, defer to the
       // service-specific config to avoid re-enabling backend Spotify polling
@@ -836,6 +864,12 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   }
 
   Future<void> sendConfig({bool forceTokenRequest = false}) async {
+    // Skip config when not authenticated (logout path)
+    if (!ref.read(authStateProvider).isAuthenticated) {
+      _log('[WS] sendConfig skipped - not authenticated');
+      return;
+    }
+
     // If there's an active service in the priority system, use sendConfigForService
     // This ensures the new service-based config is used instead of the legacy polling mode logic
     final priority = ref.read(servicePriorityProvider);
