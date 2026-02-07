@@ -159,7 +159,7 @@ class _FocusableButtonState extends State<_FocusableButton> {
             boxShadow: _focused
                 ? [
                     BoxShadow(
-                      color: const Color(0xFF5AC8FA).withOpacity(0.25),
+                      color: const Color(0xFF5AC8FA).withValues(alpha: 0.5),
                       blurRadius: 8,
                       spreadRadius: 1,
                     ),

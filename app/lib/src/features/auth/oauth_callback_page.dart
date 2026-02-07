@@ -112,6 +112,7 @@ class _OAuthCallbackPageState extends ConsumerState<OAuthCallbackPage> {
   }
 
   Future<void> _showErrorAndExit(String message) async {
+    final router = GoRouter.of(context);
     await showAppModal(
       context: context,
       title: 'Spotify account already linked',
@@ -124,16 +125,17 @@ class _OAuthCallbackPageState extends ConsumerState<OAuthCallbackPage> {
     final auth = ref.read(authStateProvider);
     final desired =
         await ref.read(authServiceProvider).consumePendingOauthRedirect();
+    if (!mounted) return;
     if (desired != null && desired.isNotEmpty) {
-      context.go(desired);
+      router.go(desired);
       return;
     }
-    if (context.canPop()) {
-      context.pop();
+    if (router.canPop()) {
+      router.pop();
     } else if (auth.isAuthenticated) {
-      context.go('/account');
+      router.go('/account');
     } else {
-      context.go('/login');
+      router.go('/login');
     }
   }
 

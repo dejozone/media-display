@@ -67,7 +67,7 @@ class _FocusableCircleButtonState extends State<FocusableCircleButton> {
     final borderColor = _focused
         ? widget.focusBorderColor
         : (_hovered
-            ? widget.defaultBorderColor.withOpacity(0.4)
+            ? widget.defaultBorderColor.withValues(alpha: 0.4)
             : widget.defaultBorderColor);
 
     final activationShortcuts = <ShortcutActivator, Intent>{
@@ -119,7 +119,7 @@ class _FocusableCircleButtonState extends State<FocusableCircleButton> {
                   boxShadow: _focused
                       ? [
                           BoxShadow(
-                            color: widget.focusBorderColor.withOpacity(0.25),
+                            color: widget.focusBorderColor.withValues(alpha: 0.25),
                             blurRadius: 12,
                             spreadRadius: 1,
                           ),

@@ -1,5 +1,4 @@
 import 'dart:io' show File;
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -381,9 +380,11 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
                           },
                           onAccount: () => context.go('/account'),
                           onLogout: () async {
+                            final router = GoRouter.of(context);
                             await ref.read(authServiceProvider).logout();
                             await ref.read(authStateProvider.notifier).clear();
-                            if (mounted) context.go('/login');
+                            if (!mounted) return;
+                            router.go('/login');
                           },
                         ),
                         const SizedBox(height: 18),

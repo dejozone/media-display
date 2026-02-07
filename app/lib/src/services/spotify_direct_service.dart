@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_display/src/config/env.dart';
@@ -59,8 +58,6 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
   SpotifyApiClient? _apiClient;
   int _consecutive401Errors = 0;
   static const int _max401BeforeStop = 3;
-  int _retryAttempts = 0;
-  final Random _random = Random();
 
   @override
   SpotifyDirectState build() {
@@ -181,24 +178,6 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
     return now >= expiresAt - 30; // 30s buffer
   }
 
-  int _computeBackoffWithJitter(
-    int baseSeconds,
-    int attempt, {
-    int maxSeconds = 120,
-    double jitterRatio = 0.2,
-  }) {
-    final scaled = (baseSeconds * pow(2, attempt)).toInt();
-    final clamped = scaled > maxSeconds ? maxSeconds : scaled;
-    final jitterWindow = (clamped * jitterRatio).toInt();
-    if (jitterWindow <= 0) return clamped;
-
-    final jitter = _random.nextInt(jitterWindow + 1); // 0..window
-    final withJitter = clamped + jitter;
-    if (withJitter < baseSeconds) return baseSeconds;
-    if (withJitter > maxSeconds) return maxSeconds;
-    return withJitter;
-  }
-
   /// Starts direct Spotify API polling
   void startDirectPolling() {
     // Set mode to direct even if no token yet
@@ -257,13 +236,11 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
     _tokenRefreshTimer?.cancel();
     _tokenRefreshTimer = null;
     _tokenRequestPending = false;
-    _retryAttempts = 0;
     state = state.copyWith(
       mode: SpotifyPollingMode.idle,
       error: null,
     );
     _fallbackStartTime = null;
-    _lastCooldownTime = null;
     debugPrint('[SPOTIFY] Polling stopped (all timers cancelled)');
   }
 
@@ -271,8 +248,6 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
     _pollTimer?.cancel();
     _retryTimer?.cancel();
     _fallbackStartTime = null;
-    _retryAttempts = 0;
-    _lastCooldownTime = null;
 
     state = state.copyWith(
       mode: SpotifyPollingMode.direct,
@@ -412,10 +387,6 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
       error: reason,
     );
 
-    _fallbackStartTime ??= DateTime.now();
-    _retryAttempts = 0;
-    _lastCooldownTime = null;
-
     // debugPrint('[SPOTIFY] Switched to fallback mode: $reason');
 
     // Start background retry loop
@@ -426,25 +397,12 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
     // Cancel both timers to prevent overlapping
     _pollTimer?.cancel();
     _retryTimer?.cancel();
-    _scheduleRetryAttempt();
-  }
-
-  void _scheduleRetryAttempt({int? delaySeconds}) {
-    _retryTimer?.cancel();
 
     final env = ref.read(envConfigProvider);
-    final base = env.directSpotifyRetryIntervalSec;
-    final maxBackoff = env.directSpotifyRetryCooldownSec > 0
-        ? max(env.directSpotifyRetryCooldownSec, base * 4)
-        : base * 4;
-    final delay = delaySeconds ??
-        _computeBackoffWithJitter(
-          base,
-          _retryAttempts,
-          maxSeconds: maxBackoff,
-        );
-
-    _retryTimer = Timer(Duration(seconds: delay), _attemptDirectRetry);
+    _retryTimer = Timer.periodic(
+      Duration(seconds: env.directSpotifyRetryIntervalSec),
+      (_) => _attemptDirectRetry(),
+    );
   }
 
   Future<void> _attemptDirectRetry() async {
@@ -454,33 +412,26 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
     }
 
     final token = state.accessToken;
+    if (token == null) return;
+
     final env = ref.read(envConfigProvider);
     final now = DateTime.now();
-    final retryWindowSec = env.directSpotifyRetryWindowSec;
 
+    // Check if we need cooldown
     if (_lastCooldownTime != null) {
-      final sinceLastCooldown = now.difference(_lastCooldownTime!).inSeconds;
-      final cooldownSec = env.directSpotifyRetryCooldownSec;
-      if (cooldownSec > 0 && sinceLastCooldown < cooldownSec) {
-        // Still cooling down; try again when cooldown ends
-        _scheduleRetryAttempt(delaySeconds: cooldownSec - sinceLastCooldown);
-        return;
+      final sinceLastCooldown = now.difference(_lastCooldownTime!);
+      if (sinceLastCooldown.inSeconds < env.directSpotifyRetryCooldownSec) {
+        return; // Still in cooldown
       }
       _lastCooldownTime = null;
     }
 
-    if (token == null) {
-      _scheduleRetryAttempt();
-      return;
-    }
-
-    _fallbackStartTime ??= now;
-
     try {
       final response = await _apiClient!.getCurrentPlayback(token);
       // Success! Switch back to direct mode
+      // debugPrint(
+      //     '[SPOTIFY] Background retry succeeded - switching to direct mode');
       _fallbackStartTime = null;
-      _retryAttempts = 0;
       _retryTimer?.cancel();
 
       if (response != null) {
@@ -500,11 +451,10 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
 
       _poll(); // Start regular polling
     } catch (e) {
-      _retryAttempts += 1;
-
       // If retry window exceeded (0 = unlimited), trigger cooldown or stop retries
       if (_fallbackStartTime != null) {
         final failureDuration = now.difference(_fallbackStartTime!);
+        final retryWindowSec = env.directSpotifyRetryWindowSec;
         final windowExceeded =
             retryWindowSec > 0 && failureDuration.inSeconds >= retryWindowSec;
         if (windowExceeded) {
@@ -512,7 +462,6 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
           if (cooldownSec <= 0) {
             // No cooldown configured: stop retrying to avoid noisy fetch errors
             _retryTimer?.cancel();
-            _retryAttempts = 0;
             state = state.copyWith(mode: SpotifyPollingMode.offline);
             return;
           }
@@ -520,15 +469,8 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
           // Enter cooldown; timer will skip polls until cooldown elapses
           _lastCooldownTime = now;
           _fallbackStartTime = now; // Reset for next window
-          _retryAttempts = 0;
-          _scheduleRetryAttempt(delaySeconds: cooldownSec);
-          return;
         }
       }
-    }
-
-    if (state.mode == SpotifyPollingMode.fallback) {
-      _scheduleRetryAttempt();
     }
   }
 

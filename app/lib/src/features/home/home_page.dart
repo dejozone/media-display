@@ -160,9 +160,11 @@ class _HomePageState extends ConsumerState<HomePage>
 
   Future<void> _logout(BuildContext context) async {
     // Note: stopPolling() is called automatically by events_ws_service auth listener
+    final router = GoRouter.of(context);
     await ref.read(authServiceProvider).logout();
     await ref.read(authStateProvider.notifier).clear();
-    if (mounted) context.go('/login');
+    if (!mounted) return;
+    router.go('/login');
   }
 
   bool _hasSpotifyIdentity() {
@@ -220,10 +222,10 @@ class _HomePageState extends ConsumerState<HomePage>
         error = null;
         launchingSpotify = true;
       });
+      if (!mounted) return;
+      final pendingUri = GoRouterState.of(context).uri.toString();
       try {
-        await ref
-            .read(authServiceProvider)
-            .setPendingOauthRedirect(GoRouterState.of(context).uri.toString());
+        await ref.read(authServiceProvider).setPendingOauthRedirect(pendingUri);
         final url = await ref.read(authServiceProvider).getSpotifyAuthUrl();
         if (!mounted) return;
         final ok = await launchUrl(

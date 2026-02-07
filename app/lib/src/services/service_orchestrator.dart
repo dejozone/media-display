@@ -110,10 +110,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
   Timer? _dataWatchTimer;
   Timer? _servicePausedTimer;
   Timer? _cycleResetTimer;
-  Timer? _offlineGuardTimer;
   DateTime? _lastDataTime;
-  DateTime? _offlineGuardUntil;
-  String? _offlineGuardReason;
 
   bool _initialized = false;
 
@@ -144,7 +141,6 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       _dataWatchTimer?.cancel();
       _servicePausedTimer?.cancel();
       _cycleResetTimer?.cancel();
-      _offlineGuardTimer?.cancel();
     });
 
     // Initialize asynchronously
@@ -254,74 +250,8 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     _startDataTimeoutWatcher();
   }
 
-  void _enterOfflineGuard(String? reason, DateTime until) {
-    if (_offlineGuardUntil != null && _offlineGuardUntil == until) {
-      return;
-    }
-
-    _offlineGuardTimer?.cancel();
-    _offlineGuardUntil = until;
-    _offlineGuardReason = reason;
-
-    final remaining = until.difference(DateTime.now());
-    _log(
-        '[Orchestrator] Offline guard active for ${remaining.inSeconds}s (${reason ?? 'no reason'})');
-
-    // Stop churny activity while offline guard is active.
-    _timeoutTimer?.cancel();
-    _dataWatchTimer?.cancel();
-    _dataWatchTimer = null;
-    ref.read(spotifyDirectProvider.notifier).stopPolling();
-
-    // Do not force WebSocket logout semantics; simply avoid sending configs.
-    state = state.copyWith(
-      isConnected: false,
-      isLoading: false,
-      clearActiveService: true,
-      error: reason ?? 'Services temporarily offline',
-    );
-
-    final remainingMs = remaining.inMilliseconds;
-    if (remainingMs > 0) {
-      _offlineGuardTimer = Timer(Duration(milliseconds: remainingMs), () {
-        _log('[Orchestrator] Offline guard expired - re-evaluating services');
-        _offlineGuardTimer = null;
-        _offlineGuardUntil = null;
-        _offlineGuardReason = null;
-        ref
-            .read(servicePriorityProvider.notifier)
-            .clearOfflineGuard(resetAttempts: true);
-        _startDataTimeoutWatcher();
-        ref.read(servicePriorityProvider.notifier).activateFirstAvailable();
-      });
-    }
-  }
-
-  void _clearOfflineGuardState() {
-    if (_offlineGuardUntil != null) {
-      _log('[Orchestrator] Clearing offline guard');
-    }
-    _offlineGuardTimer?.cancel();
-    _offlineGuardTimer = null;
-    _offlineGuardUntil = null;
-    _offlineGuardReason = null;
-  }
-
   void _handleServicePriorityChange(
       ServicePriorityState? prev, ServicePriorityState next) {
-    final now = DateTime.now();
-    final wasOffline = prev?.offlineGuardUntil != null &&
-        now.isBefore(prev!.offlineGuardUntil!);
-    final isOffline = next.offlineGuardUntil != null &&
-        now.isBefore(next.offlineGuardUntil!);
-
-    if (isOffline) {
-      _enterOfflineGuard(next.offlineGuardReason, next.offlineGuardUntil!);
-      return;
-    } else if (wasOffline && !isOffline) {
-      _clearOfflineGuardState();
-    }
-
     final currentService = next.currentService;
     final prevService = prev?.currentService;
 
@@ -1450,9 +1380,10 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       // Skip services that have already failed and are under recovery/probing;
       // the recovery loop will promote them when healthy. This avoids cycling
       // back to a failed service and resetting state unnecessarily.
-      final status = priority.serviceStatuses[service];
       final inRecovery = priority.recoveryStates.containsKey(service);
-      if (status == ServiceStatus.failing || inRecovery) continue;
+      // Allow cycling to a failing service so we can advance when Sonos is paused
+      // with no track; still skip if a dedicated recovery probe is already running.
+      if (inRecovery) continue;
 
       // Skip if already checked this cycle
       if (_checkedNotPlaying.contains(service)) continue;
@@ -1758,10 +1689,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     _dataWatchTimer?.cancel();
     _cancelPauseTimer();
     _cycleResetTimer?.cancel();
-    _offlineGuardTimer?.cancel();
     _lastDataTime = null;
-    _offlineGuardUntil = null;
-    _offlineGuardReason = null;
     _initialized = false;
 
     // Reset cycling state
@@ -1792,10 +1720,6 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     _cancelPauseTimer();
     _cycleResetTimer?.cancel();
     _cycleResetTimer = null;
-    _offlineGuardTimer?.cancel();
-    _offlineGuardTimer = null;
-    _offlineGuardUntil = null;
-    _offlineGuardReason = null;
 
     // Reset state
     _lastDataTime = null;

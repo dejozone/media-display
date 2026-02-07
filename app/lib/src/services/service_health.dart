@@ -1,8 +1,3 @@
-/// Service health status tracking for the client.
-///
-/// This module handles service status messages from the backend and tracks
-/// the health of each service to enable smart recovery behavior.
-
 import 'package:flutter/foundation.dart';
 
 /// Health status of a service (from backend health checks).

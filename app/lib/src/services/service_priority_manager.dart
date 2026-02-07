@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_display/src/config/env.dart';
@@ -100,8 +99,6 @@ class ServicePriorityState {
     this.unhealthyServices = const {},
     this.awaitingRecovery = const {},
     this.recoveryStates = const {},
-    this.offlineGuardUntil,
-    this.offlineGuardReason,
   });
 
   /// Priority order from configuration
@@ -143,12 +140,6 @@ class ServicePriorityState {
   /// Recovery states for failed higher-priority services
   /// Key: service type, Value: recovery state
   final Map<ServiceType, ServiceRecoveryState> recoveryStates;
-
-  /// When all services are offline/unavailable we pause retries until this time.
-  final DateTime? offlineGuardUntil;
-
-  /// Reason for entering offline guard (diagnostic only).
-  final String? offlineGuardReason;
 
   /// Whether we're currently transitioning between services
   final bool isTransitioning;
@@ -291,13 +282,10 @@ class ServicePriorityState {
     Set<ServiceType>? unhealthyServices,
     Set<ServiceType>? awaitingRecovery,
     Map<ServiceType, ServiceRecoveryState>? recoveryStates,
-    DateTime? offlineGuardUntil,
-    String? offlineGuardReason,
     bool clearCurrentService = false,
     bool clearPreviousService = false,
     bool clearTransitionStartTime = false,
     bool clearLastDataTime = false,
-    bool clearOfflineGuard = false,
   }) {
     return ServicePriorityState(
       configuredOrder: configuredOrder ?? this.configuredOrder,
@@ -321,10 +309,6 @@ class ServicePriorityState {
       unhealthyServices: unhealthyServices ?? this.unhealthyServices,
       awaitingRecovery: awaitingRecovery ?? this.awaitingRecovery,
       recoveryStates: recoveryStates ?? this.recoveryStates,
-        offlineGuardUntil:
-          clearOfflineGuard ? null : (offlineGuardUntil ?? this.offlineGuardUntil),
-        offlineGuardReason:
-          clearOfflineGuard ? null : (offlineGuardReason ?? this.offlineGuardReason),
     );
   }
 
@@ -341,9 +325,7 @@ class ServicePriorityState {
         other.isTransitioning == isTransitioning &&
         setEquals(other.unhealthyServices, unhealthyServices) &&
         setEquals(other.awaitingRecovery, awaitingRecovery) &&
-          mapEquals(other.recoveryStates, recoveryStates) &&
-          other.offlineGuardUntil == offlineGuardUntil &&
-          other.offlineGuardReason == offlineGuardReason;
+        mapEquals(other.recoveryStates, recoveryStates);
   }
 
   @override
@@ -358,8 +340,6 @@ class ServicePriorityState {
         Object.hashAllUnordered(unhealthyServices),
         Object.hashAllUnordered(awaitingRecovery),
         Object.hashAllUnordered(recoveryStates.entries),
-        offlineGuardUntil,
-        offlineGuardReason,
       );
 
   @override
@@ -385,80 +365,8 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
   Timer? _retryTimer;
   Timer? _recoveryTimer;
   ServiceProbeCallback? _probeCallback;
-  final Map<ServiceType, int> _retryBackoffSteps = {
-    for (final service in ServiceType.values) service: 0,
-  };
-  final Random _random = Random();
-  int _offlineGuardAttempts = 0;
 
   EnvConfig get _config => ref.read(envConfigProvider);
-
-  int _computeBackoffWithJitter(
-    int baseSeconds,
-    int attempt, {
-    int maxSeconds = 300,
-    double jitterRatio = 0.2,
-  }) {
-    final scaled = (baseSeconds * pow(2, attempt)).toInt();
-    final clamped = scaled > maxSeconds ? maxSeconds : scaled;
-    final jitterWindow = (clamped * jitterRatio).toInt();
-    if (jitterWindow <= 0) return clamped;
-
-    final jitter = _random.nextInt(jitterWindow + 1); // 0..jitterWindow
-    final withJitter = clamped + jitter;
-    if (withJitter < baseSeconds) return baseSeconds;
-    if (withJitter > maxSeconds) return maxSeconds;
-    return withJitter;
-  }
-
-  bool _isOfflineGuardActive() {
-    final until = state.offlineGuardUntil;
-    if (until == null) return false;
-    final active = DateTime.now().isBefore(until);
-    if (!active) {
-      _clearOfflineGuard();
-    }
-    return active;
-  }
-
-  void _enterOfflineGuard(String reason) {
-    final now = DateTime.now();
-    _offlineGuardAttempts++;
-    final durationSec = _computeBackoffWithJitter(
-      _config.offlineGuardBaseSec,
-      _offlineGuardAttempts - 1,
-      maxSeconds: _config.offlineGuardMaxSec,
-    );
-    final until = now.add(Duration(seconds: durationSec));
-
-    _log('[ServicePriority] Entering offline guard for ${durationSec}s ($reason)');
-
-    _retryTimer?.cancel();
-    _recoveryTimer?.cancel();
-
-    state = state.copyWith(
-      offlineGuardUntil: until,
-      offlineGuardReason: reason,
-    );
-
-    // Re-evaluate when the guard expires.
-    _retryTimer = Timer(Duration(seconds: durationSec), _attemptRetryPrimary);
-  }
-
-  void _clearOfflineGuard({bool resetAttempts = false}) {
-    if (state.offlineGuardUntil == null) {
-      if (resetAttempts) {
-        _offlineGuardAttempts = 0;
-      }
-      return;
-    }
-
-    _log('[ServicePriority] Clearing offline guard');
-    state = state.copyWith(clearOfflineGuard: true);
-    if (resetAttempts) {
-      _offlineGuardAttempts = 0;
-    }
-  }
 
   /// Set the callback for probing service health
   void setProbeCallback(ServiceProbeCallback callback) {
@@ -497,8 +405,6 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       lastRetryAttempts: initialRetries,
       retryWindowStarts: initialRetryWindows,
       awaitingRecovery: {},
-      offlineGuardUntil: null,
-      offlineGuardReason: null,
     );
   }
 
@@ -586,11 +492,6 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     }
   }
 
-  /// Clear the offline guard (e.g., when orchestrator wants to resume early).
-  void clearOfflineGuard({bool resetAttempts = false}) {
-    _clearOfflineGuard(resetAttempts: resetAttempts);
-  }
-
   /// Update the set of unhealthy services
   /// Called by the orchestrator when service health changes
   void updateUnhealthyServices(Set<ServiceType> unhealthy) {
@@ -618,8 +519,6 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       _log('[ServicePriority] Cannot activate disabled service: $service');
       return;
     }
-
-    _clearOfflineGuard(resetAttempts: false);
 
     final newStatuses =
         Map<ServiceType, ServiceStatus>.from(state.serviceStatuses);
@@ -712,10 +611,6 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
 
     final newErrors = Map<ServiceType, int>.from(state.errorCounts);
     newErrors[service] = 0;
-
-    // Reset backoff for the healthy service so future retries start from base.
-    _retryBackoffSteps[service] = 0;
-    _clearOfflineGuard(resetAttempts: true);
 
     // Clear retry window if we were recovering
     final newRetryWindows =
@@ -818,16 +713,8 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       newStatuses[service] = ServiceStatus.cooldown;
 
       final newCooldowns = Map<ServiceType, DateTime?>.from(state.cooldownEnds);
-      final backoffStep = _retryBackoffSteps[service] ?? 0;
-      final cooldownSeconds = _computeBackoffWithJitter(
-        fallbackConfig.retryCooldownSec,
-        backoffStep,
-        maxSeconds: max(fallbackConfig.retryCooldownSec, 300),
-      );
-      _retryBackoffSteps[service] = (backoffStep + 1).clamp(0, 8);
-
       newCooldowns[service] = DateTime.now().add(
-        Duration(seconds: cooldownSeconds),
+        Duration(seconds: fallbackConfig.retryCooldownSec),
       );
 
       state = state.copyWith(
@@ -874,22 +761,7 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     } else {
       // As a last resort, allow a service that's awaiting-recovery (but not disabled/cooldown)
       final lastResort = state.getNextAvailableServiceIgnoringAwaiting();
-
       if (lastResort != null && lastResort != failedService) {
-        // If the only remaining option is an awaiting-recovery cloud service,
-        // we're effectively offline/unreachable. Enter offline guard instead
-        // of churning between failing services.
-        final isAwaiting =
-            state.awaitingRecovery.contains(lastResort) &&
-                lastResort.isCloudService;
-        if (isAwaiting) {
-          _log(
-              '[ServicePriority] Only awaiting-recovery services remain; entering offline guard');
-          _enterOfflineGuard('only-awaiting-services');
-          state = state.copyWith(clearCurrentService: true);
-          return;
-        }
-
         _log(
             '[ServicePriority] No standard fallback from $failedService; using awaiting-recovery service $lastResort');
         activateService(lastResort);
@@ -897,17 +769,13 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
         startRecovery(failedService);
       } else {
         _log('[ServicePriority] No fallback available from $failedService');
-        // All services unavailable - enter offline guard to pause noisy retries
-        _enterOfflineGuard('no-service-available');
+        // All services unavailable - stay on current and retry later
+        _startRetryTimer(failedService);
       }
     }
   }
 
   void _startRetryTimer(ServiceType serviceToRetry) {
-    if (_isOfflineGuardActive()) {
-      _log('[ServicePriority] Offline guard active - delaying retry timer');
-      return;
-    }
     _retryTimer?.cancel();
 
     final fallbackConfig = _config.getFallbackConfig(serviceToRetry);
@@ -919,10 +787,6 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
   }
 
   void _attemptRetryPrimary() {
-    if (_isOfflineGuardActive()) {
-      return;
-    }
-
     // If we're already on the primary (first) enabled service, cancel the timer
     final primaryService = _getFirstEnabledService();
     if (state.currentService == primaryService) {
@@ -1127,7 +991,6 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       isTransitioning: false,
       clearTransitionStartTime: true,
       clearLastDataTime: true,
-      clearOfflineGuard: true,
     );
 
     _log('[ServicePriority] Re-running initial activation after reconnect');
@@ -1142,10 +1005,6 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     _retryTimer?.cancel();
     _recoveryTimer?.cancel();
     _recoveryTimer = null;
-    for (final key in _retryBackoffSteps.keys) {
-      _retryBackoffSteps[key] = 0;
-    }
-    _offlineGuardAttempts = 0;
     state = build();
   }
 
@@ -1340,9 +1199,6 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
 
     final newErrors = Map<ServiceType, int>.from(state.errorCounts);
     newErrors[service] = 0;
-
-    _retryBackoffSteps[service] = 0;
-    _clearOfflineGuard(resetAttempts: true);
 
     state = state.copyWith(
       recoveryStates: newRecoveryStates,
