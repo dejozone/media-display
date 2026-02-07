@@ -204,6 +204,7 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
       // Any response (including null for 204) is considered healthy
       return true;
     } on SpotifyApiException catch (e) {
+      debugPrint('[SPOTIFY] Probe failed: ${e.message}');
       return false;
     } catch (e) {
       return false;

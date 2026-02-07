@@ -74,11 +74,14 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     _useDirectPolling = false;
     _lastSettings = null;
     _lastConfigSent = null;
+    _lastConfigJson = null;
     _lastConfigSentAt = null;
     _tokenRequested = false;
     _lastTokenRequestTime = null;
     _wsTokenReceived = false;
     _lastEnabledSent.clear();
+    _configRetryTimer?.cancel();
+    _retryTimer?.cancel();
     _disconnect(scheduleRetry: false, resetFirstConnectFlag: true);
   }
 
@@ -91,7 +94,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   // to avoid re-sending redundant enabled=true toggles. Reset on disconnect.
   final Map<String, bool> _lastEnabledSent = {};
   Map<String, dynamic>? _lastConfigSent; // Last config payload sent to server
-  // String? _lastConfigJson;
+  String? _lastConfigJson; // Serialized payload for duplicate suppression
   DateTime? _lastConfigSentAt;
 
   /// Callback for service status updates (set by orchestrator)
@@ -106,6 +109,10 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       cooldown: Duration(seconds: env.wsRetryCooldownSeconds),
       maxTotal: Duration(seconds: env.wsRetryMaxTotalSeconds),
     );
+
+    _log('[WS] Retry policy initialized: interval=${env.wsRetryIntervalMs}ms, '
+        'active=${env.wsRetryActiveSeconds}s, cooldown=${env.wsRetryCooldownSeconds}s, '
+        'maxTotal=${env.wsRetryMaxTotalSeconds}s');
 
     // Set up token refresh callback for spotify_direct_service
     ref.read(spotifyTokenRefreshCallbackProvider).callback = () {
@@ -142,6 +149,12 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       {String caller = 'unknown', bool skipSendConfig = false}) async {
     if (!auth.isAuthenticated) return;
 
+    // Respect cooldown: if a retry is already scheduled while we're in cooldown,
+    // do not cancel it or attempt a new connection earlier than planned.
+    if (_retryTimer?.isActive == true && _retryPolicy.inCooldown) {
+      return;
+    }
+
     // CRITICAL: Set _connecting FIRST to prevent race conditions
     // Check and set atomically using a local flag
     if (_connecting) {
@@ -160,9 +173,15 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
 
     try {
       // Ensure we don't stack multiple channels; close any existing one first.
-      _disconnect(scheduleRetry: false);
+      // Do NOT reset retry policy here; we want retries to honor the same
+      // policy across attempts. Retry state resets only on successful connect
+      // (ready) or explicit manual reset.
+      _disconnect(
+        scheduleRetry: false,
+        resetRetryPolicy: false,
+        cancelRetryTimer: false,
+      );
       final env = ref.read(envConfigProvider);
-      _retryTimer?.cancel();
       final uri = Uri.parse('${env.eventsWsUrl}?token=${auth.token}');
 
       WebSocketChannel? channel;
@@ -345,6 +364,11 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   }
 
   void _scheduleRetry() {
+    // If a retry is already scheduled (including cooldown), do not override it.
+    if (_retryTimer?.isActive == true) {
+      return;
+    }
+
     _channel = null;
     _connectionConfirmed = false; // Reset to match channel state
     _retryTimer?.cancel();
@@ -375,7 +399,8 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       wsInCooldown: _retryPolicy.inCooldown,
     );
 
-    // _log('[WS] Scheduling retry in ${delay.inMilliseconds}ms');
+    // _log('[WS] Scheduling retry in ${delay.inMilliseconds}ms '
+    //     '(cooldown=${_retryPolicy.inCooldown}, retryCount=${_retryPolicy.retryCount})');
     _retryTimer = Timer(delay, () async {
       // If channel already exists, skip retry - another connection succeeded
       if (_channel != null) {
@@ -390,9 +415,15 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     });
   }
 
-  void _disconnect(
-      {bool scheduleRetry = true, bool resetFirstConnectFlag = false}) {
-    _retryTimer?.cancel();
+  void _disconnect({
+    bool scheduleRetry = true,
+    bool resetFirstConnectFlag = false,
+    bool resetRetryPolicy = true,
+    bool cancelRetryTimer = true,
+  }) {
+    if (cancelRetryTimer) {
+      _retryTimer?.cancel();
+    }
     _channel?.sink.close();
     _channel = null;
     _connectionConfirmed = false;
@@ -405,10 +436,11 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
         null; // Reset debounce - any pending token request was lost
     _lastSpotifyEnabled = false; // Reset so next enable triggers token request
     _lastEnabledSent.clear(); // Reset per-connection enable tracking
+    _lastConfigJson = null;
 
-    // If not scheduling retry (intentional disconnect), reset retry policy
-    // so future manual reconnection attempts can proceed
-    if (!scheduleRetry) {
+    // If not scheduling retry (intentional disconnect), optionally reset retry
+    // policy so future manual reconnection attempts can proceed.
+    if (!scheduleRetry && resetRetryPolicy) {
       _retryPolicy.reset();
     }
 
@@ -438,7 +470,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   void reconnect() {
     // _log('[WS] Force reconnect requested');
     _retryPolicy.reset();
-    _disconnect(scheduleRetry: false);
+    _disconnect(scheduleRetry: false, resetRetryPolicy: false);
     connect();
   }
 
@@ -472,6 +504,10 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   /// and we need to stop server-side polling immediately without touching Sonos
   /// settings.
   Future<void> sendSpotifyDisableOnly() async {
+    if (!ref.read(authStateProvider).isAuthenticated) {
+      _log('[WS] Cannot send Spotify disable config - not authenticated');
+      return;
+    }
     if (_channel == null) {
       _log('[WS] Cannot send Spotify disable config - no channel');
       return;
@@ -490,6 +526,11 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   /// Send config to disable all services on the server
   /// Called when user disables all services
   Future<void> sendDisableAllConfig() async {
+    if (!ref.read(authStateProvider).isAuthenticated) {
+      _log('[WS] sendDisableAllConfig skipped - not authenticated');
+      return;
+    }
+
     final payload = {
       'type': 'config',
       'need_spotify_token': false, // Explicitly cancel token refresh task
@@ -639,7 +680,13 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       {bool keepSonosEnabled = false,
       bool keepSpotifyPollingForRecovery = false}) async {
     try {
+      if (!ref.read(authStateProvider).isAuthenticated) {
+        _log('[WS] sendConfigForService skipped - not authenticated');
+        return;
+      }
+
       final baseWsConfig = service.webSocketConfig;
+      final priority = ref.read(servicePriorityProvider);
       final env = ref.read(envConfigProvider);
 
       // Update direct polling flag based on the service being activated
@@ -700,12 +747,20 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       // back from cloudSpotify to directSpotify, so the server continues its retry
       // loop and can emit healthy status when it recovers (still gated by user setting).
       //
+      // Only keep an extra service enabled when that service is marked as
+      // awaiting recovery; otherwise enforce a single enabled service to avoid
+      // sending configs with both spotify and sonos true.
+      final allowKeepSpotify = keepSpotifyPollingForRecovery &&
+          priority.awaitingRecovery.contains(ServiceType.cloudSpotify);
+      final allowKeepSonos = keepSonosEnabled &&
+          priority.awaitingRecovery.contains(ServiceType.localSonos);
+      //
       // NOTE: We intentionally do NOT enable Sonos when directSpotify is active,
       // even if user has Sonos enabled. Receiving Sonos data would cause the
       // orchestrator to switch away from directSpotify prematurely.
       final wsConfig = (
-        spotify: baseWsConfig.spotify || keepSpotifyPollingForRecovery,
-        sonos: baseWsConfig.sonos || keepSonosEnabled,
+        spotify: baseWsConfig.spotify || allowKeepSpotify,
+        sonos: baseWsConfig.sonos || allowKeepSonos,
       );
 
       // Token logic: Request token whenever Spotify is enabled in user settings
@@ -735,7 +790,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       // server can keep retrying; we only send true for recovery, or false if the
       // user disabled Spotify in settings.
       bool shouldExplicitlyEnableSpotifyForRecovery() =>
-          keepSpotifyPollingForRecovery && userSpotifyEnabled;
+          allowKeepSpotify && userSpotifyEnabled;
       bool shouldExplicitlyDisableSpotify() => !userSpotifyEnabled;
 
       if (service == ServiceType.directSpotify) {
@@ -1093,10 +1148,10 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
 
       final payloadJson = jsonEncode(mutable);
 
-      // if (payloadJson == _lastConfigJson) {
-      //   _log('[WS] Suppressing duplicate config: $logLabel');
-      //   return;
-      // }
+      if (payloadJson == _lastConfigJson) {
+        // Drop exact duplicate configs to prevent churn (e.g., repeated Sonos disable)
+        return;
+      }
 
       if (_channel == null) {
         _log('[WS] No channel to send $logLabel config');
@@ -1105,14 +1160,14 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
 
       _channel?.sink.add(payloadJson);
       _lastConfigSent = mutable;
-      // _lastConfigJson = payloadJson;
+      _lastConfigJson = payloadJson;
       _lastConfigSentAt = DateTime.now();
       // Update enabled tracking only with what we actually sent
       final sentEnabled = (mutable['enabled'] as Map?)?.cast<String, bool>();
       if (sentEnabled != null) {
         _lastEnabledSent.addAll(sentEnabled);
       }
-      // _log('[WS] Config sent: $logLabel, raw=$payloadJson');
+      _log('[WS] Config sent: $logLabel, raw=$payloadJson');
     } catch (e) {
       _log('[WS] Error sending $logLabel config: $e');
     }

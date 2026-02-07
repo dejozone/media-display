@@ -443,8 +443,12 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       }
     }
 
-    // Only process if direct_spotify is active
-    if (priority.currentService != ServiceType.directSpotify) return;
+    // Process when direct_spotify is active, OR when cloud services are down and
+    // direct polling is running so the UI can still update while WS is retrying.
+    final wsState = ref.read(eventsWsProvider);
+    final directIsActive = priority.currentService == ServiceType.directSpotify;
+    final cloudUnavailable = !wsState.connected && wsState.wsRetrying;
+    if (!directIsActive && !cloudUnavailable) return;
 
     // Check for errors
     if (spotifyState.error != null) {
@@ -805,8 +809,6 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
     if (currentService == ServiceType.directSpotify &&
         !allowDirectSpotifyDiscovery) {
-      _log(
-          '[Orchestrator] Speaker detected while on directSpotify - keeping Sonos disabled');
       _disableSonosBackend();
       _resetSpeakerDetectionState();
       return;
@@ -1025,12 +1027,12 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
                   healthState.shouldFallback;
 
           if (currentService == serviceType && shouldFallback) {
-            _log(
-                '[Orchestrator] $serviceType still ${healthState.status.name} - reporting error toward fallback');
+            // _log(
+            //     '[Orchestrator] $serviceType still ${healthState.status.name} - reporting error toward fallback');
             ref.read(servicePriorityProvider.notifier).reportError(serviceType);
-          } else {
-            _log(
-                '[Orchestrator] $serviceType still ${healthState.status.name} - staying on current fallback');
+          // } else {
+          //   _log(
+          //       '[Orchestrator] $serviceType still ${healthState.status.name} - staying on current fallback');
           }
         }
 
@@ -1351,19 +1353,6 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     for (final service in _config.priorityOrderOfServices) {
       if (priority.enabledServices.contains(service) &&
           priority.isServiceAvailable(service)) {
-        return service;
-      }
-    }
-
-    return null;
-  }
-
-  /// Get highest priority enabled service (may include unhealthy services)
-  ServiceType? _getHighestPriorityEnabledService() {
-    final priority = ref.read(servicePriorityProvider);
-
-    for (final service in _config.priorityOrderOfServices) {
-      if (priority.enabledServices.contains(service)) {
         return service;
       }
     }

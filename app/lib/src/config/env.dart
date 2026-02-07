@@ -233,12 +233,34 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
   // Default: Sonos is primary when both are enabled, then direct Spotify, then cloud Spotify
   final priorityOrderString = dotenv.env['PRIORITY_ORDER_OF_SERVICES'] ??
       'local_sonos,direct_spotify,cloud_spotify';
-  final priorityOrderOfServices = priorityOrderString
+
+  // Parse, deduplicate, and append any missing service types to keep a stable
+  // total ordering even if the env omits a value. This avoids hash-set
+  // reordering when logging while preserving the user-specified precedence.
+  final parsedPriorityOrder = priorityOrderString
       .split(',')
       .map((s) => ServiceType.fromString(s))
       .whereType<ServiceType>()
       .toList();
-  // Ensure we have at least one service
+
+  final seen = <ServiceType>{};
+  final priorityOrderOfServices = <ServiceType>[];
+
+  for (final service in parsedPriorityOrder) {
+    if (seen.add(service)) {
+      priorityOrderOfServices.add(service);
+    }
+  }
+
+  // Append any missing services in a deterministic order so every service has
+  // a position even if not explicitly listed in the env value.
+  for (final service in ServiceType.values) {
+    if (seen.add(service)) {
+      priorityOrderOfServices.add(service);
+    }
+  }
+
+  // Ensure we have at least one service (defensive, should never be empty here)
   if (priorityOrderOfServices.isEmpty) {
     priorityOrderOfServices.addAll([
       ServiceType.localSonos,

@@ -395,6 +395,9 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       _recoveryTimer?.cancel();
     });
 
+    _log(
+        '[ServicePriority] Configured priority order: ${config.priorityOrderOfServices}');
+
     return ServicePriorityState(
       configuredOrder: config.priorityOrderOfServices,
       enabledServices: {},
@@ -787,8 +790,8 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     if (state.currentService != null &&
         state.currentService!.isCloudService &&
         state.awaitingRecovery.contains(state.currentService)) {
-      _log(
-          '[ServicePriority] Awaiting recovery for ${state.currentService}; skipping retry');
+      // _log(
+      //     '[ServicePriority] Awaiting recovery for ${state.currentService}; skipping retry');
       return;
     }
 
