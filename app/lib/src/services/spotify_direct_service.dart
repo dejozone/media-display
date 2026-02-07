@@ -87,8 +87,6 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
 
   /// Updates the access token received from WebSocket
   void updateToken(String accessToken, int expiresAt) {
-    debugPrint('[SPOTIFY] Token updated, expiresAt=$expiresAt');
-
     // Cancel any existing refresh timer before scheduling a new one
     _tokenRefreshTimer?.cancel();
     _tokenRefreshTimer = null;
@@ -116,7 +114,6 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
       _startDirectPolling();
     } else if (state.mode == SpotifyPollingMode.direct && _pollTimer == null) {
       // Poll timer was cancelled (e.g., due to 401), restart it
-      // debugPrint('[SPOTIFY] Restarting poll after token update');
       _poll();
     }
     // If mode is idle, do nothing - orchestrator will call startDirectPolling() if needed
@@ -148,24 +145,18 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
 
     if (refreshIn <= 0) {
       // Token expires in less than 1 minute, refresh now
-      debugPrint(
-          '[SPOTIFY] Token expiring very soon, requesting refresh immediately');
       _requestTokenRefresh();
       return;
     }
 
-    debugPrint(
-        '[SPOTIFY] Scheduling fallback token refresh in ${refreshIn}s (token expires in ${expiresIn}s)');
     _tokenRefreshTimer = Timer(Duration(seconds: refreshIn), () {
       // Only request if token hasn't been refreshed by server
       final currentExpiresAt = state.tokenExpiresAt;
       if (currentExpiresAt != null && currentExpiresAt <= expiresAt) {
-        debugPrint(
-            '[SPOTIFY] Fallback token refresh timer fired - server did not refresh');
         _requestTokenRefresh();
-      } else {
-        debugPrint(
-            '[SPOTIFY] Fallback timer fired but token was already refreshed by server');
+      // } else {
+      //   debugPrint(
+      //       '[SPOTIFY] Fallback timer fired but token was already refreshed by server');
       }
     });
   }
@@ -183,7 +174,6 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
     // Set mode to direct even if no token yet
     // When token arrives, updateToken() will start actual polling
     if (state.accessToken == null) {
-      debugPrint('[SPOTIFY] Direct polling requested - waiting for token');
       _pollTimer?.cancel();
       _retryTimer?.cancel();
       state = state.copyWith(
@@ -201,12 +191,10 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
   Future<bool> probeService() async {
     final token = state.accessToken;
     if (token == null) {
-      debugPrint('[SPOTIFY] Probe failed: no access token');
       return false;
     }
 
     if (_isTokenExpired()) {
-      debugPrint('[SPOTIFY] Probe failed: token expired');
       return false;
     }
 
@@ -214,13 +202,10 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
       // Make a single API call to check if Spotify is reachable
       await _apiClient!.getCurrentPlayback(token);
       // Any response (including null for 204) is considered healthy
-      debugPrint('[SPOTIFY] Probe successful');
       return true;
     } on SpotifyApiException catch (e) {
-      debugPrint('[SPOTIFY] Probe failed: ${e.message}');
       return false;
     } catch (e) {
-      debugPrint('[SPOTIFY] Probe failed: $e');
       return false;
     }
   }
@@ -241,7 +226,6 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
       error: null,
     );
     _fallbackStartTime = null;
-    debugPrint('[SPOTIFY] Polling stopped (all timers cancelled)');
   }
 
   void _startDirectPolling() {
@@ -272,14 +256,12 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
 
     final token = state.accessToken;
     if (token == null) {
-      // debugPrint('[SPOTIFY] No access token available for polling');
       _enterFallbackMode('No access token');
       return;
     }
 
     // Check if token is expired before making request
     if (_isTokenExpired()) {
-      // debugPrint('[SPOTIFY] Token expired before poll - requesting refresh');
       _requestTokenRefresh();
       // Schedule retry after short delay (token refresh should arrive)
       _pollTimer?.cancel();
@@ -318,15 +300,11 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
     } on SpotifyApiException catch (e) {
       if (e.isAuthError) {
         _consecutive401Errors++;
-        // debugPrint(
-        //     '[SPOTIFY] Direct poll failed: 401 ($_consecutive401Errors/$_max401BeforeStop)');
-
         // Request token refresh
         _requestTokenRefresh();
 
         // If too many consecutive 401s, enter fallback mode
         if (_consecutive401Errors >= _max401BeforeStop) {
-          // debugPrint('[SPOTIFY] Too many 401 errors - entering fallback mode');
           _consecutive401Errors = 0;
           _enterFallbackMode('Authentication failed repeatedly');
           return;
@@ -360,15 +338,11 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
     final windowExceeded =
         retryWindowSec > 0 && failureDuration.inSeconds >= retryWindowSec;
     if (windowExceeded) {
-      // debugPrint(
-      //     '[SPOTIFY] Direct poll failed for ${failureDuration.inSeconds}s (retry 3/3) - entering fallback mode');
       _enterFallbackMode(errorMessage);
       return;
     }
 
     // Retry after interval
-    // debugPrint(
-    //     '[SPOTIFY] Direct poll failed: $errorMessage (retry $_consecutiveFailures)');
     state = state.copyWith(error: errorMessage);
 
     // Cancel both timers to prevent overlapping
@@ -386,8 +360,6 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
       mode: SpotifyPollingMode.fallback,
       error: reason,
     );
-
-    // debugPrint('[SPOTIFY] Switched to fallback mode: $reason');
 
     // Start background retry loop
     _startBackgroundRetry();
@@ -429,8 +401,6 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
     try {
       final response = await _apiClient!.getCurrentPlayback(token);
       // Success! Switch back to direct mode
-      // debugPrint(
-      //     '[SPOTIFY] Background retry succeeded - switching to direct mode');
       _fallbackStartTime = null;
       _retryTimer?.cancel();
 
@@ -486,8 +456,6 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
       final lastRefresh = state.lastTokenRefreshTime;
       if (lastRefresh == null ||
           DateTime.now().difference(lastRefresh).inSeconds > 60) {
-        // debugPrint(
-        //     '[SPOTIFY] Token expires in ${timeUntilExpiry}s - requesting refresh');
         _requestTokenRefresh();
       }
     }
@@ -496,7 +464,6 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
   void _requestTokenRefresh() {
     // Prevent duplicate token requests
     if (_tokenRequestPending) {
-      debugPrint('[SPOTIFY] Token request already pending, skipping');
       return;
     }
     _tokenRequestPending = true;

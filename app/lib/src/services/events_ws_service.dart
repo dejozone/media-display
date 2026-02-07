@@ -211,15 +211,12 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       // send (or the caller) handle it to avoid duplicate configs on first login.
       if (!skipSendConfig && !deferConfigForReconnect) {
         final currentService = ref.read(servicePriorityProvider).currentService;
-        if (currentService != null) {
-          _log(
-              '[WS] Skipping initial config in _connect; currentService=$currentService will send its config');
-        } else {
+        if (currentService == null) {
           await sendConfig();
         }
       } else if (deferConfigForReconnect) {
-        _log(
-            '[WS] Skipping initial config on reconnect; will send after priority reset');
+        // _log(
+        //     '[WS] Skipping initial config on reconnect; will send after priority reset');
       }
 
       _channel?.stream.listen(
@@ -777,12 +774,6 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
         }
       }
 
-      // _log('[WS] sendConfigForService: service=$service, '
-      //     'keepSonosEnabled=$keepSonosEnabled, '
-      //     'keepSpotifyPollingForRecovery=$keepSpotifyPollingForRecovery, '
-      //     'wsConfig=(spotify=${wsConfig.spotify}, sonos=${wsConfig.sonos}), '
-      //     'enabled=$enabled, poll=$poll, needToken=$needToken (spotifyEnabled=$userSpotifyEnabled)');
-
       final payload = {
         'type': 'config',
         'need_spotify_token': needToken,
@@ -793,12 +784,6 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
             'spotify': false,
           },
       };
-
-      _log('[WS] sendConfigForService: service=$service, '
-          'keepSonosEnabled=$keepSonosEnabled, '
-          'keepSpotifyPollingForRecovery=$keepSpotifyPollingForRecovery, '
-          'wsConfig=(spotify=${wsConfig.spotify}, sonos=${wsConfig.sonos}), '
-          '(spotifyEnabled=$userSpotifyEnabled), payload=$payload');
 
       // If no channel, try to connect first
       if (_channel == null) {
@@ -878,8 +863,6 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     // This ensures the new service-based config is used instead of the legacy polling mode logic
     final priority = ref.read(servicePriorityProvider);
     if (priority.currentService != null) {
-      _log(
-          '[WS] sendConfig delegating to sendConfigForService for ${priority.currentService}');
       await sendConfigForService(priority.currentService!);
       return;
     }
@@ -1129,7 +1112,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       if (sentEnabled != null) {
         _lastEnabledSent.addAll(sentEnabled);
       }
-      _log('[WS] Config sent: $logLabel, raw=$payloadJson');
+      // _log('[WS] Config sent: $logLabel, raw=$payloadJson');
     } catch (e) {
       _log('[WS] Error sending $logLabel config: $e');
     }
