@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:media_display/src/services/auth_service.dart';
 import 'package:media_display/src/config/env.dart';
 import 'package:media_display/src/services/auth_state.dart';
+import 'package:media_display/src/widgets/app_modal.dart';
 
 class LoginPage extends ConsumerStatefulWidget {
   const LoginPage({super.key});
@@ -18,6 +19,16 @@ class LoginPage extends ConsumerStatefulWidget {
 class _LoginPageState extends ConsumerState<LoginPage> {
   bool _loading = false;
   String? _error;
+
+  Future<void> _showFriendlyError() async {
+    if (!mounted) return;
+    await showAppModal(
+      context: context,
+      title: 'Login Unavailable',
+      message:
+          'We’re having trouble processing your request. Please try again soon.',
+    );
+  }
 
   Future<void> _startLogin(Future<Uri> Function() loader) async {
     setState(() {
@@ -36,11 +47,14 @@ class _LoginPageState extends ConsumerState<LoginPage> {
         setState(() {
           _error = 'Failed to open browser for login';
         });
+        await _showFriendlyError();
       }
     } catch (e) {
       setState(() {
-        _error = e.toString();
+        // _error = e.toString();
+        _error = null; // Avoid showing raw error to users
       });
+      await _showFriendlyError();
     } finally {
       if (mounted) {
         setState(() => _loading = false);
@@ -78,13 +92,13 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                       style:
                           TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 12),
-                  Text('API: ${env.apiBaseUrl}'),
+                  // Text('API: ${env.apiBaseUrl}'),
                   const SizedBox(height: 12),
                   _FocusableButton(
                     onPressed: _loading
                         ? null
                         : () => _startLogin(auth.getGoogleAuthUrl),
-                        isOutlined: true,
+                    isOutlined: true,
                     child:
                         Text(_loading ? 'Redirecting…' : 'Login with Google'),
                   ),
