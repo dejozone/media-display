@@ -365,7 +365,6 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
   }
 
   void _activateDirectSpotify({bool isFallback = false}) {
-    
     // Stop any direct polling first (in case switching from another mode)
     // Start direct polling
     ref.read(spotifyDirectProvider.notifier).startDirectPolling();
@@ -872,9 +871,9 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
       if (!willSwitchToSonos && !skipDiscoveryBecauseBackendEnabled) {
         _triggerSonosDiscovery();
-      // } else if (skipDiscoveryBecauseBackendEnabled) {
-      //   _log(
-      //       '[Orchestrator] Speaker detected while Sonos backend already enabled - skipping duplicate discovery config');
+        // } else if (skipDiscoveryBecauseBackendEnabled) {
+        //   _log(
+        //       '[Orchestrator] Speaker detected while Sonos backend already enabled - skipping duplicate discovery config');
       }
 
       if (willSwitchToSonos) {
@@ -1030,9 +1029,9 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
             // _log(
             //     '[Orchestrator] $serviceType still ${healthState.status.name} - reporting error toward fallback');
             ref.read(servicePriorityProvider.notifier).reportError(serviceType);
-          // } else {
-          //   _log(
-          //       '[Orchestrator] $serviceType still ${healthState.status.name} - staying on current fallback');
+            // } else {
+            //   _log(
+            //       '[Orchestrator] $serviceType still ${healthState.status.name} - staying on current fallback');
           }
         }
 
