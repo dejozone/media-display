@@ -34,6 +34,10 @@ class _HomePageState extends ConsumerState<HomePage>
   bool launchingSpotify = false;
   DateTime? _lastPauseTime;
 
+  Future<void> _resetServices() async {
+    ref.read(serviceOrchestratorProvider.notifier).reset();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -339,6 +343,7 @@ class _HomePageState extends ConsumerState<HomePage>
                       title: 'Media Display',
                       subtitle: 'Now Playing • Spotify & Sonos',
                       onHome: () => context.go('/home'),
+                      onReset: _resetServices,
                       onAccount: () => context.go('/account'),
                       onLogout: () => _logout(context),
                     ),

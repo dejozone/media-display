@@ -9,6 +9,7 @@ class AppHeader extends ConsumerWidget {
     required this.user,
     required this.onAccount,
     this.onHome,
+    this.onReset,
     this.onLogout,
     this.title = 'Media Display',
     this.subtitle,
@@ -17,6 +18,7 @@ class AppHeader extends ConsumerWidget {
   final Map<String, dynamic>? user;
   final VoidCallback onAccount;
   final VoidCallback? onHome;
+  final VoidCallback? onReset;
   final VoidCallback? onLogout;
   final String title;
   final String? subtitle;
@@ -60,6 +62,14 @@ class AppHeader extends ConsumerWidget {
             onPressed: onHome,
             child: const Icon(Icons.home_outlined),
           ),
+        if (onReset != null) ...[
+          const SizedBox(width: 8),
+          FocusableCircleButton(
+            tooltip: 'Reset Services',
+            onPressed: onReset,
+            child: const Icon(Icons.restart_alt),
+          ),
+        ],
         if (onLogout != null) ...[
           const SizedBox(width: 8),
           FocusableCircleButton(

@@ -43,6 +43,10 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
   String? error;
   String? success;
 
+  void _resetServices() {
+    ref.read(serviceOrchestratorProvider.notifier).reset();
+  }
+
   final CropController _cropController = CropController();
   Uint8List? _pendingImageBytes;
   Future<void> Function(Uint8List bytes)? _onChildCropped;
@@ -384,6 +388,7 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
                           onHome: () {
                             context.go('/home');
                           },
+                          onReset: _resetServices,
                           onAccount: () => context.go('/account'),
                           onLogout: () async {
                             final router = GoRouter.of(context);
