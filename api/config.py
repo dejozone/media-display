@@ -141,16 +141,25 @@ class Config:
     LOG_FORMAT = CONFIG['logging']['format']
     
     # =============================================================================
-    # ASSETS (from JSON config)
+    # USER / AVATAR SETTINGS (from JSON config)
     # =============================================================================
-    ASSETS_BASE_URL = CONFIG['assets']['baseUrl'].rstrip('/')
-    _image_upload_cfg = CONFIG['assets'].get('imageUpload', {})
+    _user_cfg = CONFIG.get('user', {}) if isinstance(CONFIG, dict) else {}
+    _avatar_cfg = _user_cfg.get('avatar', {}) if isinstance(_user_cfg, dict) else {}
+    assets_cfg = CONFIG.get('assets', {}) if isinstance(CONFIG, dict) else {}
+
+    ASSETS_BASE_URL = (_avatar_cfg.get('baseUrl') or assets_cfg.get('baseUrl', '')).rstrip('/')
+    _image_upload_cfg = _avatar_cfg.get('imageUpload', {}) if isinstance(_avatar_cfg, dict) else {}
+    if not _image_upload_cfg and isinstance(assets_cfg, dict):
+        _image_upload_cfg = assets_cfg.get('imageUpload', {})
+
     ASSETS_LOCAL_PATH = _image_upload_cfg.get('localPath', 'api/assets')
     ASSETS_ROOT = (ROOT_DIR / ASSETS_LOCAL_PATH).resolve()
-    
+
     # Image Upload Settings
     MAX_AVATAR_UPLOAD_BYTES = _image_upload_cfg.get('maxFileSizeBytes', 8388608)  # Default 8MB
     ALLOWED_IMAGE_EXTENSIONS = set(_image_upload_cfg.get('allowedExtensions', ['.jpg', '.jpeg', '.png', '.bmp']))
+
+    MAX_AVATARS_PER_USER = _avatar_cfg.get('maxAllowedPerUser', 6)
 
     # =============================================================================
     # SSL/TLS (from JSON config)

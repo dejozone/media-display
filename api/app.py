@@ -471,6 +471,12 @@ def upload_user_avatar(user_id: str):
     filename = (file.filename or '').strip()
     if not file or not filename:
         return jsonify({'error': 'No file provided'}), 400
+
+    # Enforce avatar count limit per user
+    max_allowed = Config.MAX_AVATARS_PER_USER
+    existing_avatars = auth_manager.get_avatars(g.user_id, limit=max_allowed + 1)
+    if len(existing_avatars) >= max_allowed:
+        return jsonify({'error': 'Avatar limit reached', 'message': f'Maximum of {max_allowed} avatars reached'}), 400
     
     # Read file content
     try:

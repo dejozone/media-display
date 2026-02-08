@@ -7,12 +7,22 @@
   "frontend": {
     "baseUrl": "https://media-display-app.projecttechcycle.org:9082"
   },
-  "assets": {
-    "baseUrl": "https://media-display-app.projecttechcycle.org:9082/assets",
-    "imageUpload": {
-      "localPath": "api/assets",
-      "maxFileSizeBytes": 8388608,
-      "allowedExtensions": [".jpg", ".jpeg", ".png", ".bmp", ".heic", ".heif"]
+  "user": {
+    "avatar": {
+      "baseUrl": "https://media-display-app.projecttechcycle.org:9082/assets",
+      "imageUpload": {
+        "localPath": "api/assets",
+        "maxFileSizeBytes": 8388608,
+        "allowedExtensions": [
+          ".jpg",
+          ".jpeg",
+          ".png",
+          ".bmp",
+          ".heic",
+          ".heif"
+        ]
+      },
+      "maxAllowedPerUser": 6
     }
   },
   "database": {

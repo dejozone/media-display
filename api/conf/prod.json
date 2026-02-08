@@ -1,18 +1,28 @@
 {
   "server": {
     "host": "0.0.0.0",
-    "port": 5000,
-    "debug": false
+    "port": 5001,
+    "debug": true
   },
   "frontend": {
     "baseUrl": "https://media-display-app.projecttechcycle.org"
   },
-  "assets": {
-    "baseUrl": "https://media-display-app.projecttechcycle.org/assets",
-    "imageUpload": {
-      "localPath": "api/assets",
-      "maxFileSizeBytes": 8388608,
-      "allowedExtensions": [".jpg", ".jpeg", ".png", ".bmp", ".heic", ".heif"]
+  "user": {
+    "avatar": {
+      "baseUrl": "https://media-display-app.projecttechcycle.org/assets",
+      "imageUpload": {
+        "localPath": "api/assets",
+        "maxFileSizeBytes": 8388608,
+        "allowedExtensions": [
+          ".jpg",
+          ".jpeg",
+          ".png",
+          ".bmp",
+          ".heic",
+          ".heif"
+        ]
+      },
+      "maxAllowedPerUser": 6
     }
   },
   "database": {
@@ -20,8 +30,8 @@
     "port": 5432,
     "name": "nowplaying",
     "user": "nowplaying",
-    "poolMinConn": 5,
-    "poolMaxConn": 20
+    "poolMinConn": 2,
+    "poolMaxConn": 10
   },
   "google": {
     "redirectUri": "https://media-display-app.projecttechcycle.org/api/auth/google/callback",
@@ -35,13 +45,23 @@
     ]
   },
   "spotify": {
-    "redirectUri": "https://media-display-app.projecttechcycle.org/api/auth/spotify/callback",
-    "scope": "user-read-currently-playing user-read-playback-state user-read-email user-read-private",
-    "sslVerify": true
+    "api": {
+      "main": {
+        "baseUrl": "https://api.spotify.com/v1",
+        "sslVerify": false
+      },
+      "account": {
+        "baseUrl": "https://accounts.spotify.com",
+        "sslVerify": false
+      },
+      "redirectUri": "https://media-display-app.projecttechcycle.org/api/auth/spotify/callback",
+      "scope": "user-read-currently-playing user-read-playback-state user-read-email user-read-private"
+    }
   },
   "cors": {
     "origins": [
-      "https://media-display-app.projecttechcycle.org"
+      "https://media-display-app.projecttechcycle.org",
+      "*"
     ]
   },
   "jwt": {
@@ -49,21 +69,22 @@
     "expirationHours": 24
   },
   "session": {
-    "timeoutMinutes": 60
+    "timeoutMinutes": 30
   },
   "rateLimit": {
     "spotifyApiCallsPerMinute": 100
   },
   "logging": {
-    "level": "INFO",
+    "level": "DEBUG",
     "format": "detailed"
   },
   "websocket": {
     "path": "/ws/socket.io",
     "asyncMode": "eventlet",
-    "corsAllowedOrigins": "https://media-display-app.projecttechcycle.org"
+    "corsAllowedOrigins": "*",
+    "port": 5002
   },
   "ssl": {
-    "verify": true
+    "verify": false
   }
 }
