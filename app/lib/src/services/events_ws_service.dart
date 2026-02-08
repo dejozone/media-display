@@ -271,7 +271,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
                 } else {
                   expiresAtInt = int.tryParse(expiresAt.toString()) ?? 0;
                 }
-                // _log('Token received via WebSocket');
+                _log('Token received via server push');
                 ref.read(spotifyDirectProvider.notifier).updateToken(
                       accessToken,
                       expiresAtInt,
@@ -1260,7 +1260,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
           expiresAtInt = int.tryParse(expiresAt.toString()) ?? 0;
         }
 
-        // _log('Token fetched via REST API');
+        _log('Token fetched via REST API');
         ref.read(spotifyDirectProvider.notifier).updateToken(
               accessToken,
               expiresAtInt,

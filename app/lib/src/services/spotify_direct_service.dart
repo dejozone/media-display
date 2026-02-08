@@ -1,8 +1,16 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:logging/logging.dart';
 import 'package:media_display/src/config/env.dart';
 import 'package:media_display/src/services/spotify_api_client.dart';
+import 'package:media_display/src/utils/logging.dart';
+
+final _logger = appLogger('SpotifyDirect');
+
+void _log(String message, {Level level = Level.INFO}) {
+  _logger.log(level, message);
+}
 
 enum SpotifyPollingMode {
   idle,
@@ -102,6 +110,7 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
 
     // Reset 401 error counter on fresh token
     _consecutive401Errors = 0;
+    _log('Token updated, resetting 401 error counter');
 
     // Schedule proactive token refresh before expiry
     _scheduleTokenRefresh(expiresAt);
@@ -131,8 +140,7 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
     final expiresIn = expiresAt - now;
 
     if (expiresIn <= 0) {
-      debugPrint(
-          '[SPOTIFY] Token already expired, requesting refresh immediately');
+      _log('Token already expired, requesting refresh immediately');
       _requestTokenRefresh();
       return;
     }
@@ -154,9 +162,8 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
       final currentExpiresAt = state.tokenExpiresAt;
       if (currentExpiresAt != null && currentExpiresAt <= expiresAt) {
         _requestTokenRefresh();
-      // } else {
-      //   debugPrint(
-      //       '[SPOTIFY] Fallback timer fired but token was already refreshed by server');
+        // } else {
+        //   _log('Fallback timer fired but token was already refreshed by server');
       }
     });
   }
@@ -204,7 +211,7 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
       // Any response (including null for 204) is considered healthy
       return true;
     } on SpotifyApiException catch (e) {
-      debugPrint('[SPOTIFY] Probe failed: ${e.message}');
+      _log('Probe failed: ${e.message}');
       return false;
     } catch (e) {
       return false;
@@ -239,7 +246,7 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
       error: null,
     );
 
-    debugPrint('[SPOTIFY] Switched to direct mode');
+    _log('Switched to direct mode');
 
     // Only start polling if we have a valid token
     // If no token yet, updateToken() will call _poll() when token arrives
