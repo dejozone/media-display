@@ -65,7 +65,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   @override
   Widget build(BuildContext context) {
     final auth = ref.watch(authServiceProvider);
-    final env = ref.watch(envConfigProvider);
+    // final env = ref.watch(envConfigProvider);
     final authState = ref.watch(authStateProvider);
 
     if (authState.isAuthenticated) {
