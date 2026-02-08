@@ -1538,13 +1538,13 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       // Current service is still enabled
 
       // If services changed but no switch occurred, we still need to send config
-      // to the server so it knows to stop disabled services
+      // to the server so it knows to stop disabled services. Use user-settings
+      // config to reflect the full enabled set and avoid multiple per-service
+      // configs when toggling services without a switch.
       if (servicesChanged) {
         _log(
-            '[Orchestrator] Services changed without switch - sending config to update server');
-        ref
-            .read(eventsWsProvider.notifier)
-            .sendConfigForService(currentService);
+            '[Orchestrator] Services changed without switch - sending user settings config');
+        ref.read(eventsWsProvider.notifier).sendConfigForUserSettings();
       }
 
       // Check if we should re-evaluate cycling
