@@ -1399,6 +1399,7 @@ file:///Users/hthai00/Projects/media-display/app/lib/src/services/token_storage.
 file:///Users/hthai00/Projects/media-display/app/lib/src/services/user_service.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/services/ws_retry_policy.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/services/ws_ssl_override.dart
+file:///Users/hthai00/Projects/media-display/app/lib/src/utils/logging.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/widgets/app_header.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/widgets/app_modal.dart
 file:///Users/hthai00/Projects/media-display/app/lib/src/widgets/focusable_circle_button.dart

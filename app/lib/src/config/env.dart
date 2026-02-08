@@ -106,6 +106,7 @@ class EnvConfig {
     required this.apiBaseUrl,
     required this.eventsWsUrl,
     required this.flavor,
+    required this.logLevel,
     required this.apiSslVerify,
     required this.eventsWsSslVerify,
     required this.wsRetryIntervalMs,
@@ -139,6 +140,7 @@ class EnvConfig {
   final String apiBaseUrl;
   final String eventsWsUrl;
   final String flavor;
+  final String logLevel;
   final bool apiSslVerify;
   final bool eventsWsSslVerify;
   final int wsRetryIntervalMs;
@@ -187,6 +189,7 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
   final api = dotenv.env['API_BASE_URL'] ?? 'http://localhost:5001';
   final ws = dotenv.env['WS_BASE_URL'] ?? 'ws://localhost:5002/events/media';
   final flavor = dotenv.env['FLAVOR'] ?? 'dev';
+  final logLevel = (dotenv.env['LOG_LEVEL'] ?? 'INFO').toUpperCase();
   final apiSslVerify =
       (dotenv.env['API_SSL_VERIFY'] ?? 'true').toLowerCase() == 'true';
   final wsSslVerify =
@@ -197,7 +200,7 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
       int.tryParse(dotenv.env['WS_RETRY_ACTIVE_SEC'] ?? '') ?? 60;
   final wsRetryCooldownSec =
       int.tryParse(dotenv.env['WS_RETRY_COOLDOWN_SEC'] ?? '') ?? 60;
-    final wsRetryWindowSec =
+  final wsRetryWindowSec =
       int.tryParse(dotenv.env['WS_RETRY_WINDOW_SEC'] ?? '') ?? 1800;
   final directSpotifyTimeoutSec =
       int.tryParse(dotenv.env['DIRECT_SPOTIFY_TIMEOUT_SEC'] ?? '') ?? 3;
@@ -370,6 +373,7 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
     apiBaseUrl: api,
     eventsWsUrl: ws,
     flavor: flavor,
+    logLevel: logLevel,
     apiSslVerify: apiSslVerify,
     eventsWsSslVerify: wsSslVerify,
     wsRetryIntervalMs: wsRetryIntervalMs,

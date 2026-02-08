@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:logging/logging.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:media_display/src/config/env.dart';
 import 'package:media_display/src/services/api_client.dart';
@@ -14,17 +14,12 @@ import 'package:media_display/src/services/ws_ssl_override.dart'
     if (dart.library.io) 'package:media_display/src/services/ws_ssl_override_io.dart';
 import 'package:media_display/src/services/spotify_direct_service.dart';
 import 'package:media_display/src/services/service_priority_manager.dart';
+import 'package:media_display/src/utils/logging.dart';
 
-/// Timestamped debug print for correlation with server logs
-void _log(String message) {
-  final now = DateTime.now();
-  final mo = now.month.toString().padLeft(2, '0');
-  final d = now.day.toString().padLeft(2, '0');
-  final h = now.hour.toString().padLeft(2, '0');
-  final m = now.minute.toString().padLeft(2, '0');
-  final s = now.second.toString().padLeft(2, '0');
-  final ms = now.millisecond.toString().padLeft(3, '0');
-  debugPrint('[$mo-$d $h:$m:$s.$ms] $message');
+final _logger = appLogger('EventsWs');
+
+void _log(String message, {Level level = Level.INFO}) {
+  _logger.log(level, message);
 }
 
 class NowPlayingState {
@@ -70,7 +65,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   /// Clean shutdown used on logout: no retries, clear cached settings/state,
   /// and prevent fallback direct polling from being triggered.
   void disconnectOnLogout() {
-    _log('[WS] Disconnecting due to logout');
+    _log('Disconnecting due to logout');
     _useDirectPolling = false;
     _lastSettings = null;
     _lastConfigSent = null;
@@ -112,7 +107,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
 
     final retryWindowLabel =
         env.wsRetryWindowSec <= 0 ? 'forever' : '${env.wsRetryWindowSec}s';
-    _log('[WS] Retry policy initialized: interval=${env.wsRetryIntervalMs}ms, '
+    _log('Retry policy initialized: interval=${env.wsRetryIntervalMs}ms, '
         'active=${env.wsRetryActiveSec}s, cooldown=${env.wsRetryCooldownSec}s, '
         'window=$retryWindowLabel');
 
@@ -197,7 +192,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
         await channel!.ready;
         _channel = channel;
       } catch (e) {
-        // _log('[WS] Unable to connect to server, will retry...');
+        // _log('Unable to connect to server, will retry...');
         state = NowPlayingState(
           error: 'Unable to connect to server',
           connected: false,
@@ -237,7 +232,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
         }
       } else if (deferConfigForReconnect) {
         // _log(
-        //     '[WS] Skipping initial config on reconnect; will send after priority reset');
+        //     'Skipping initial config on reconnect; will send after priority reset');
       }
 
       _channel?.stream.listen(
@@ -276,7 +271,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
                 } else {
                   expiresAtInt = int.tryParse(expiresAt.toString()) ?? 0;
                 }
-                // _log('[SPOTIFY] Token received via WebSocket');
+                // _log('Token received via WebSocket');
                 ref.read(spotifyDirectProvider.notifier).updateToken(
                       accessToken,
                       expiresAtInt,
@@ -291,7 +286,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
               if (!_connectionConfirmed) {
                 _connectionConfirmed = true;
                 _retryPolicy.reset();
-                _log('[WS] Connected successfully');
+                _log('Connected successfully');
                 state = NowPlayingState(
                   provider: state.provider,
                   payload: state.payload,
@@ -346,7 +341,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
           _scheduleRetry();
         },
         onDone: () {
-          _log('[WS] onDone: Connection closed by server');
+          _log('onDone: Connection closed by server');
           state = NowPlayingState(
             error: 'Connection closed',
             connected: false,
@@ -376,7 +371,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     _retryTimer?.cancel();
     final delay = _retryPolicy.nextDelay();
     if (delay == null) {
-      _log('[WS] Connection failed after maximum retry time');
+      _log('Connection failed after maximum retry time');
       // Update state to show exhausted (not retrying anymore)
       state = NowPlayingState(
         error: state.error,
@@ -401,12 +396,12 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       wsInCooldown: _retryPolicy.inCooldown,
     );
 
-    // _log('[WS] Scheduling retry in ${delay.inMilliseconds}ms '
+    // _log('Scheduling retry in ${delay.inMilliseconds}ms '
     //     '(cooldown=${_retryPolicy.inCooldown}, retryCount=${_retryPolicy.retryCount})');
     _retryTimer = Timer(delay, () async {
       // If channel already exists, skip retry - another connection succeeded
       if (_channel != null) {
-        // _log('[WS] Retry skipped - channel already exists');
+        // _log('Retry skipped - channel already exists');
         return;
       }
       final auth = ref.read(authStateProvider);
@@ -470,7 +465,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   /// Force reconnect - disconnect and reconnect immediately
   /// Useful for recovering from sleep/wake scenarios
   void reconnect() {
-    // _log('[WS] Force reconnect requested');
+    // _log('Force reconnect requested');
     _retryPolicy.reset();
     _disconnect(scheduleRetry: false, resetRetryPolicy: false);
     connect();
@@ -482,7 +477,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   /// @returns true if request was sent, false if WebSocket not connected
   bool requestServiceStatus(List<String> providers) {
     if (_channel == null || !_connectionConfirmed) {
-      _log('[WS] Cannot request service status - not connected');
+      _log('Cannot request service status - not connected');
       return false;
     }
 
@@ -493,10 +488,10 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
 
     try {
       _channel?.sink.add(payload);
-      _log('[WS] Requested service status for: $providers');
+      _log('Requested service status for: $providers');
       return true;
     } catch (e) {
-      _log('[WS] Error requesting service status: $e');
+      _log('Error requesting service status: $e');
       return false;
     }
   }
@@ -507,11 +502,11 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   /// settings.
   Future<void> sendSpotifyDisableOnly() async {
     if (!ref.read(authStateProvider).isAuthenticated) {
-      _log('[WS] Cannot send Spotify disable config - not authenticated');
+      _log('Cannot send Spotify disable config - not authenticated');
       return;
     }
     if (_channel == null) {
-      _log('[WS] Cannot send Spotify disable config - no channel');
+      _log('Cannot send Spotify disable config - no channel');
       return;
     }
 
@@ -529,7 +524,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   /// Called when user disables all services
   Future<void> sendDisableAllConfig() async {
     if (!ref.read(authStateProvider).isAuthenticated) {
-      _log('[WS] sendDisableAllConfig skipped - not authenticated');
+      _log('sendDisableAllConfig skipped - not authenticated');
       return;
     }
 
@@ -556,7 +551,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   Future<void> sendConfigForUserSettings() async {
     // Skip sending config when not authenticated (logout path)
     if (!ref.read(authStateProvider).isAuthenticated) {
-      _log('[WS] sendConfigForUserSettings skipped - not authenticated');
+      _log('sendConfigForUserSettings skipped - not authenticated');
       return;
     }
 
@@ -604,7 +599,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
         if (!recentlySentDisable) {
           await sendDisableAllConfig();
         } else {
-          _log('[WS] Suppressing duplicate disable-all config');
+          _log('Suppressing duplicate disable-all config');
         }
         return;
       }
@@ -629,7 +624,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       // Request token if Spotify is enabled
       final needToken = userSpotifyEnabled;
 
-      _log('[WS] sendConfigForUserSettings: '
+      _log('sendConfigForUserSettings: '
           'enabled=(spotify=$userSpotifyEnabled, sonos=$userSonosEnabled), '
           'needToken=$needToken');
 
@@ -667,7 +662,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       _initialConfigSent = true;
       await _sendConfigPayload(payload, logLabel: 'user settings');
     } catch (e) {
-      _log('[WS] sendConfigForUserSettings error: $e');
+      _log('sendConfigForUserSettings error: $e');
     }
   }
 
@@ -683,7 +678,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       bool keepSpotifyPollingForRecovery = false}) async {
     try {
       if (!ref.read(authStateProvider).isAuthenticated) {
-        _log('[WS] sendConfigForService skipped - not authenticated');
+        _log('sendConfigForService skipped - not authenticated');
         return;
       }
 
@@ -864,7 +859,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       // Send the config
       await _sendConfigPayload(payload, logLabel: 'service config');
     } catch (e) {
-      _log('[WS] sendConfigForService error: $e');
+      _log('sendConfigForService error: $e');
     }
   }
 
@@ -899,7 +894,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
         keepSpotifyPollingForRecovery: keepSpotify,
       );
     } catch (e) {
-      _log('[WS] triggerSonosDiscovery error: $e');
+      _log('triggerSonosDiscovery error: $e');
     }
   }
 
@@ -912,7 +907,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   Future<void> sendConfig({bool forceTokenRequest = false}) async {
     // Skip config when not authenticated (logout path)
     if (!ref.read(authStateProvider).isAuthenticated) {
-      _log('[WS] sendConfig skipped - not authenticated');
+      _log('sendConfig skipped - not authenticated');
       return;
     }
 
@@ -1038,7 +1033,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
               (!hasValidToken && !tokenRequestDebounced));
 
       // Debug logging to understand token request decisions
-      _log('[WS] sendConfig decision: spotifyEnabled=$spotifyEnabled, '
+      _log('sendConfig decision: spotifyEnabled=$spotifyEnabled, '
           'isInitialConfig=$isInitialConfig, '
           'spotifyJustEnabled=$spotifyJustEnabled, '
           'hasValidToken=$hasValidToken (token=${directState.accessToken != null}, '
@@ -1156,7 +1151,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       }
 
       if (_channel == null) {
-        _log('[WS] No channel to send $logLabel config');
+        _log('No channel to send $logLabel config');
         return;
       }
 
@@ -1169,9 +1164,9 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       if (sentEnabled != null) {
         _lastEnabledSent.addAll(sentEnabled);
       }
-      _log('[WS] Config sent: $logLabel, raw=$payloadJson');
+      _log('Config sent: $logLabel, raw=$payloadJson');
     } catch (e) {
-      _log('[WS] Error sending $logLabel config: $e');
+      _log('Error sending $logLabel config: $e');
     }
   }
 
@@ -1220,7 +1215,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   void _requestTokenRefresh() {
     if (_tokenRequested) return;
     _tokenRequested = true;
-    _log('[SPOTIFY] Requesting token refresh');
+    _log('Requesting token refresh');
 
     // If WS is connected and has sent tokens before, use WS
     if (_channel != null && _wsTokenReceived) {
@@ -1265,7 +1260,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
           expiresAtInt = int.tryParse(expiresAt.toString()) ?? 0;
         }
 
-        // _log('[SPOTIFY] Token fetched via REST API');
+        // _log('Token fetched via REST API');
         ref.read(spotifyDirectProvider.notifier).updateToken(
               accessToken,
               expiresAtInt,
@@ -1273,9 +1268,9 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
         // Note: updateToken() already starts direct polling internally
       }
     } on DioException catch (e) {
-      _log('[SPOTIFY] REST API token fetch failed: ${e.message}');
+      _log('REST API token fetch failed: ${e.message}');
     } catch (e) {
-      _log('[SPOTIFY] REST API token fetch error: $e');
+      _log('REST API token fetch error: $e');
     } finally {
       _tokenRequested = false;
     }
@@ -1296,7 +1291,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       }
     } else {
       // No valid token, try REST API
-      _log('[SPOTIFY] No valid token, fetching via REST API...');
+      _log('No valid token, fetching via REST API...');
       await _fetchTokenViaRestApi();
     }
   }
