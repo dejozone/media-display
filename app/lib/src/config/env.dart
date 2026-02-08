@@ -109,9 +109,9 @@ class EnvConfig {
     required this.apiSslVerify,
     required this.eventsWsSslVerify,
     required this.wsRetryIntervalMs,
-    required this.wsRetryActiveSeconds,
-    required this.wsRetryCooldownSeconds,
-    required this.wsRetryMaxTotalSeconds,
+    required this.wsRetryActiveSec,
+    required this.wsRetryCooldownSec,
+    required this.wsRetryWindowSec,
     required this.cloudSpotifyPollIntervalSec,
     required this.maxAvatarsPerUser,
     required this.directSpotifyPollIntervalSec,
@@ -142,9 +142,9 @@ class EnvConfig {
   final bool apiSslVerify;
   final bool eventsWsSslVerify;
   final int wsRetryIntervalMs;
-  final int wsRetryActiveSeconds;
-  final int wsRetryCooldownSeconds;
-  final int wsRetryMaxTotalSeconds;
+  final int wsRetryActiveSec;
+  final int wsRetryCooldownSec;
+  final int wsRetryWindowSec;
   final int directSpotifyTimeoutSec;
   final int cloudSpotifyPollIntervalSec;
   final int? sonosPollIntervalSec;
@@ -193,12 +193,12 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
       (dotenv.env['WS_SSL_VERIFY'] ?? 'true').toLowerCase() == 'true';
   final wsRetryIntervalMs =
       int.tryParse(dotenv.env['WS_RETRY_INTERVAL_MS'] ?? '') ?? 3000;
-  final wsRetryActiveSeconds =
-      int.tryParse(dotenv.env['WS_RETRY_ACTIVE_SECONDS'] ?? '') ?? 60;
-  final wsRetryCooldownSeconds =
-      int.tryParse(dotenv.env['WS_RETRY_COOLDOWN_SECONDS'] ?? '') ?? 60;
-  final wsRetryMaxTotalSeconds =
-      int.tryParse(dotenv.env['WS_RETRY_MAX_TOTAL_SECONDS'] ?? '') ?? 1800;
+  final wsRetryActiveSec =
+      int.tryParse(dotenv.env['WS_RETRY_ACTIVE_SEC'] ?? '') ?? 60;
+  final wsRetryCooldownSec =
+      int.tryParse(dotenv.env['WS_RETRY_COOLDOWN_SEC'] ?? '') ?? 60;
+    final wsRetryWindowSec =
+      int.tryParse(dotenv.env['WS_RETRY_WINDOW_SEC'] ?? '') ?? 1800;
   final directSpotifyTimeoutSec =
       int.tryParse(dotenv.env['DIRECT_SPOTIFY_TIMEOUT_SEC'] ?? '') ?? 3;
   final cloudSpotifyPollIntervalSec =
@@ -373,9 +373,9 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
     apiSslVerify: apiSslVerify,
     eventsWsSslVerify: wsSslVerify,
     wsRetryIntervalMs: wsRetryIntervalMs,
-    wsRetryActiveSeconds: wsRetryActiveSeconds,
-    wsRetryCooldownSeconds: wsRetryCooldownSeconds,
-    wsRetryMaxTotalSeconds: wsRetryMaxTotalSeconds,
+    wsRetryActiveSec: wsRetryActiveSec,
+    wsRetryCooldownSec: wsRetryCooldownSec,
+    wsRetryWindowSec: wsRetryWindowSec,
     directSpotifyTimeoutSec: directSpotifyTimeoutSec,
     cloudSpotifyPollIntervalSec: cloudSpotifyPollIntervalSec,
     sonosPollIntervalSec: sonosPollIntervalSec,

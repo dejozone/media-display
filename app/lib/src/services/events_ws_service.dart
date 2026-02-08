@@ -105,14 +105,16 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     final env = ref.read(envConfigProvider);
     _retryPolicy = WsRetryPolicy(
       interval: Duration(milliseconds: env.wsRetryIntervalMs),
-      activeWindow: Duration(seconds: env.wsRetryActiveSeconds),
-      cooldown: Duration(seconds: env.wsRetryCooldownSeconds),
-      maxTotal: Duration(seconds: env.wsRetryMaxTotalSeconds),
+      activeWindow: Duration(seconds: env.wsRetryActiveSec),
+      cooldown: Duration(seconds: env.wsRetryCooldownSec),
+      retryWindow: Duration(seconds: env.wsRetryWindowSec),
     );
 
+    final retryWindowLabel =
+        env.wsRetryWindowSec <= 0 ? 'forever' : '${env.wsRetryWindowSec}s';
     _log('[WS] Retry policy initialized: interval=${env.wsRetryIntervalMs}ms, '
-        'active=${env.wsRetryActiveSeconds}s, cooldown=${env.wsRetryCooldownSeconds}s, '
-        'maxTotal=${env.wsRetryMaxTotalSeconds}s');
+        'active=${env.wsRetryActiveSec}s, cooldown=${env.wsRetryCooldownSec}s, '
+        'window=$retryWindowLabel');
 
     // Set up token refresh callback for spotify_direct_service
     ref.read(spotifyTokenRefreshCallbackProvider).callback = () {

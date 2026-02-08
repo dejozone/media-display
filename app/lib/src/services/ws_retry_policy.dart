@@ -4,19 +4,20 @@ import 'package:flutter/foundation.dart';
 /// - retry every [interval]
 /// - keep retrying for [activeWindow]
 /// - then back off for [cooldown]
-/// - repeat until [maxTotal] has elapsed from the first failure
+/// - repeat until [retryWindow] has elapsed from the first failure
+///   (or forever when [retryWindow] is zero or negative)
 class WsRetryPolicy {
   WsRetryPolicy({
     required this.interval,
     required this.activeWindow,
     required this.cooldown,
-    required this.maxTotal,
+    required this.retryWindow,
   });
 
   final Duration interval;
   final Duration activeWindow;
   final Duration cooldown;
-  final Duration maxTotal;
+  final Duration retryWindow;
 
   DateTime? _sessionStart;
   DateTime? _cycleStart;
@@ -37,9 +38,12 @@ class WsRetryPolicy {
     final now = DateTime.now();
     _sessionStart ??= now;
 
-    final sessionElapsed = now.difference(_sessionStart!);
-    if (sessionElapsed >= maxTotal) {
-      return null;
+    // When retryWindow is zero or negative, retries run indefinitely.
+    if (retryWindow > Duration.zero) {
+      final sessionElapsed = now.difference(_sessionStart!);
+      if (sessionElapsed >= retryWindow) {
+        return null;
+      }
     }
 
     _cycleStart ??= now;
