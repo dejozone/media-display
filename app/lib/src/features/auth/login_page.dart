@@ -5,7 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:go_router/go_router.dart';
 import 'package:media_display/src/services/auth_service.dart';
-import 'package:media_display/src/config/env.dart';
+// import 'package:media_display/src/config/env.dart';
 import 'package:media_display/src/services/auth_state.dart';
 import 'package:media_display/src/widgets/app_modal.dart';
 
