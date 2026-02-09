@@ -878,8 +878,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
           priority.awaitingRecovery.contains(ServiceType.localSonos);
 
       if (sonosAwaiting && current != ServiceType.localSonos) {
-        _log(
-            '[WS] triggerSonosDiscovery: skipping because Sonos awaiting recovery while on $current');
+        _log('triggerSonosDiscovery: skipping because Sonos awaiting recovery while on $current');
         return;
       }
 
@@ -887,8 +886,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       // drop the current fallback (e.g., cloudSpotify) during discovery.
       final keepSpotify = current != ServiceType.localSonos;
 
-      _log(
-          '[WS] triggerSonosDiscovery: delegating to sendConfigForService(localSonos) (keepSpotify=$keepSpotify)');
+        _log('triggerSonosDiscovery: delegating to sendConfigForService(localSonos) (keepSpotify=$keepSpotify)');
       await sendConfigForService(
         ServiceType.localSonos,
         keepSpotifyPollingForRecovery: keepSpotify,
@@ -1201,8 +1199,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
         if (_channel == null && !_connecting) {
           await _connect(auth, caller: 'refreshAndMaybeConnect');
           // } else {
-          //   _log(
-          //       '[WS] _refreshAndMaybeConnect skipped - already connected');
+          //   _log('_refreshAndMaybeConnect skipped - already connected');
         }
       } else {
         _disconnect(scheduleRetry: false);

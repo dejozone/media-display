@@ -185,9 +185,17 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
         return ref.read(spotifyDirectProvider.notifier).probeService();
 
       case ServiceType.cloudSpotify:
+        // Cloud Spotify: request server health via WebSocket; rely on server response
+        ref
+            .read(eventsWsProvider.notifier)
+            .requestServiceStatus(const ['spotify']);
+        return false;
+
       case ServiceType.localSonos:
-        // Cloud services - recovery handled by server, no client-side probing
-        // _log('Skipping probe for $service (recovery handled by server)');
+        // Local Sonos: request server health via WebSocket; rely on server response
+        ref
+            .read(eventsWsProvider.notifier)
+            .requestServiceStatus(const ['sonos']);
         return false;
     }
   }

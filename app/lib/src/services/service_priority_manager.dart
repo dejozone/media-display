@@ -364,6 +364,11 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
 
   EnvConfig get _config => ref.read(envConfigProvider);
 
+  bool _clientRecoveryEnabled(ServiceType service) {
+    final interval = _config.getFallbackConfig(service).retryIntervalSec;
+    return interval > 0;
+  }
+
   /// Set the callback for probing service health
   void setProbeCallback(ServiceProbeCallback callback) {
     _probeCallback = callback;
@@ -448,13 +453,15 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       serviceStatuses: newStatuses,
     );
 
-    _log('Updated enabled services: $enabled (spotify=$spotifyEnabled, sonos=$sonosEnabled)');
+    _log(
+        'Updated enabled services: $enabled (spotify=$spotifyEnabled, sonos=$sonosEnabled)');
 
     // If current service is now disabled, switch to next available
     final currentService = state.currentService;
 
     if (currentService != null && !enabled.contains(currentService)) {
-      _log('Current service $currentService is disabled, finding next available');
+      _log(
+          'Current service $currentService is disabled, finding next available');
       final next = state.getNextAvailableService();
       _log('Next available service: $next');
       if (next != null) {
@@ -475,10 +482,12 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
         final isUnhealthy = unhealthyServices?.contains(nextAvailable) ?? false;
 
         if (isHigherPriority && !isUnhealthy) {
-          _log('Higher-priority service $nextAvailable is now available (was on $currentService)');
+          _log(
+              'Higher-priority service $nextAvailable is now available (was on $currentService)');
           activateService(nextAvailable);
         } else if (isHigherPriority && isUnhealthy) {
-          _log('Higher-priority service $nextAvailable is enabled but unhealthy - staying on $currentService');
+          _log(
+              'Higher-priority service $nextAvailable is enabled but unhealthy - staying on $currentService');
         }
       }
     }
@@ -1071,11 +1080,18 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
   /// NOTE: Only directSpotify is handled client-side. Cloud services (cloudSpotify, localSonos)
   /// have their recovery handled by the WebSocket server.
   void startRecovery(ServiceType failedService) {
-    // Only handle directSpotify recovery client-side
-    // Cloud services (cloudSpotify, localSonos) recovery is handled by the server
-    if (failedService != ServiceType.directSpotify) {
+    final isCloud = failedService.isCloudService;
+
+    // Respect per-service toggle: interval <= 0 means rely solely on server health
+    if (isCloud && !_clientRecoveryEnabled(failedService)) {
       _log(
-          'Skipping client-side recovery for $failedService (handled by server)');
+          'Skipping client-side recovery for $failedService (retry interval <= 0; waiting for server health)');
+      return;
+    }
+
+    // Direct Spotify always uses client-side recovery
+    if (!isCloud && failedService != ServiceType.directSpotify) {
+      _log('Skipping client-side recovery for $failedService (not supported)');
       return;
     }
 
@@ -1236,15 +1252,29 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
   }
 
   void _startRecoveryTimer() {
-    if (_recoveryTimer != null) return; // Already running
+    // Determine the fastest probe interval among services under recovery
+    final interval = _computeRecoveryTimerIntervalSec();
+    if (interval == null) return;
 
-    // Use directSpotify fallback config for recovery (only directSpotify is recovered client-side)
-    final interval = _config.spotifyDirectFallback.retryIntervalSec;
-
+    // Always restart to honor updated intervals
+    _recoveryTimer?.cancel();
     _recoveryTimer = Timer.periodic(
       Duration(seconds: interval),
       (_) => _onRecoveryTimerTick(),
     );
+  }
+
+  int? _computeRecoveryTimerIntervalSec() {
+    if (state.recoveryStates.isEmpty) return null;
+
+    final intervals = state.recoveryStates.keys
+        .map((s) => _config.getFallbackConfig(s).retryIntervalSec)
+        .where((v) => v > 0)
+        .toList();
+
+    if (intervals.isEmpty) return null;
+    final minInterval = intervals.reduce((a, b) => a < b ? a : b);
+    return minInterval.clamp(1, minInterval);
   }
 
   void _stopRecoveryTimer() {
@@ -1316,6 +1346,17 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
         }
       }
 
+      // Respect per-service probe interval
+      final intervalSec = fallbackConfig.retryIntervalSec;
+      final lastProbe = recoveryState.lastProbeTime;
+      if (intervalSec <= 0) {
+        continue; // Should not happen because we gate when adding, but defensive
+      }
+      if (lastProbe != null &&
+          now.difference(lastProbe).inSeconds < intervalSec) {
+        continue; // Not yet time to probe
+      }
+
       // Ready to probe
       servicesToProbe.add(service);
     }
@@ -1343,6 +1384,13 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
           .compareTo(state.configuredOrder.indexOf(b)));
 
       final serviceToProbe = servicesToProbe.first;
+      // Stamp last probe time to enforce interval, even if probe is skipped/async
+      final recoveryState = updatedStates[serviceToProbe];
+      if (recoveryState != null) {
+        updatedStates[serviceToProbe] =
+            recoveryState.copyWith(lastProbeTime: DateTime.now());
+        state = state.copyWith(recoveryStates: updatedStates);
+      }
       // _log('Probing $serviceToProbe for recovery');
       _probeService(serviceToProbe);
     }
@@ -1359,6 +1407,11 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       if (isHealthy) {
         onServiceRecovered(service);
       } else {
+        // For cloud services, probes are best-effort requests for server health.
+        // Do not penalize failures; await server or future probes to mark healthy.
+        if (service.isCloudService) {
+          return;
+        }
         onRecoveryProbeFailed(service);
       }
     } catch (e) {
