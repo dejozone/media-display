@@ -794,6 +794,9 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       return;
     }
 
+    _log(
+        'Retry scan: current=${state.currentService}, order=${state.configuredOrder}');
+
     // Only attempt retry if the current service is failing or in cooldown
     // Don't switch away from a service that's still working (active status with low error count)
     final currentStatus = state.serviceStatuses[state.currentService];
@@ -809,7 +812,19 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     }
 
     // Find the highest priority service that's in cooldown/standby and ready for retry
+    final current = state.currentService;
+    final currentIdx =
+        current != null ? state.configuredOrder.indexOf(current) : -1;
+
     for (final service in state.effectiveOrder) {
+      // Only retry services that are HIGHER priority than the current one.
+      if (currentIdx >= 0) {
+        final serviceIdx = state.configuredOrder.indexOf(service);
+        if (serviceIdx >= currentIdx) {
+          continue;
+        }
+      }
+
       if (state.awaitingRecovery.contains(service) && service.isCloudService) {
         // Wait for server-side health recovery for cloud services
         continue;

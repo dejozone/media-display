@@ -257,6 +257,18 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     final prevService = prev?.currentService;
 
     if (currentService != prevService) {
+      // Prevent switching to a lower-priority Spotify service during a global
+      // pause when the current service is still healthy. In this state the
+      // user explicitly paused playback; we should stay on the chosen service
+      // until a higher-priority service recovers instead of dropping to a
+      // lower tier (e.g., direct -> cloud).
+      if (_shouldHoldGlobalPause(prevService, currentService, next)) {
+        ref
+            .read(servicePriorityProvider.notifier)
+            .activateService(prevService!);
+        return;
+      }
+
       // Check if this is a switch to a higher-priority service (not a fallback due to cycling)
       // If so, reset cycling state to allow fresh evaluation of the new service
       bool isFallback = false;
@@ -926,6 +938,38 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     return idxCandidate < idxReference;
   }
 
+  bool _isLowerPriority(ServiceType candidate, ServiceType reference) {
+    final order = _config.priorityOrderOfServices;
+    final idxCandidate = order.indexOf(candidate);
+    final idxReference = order.indexOf(reference);
+    if (idxCandidate < 0 || idxReference < 0) return false;
+    return idxCandidate > idxReference;
+  }
+
+  bool _shouldHoldGlobalPause(ServiceType? prevService,
+      ServiceType? currentService, ServicePriorityState nextState) {
+    if (prevService == null || currentService == null) return false;
+
+    // Only guard when attempting to move down the priority order from direct
+    // Spotify to cloud Spotify.
+    final movingToLowerPriority = _isLowerPriority(currentService, prevService);
+    final isDirectToCloud = prevService == ServiceType.directSpotify &&
+        currentService == ServiceType.cloudSpotify;
+    if (!movingToLowerPriority || !isDirectToCloud) return false;
+
+    // Only hold if the previous service is not in a failing/cooldown state.
+    final prevStatus = nextState.serviceStatuses[prevService];
+    final prevHealthy = prevStatus == ServiceStatus.active ||
+        prevStatus == ServiceStatus.standby;
+    if (!prevHealthy) return false;
+
+    // Treat Spotify paused/stopped as a global pause signal.
+    final isGlobalPause = !state.isPlaying && state.provider == 'spotify';
+    final stillOnPrevService = state.activeService == prevService;
+
+    return isGlobalPause && stillOnPrevService;
+  }
+
   /// Handle service status messages from WebSocket backend
   /// Supports both single status format and multi-status format (probe response)
   void _handleServiceStatus(Map<String, dynamic> data) {
@@ -1131,7 +1175,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     // so do not cycle to Sonos on this signal.
     if (service == ServiceType.directSpotify ||
         service == ServiceType.cloudSpotify) {
-      _log('$service paused/stopped - treating as global pause, not cycling');
+      // _log('$service paused/stopped - treating as global pause, not cycling');
       return;
     }
 
