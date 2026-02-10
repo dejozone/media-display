@@ -672,8 +672,13 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     final elapsedSinceFirstError = newRetryWindows[service] != null
         ? now.difference(newRetryWindows[service]!).inSeconds
         : 0;
-    final timeThresholdReached =
+
+    // Treat fallbackTimeThresholdSec as the maximum window to accumulate
+    // errorThreshold samples. Whichever happens first (count reached OR window
+    // elapsed) triggers fallback.
+    final windowExpired =
         timeThreshold > 0 && elapsedSinceFirstError >= timeThreshold;
+    final countReached = newErrors[service]! >= effectiveThreshold;
 
     // _log('Error on $service '
     //     '(${newErrors[service]}/$effectiveThreshold)');
@@ -691,10 +696,13 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       _log('Marked $service as awaiting server recovery');
     }
 
-    final thresholdReached =
-        newErrors[service]! >= effectiveThreshold || timeThresholdReached;
+    final thresholdReached = countReached || windowExpired;
 
     if (thresholdReached) {
+      if (windowExpired && !countReached) {
+        _log(
+            '$service fallback window expired after ${elapsedSinceFirstError}s before reaching errorThreshold=${fallbackConfig.errorThreshold}');
+      }
       // Threshold reached (by count or time) - enter cooldown and trigger fallback
       // final reason = newErrors[service]! >= effectiveThreshold
       //     ? 'error-threshold'
@@ -771,6 +779,13 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
 
     final fallbackConfig = _config.getFallbackConfig(serviceToRetry);
 
+    // If retry interval is 0/negative, skip starting the timer to avoid
+    // tight retry loops (e.g., when client-side retry is disabled).
+    if (fallbackConfig.retryIntervalSec <= 0) {
+      _log('Skipping retry timer for $serviceToRetry (retryIntervalSec<=0)');
+      return;
+    }
+
     _retryTimer = Timer.periodic(
       Duration(seconds: fallbackConfig.retryIntervalSec),
       (_) => _attemptRetryPrimary(),
@@ -794,9 +809,6 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       return;
     }
 
-    _log(
-        'Retry scan: current=${state.currentService}, order=${state.configuredOrder}');
-
     // Only attempt retry if the current service is failing or in cooldown
     // Don't switch away from a service that's still working (active status with low error count)
     final currentStatus = state.serviceStatuses[state.currentService];
@@ -815,6 +827,8 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     final current = state.currentService;
     final currentIdx =
         current != null ? state.configuredOrder.indexOf(current) : -1;
+
+    var attempted = false;
 
     for (final service in state.effectiveOrder) {
       // Only retry services that are HIGHER priority than the current one.
@@ -842,6 +856,8 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       if (state.shouldRetryService(service, _config)) {
         _log('Attempting retry of $service');
 
+        attempted = true;
+
         // Update last retry attempt
         final newRetries =
             Map<ServiceType, DateTime?>.from(state.lastRetryAttempts);
@@ -866,6 +882,12 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
         activateService(service);
         break;
       }
+    }
+
+    // If nothing is eligible to retry right now, simply wait for the next tick
+    // (e.g., cooldown not elapsed yet). Avoid spamming the log.
+    if (!attempted) {
+      return;
     }
   }
 
