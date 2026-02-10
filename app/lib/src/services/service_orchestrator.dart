@@ -716,6 +716,22 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     final provider = payload['provider'] as String?;
     final isPlaying = playback?['is_playing'] as bool? ?? false;
 
+    // Prevent unnecessary widget churn after resets: only update when track or
+    // play/pause meaningfully changes.
+    final currentTrackKey = state.track?['id'] ??
+        state.track?['uri'] ??
+        state.track?['spotify_uri'];
+    final newTrackKey = track?['id'] ?? track?['uri'] ?? track?['spotify_uri'];
+    final sameTrack = (currentTrackKey != null && newTrackKey != null)
+        ? currentTrackKey == newTrackKey
+        : currentTrackKey == null && newTrackKey == null;
+
+    // If we already have data and neither track nor play/pause state changed,
+    // skip updating to avoid flicker during reloads.
+    if (state.hasData && sameTrack && state.isPlaying == isPlaying) {
+      return;
+    }
+
     // Track last time we observed active playback for idle reset watchdog.
     if (isPlaying) {
       _lastPlayingTime = DateTime.now();
