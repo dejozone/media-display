@@ -106,7 +106,10 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
   Timer? _dataWatchTimer;
   Timer? _servicePausedTimer;
   Timer? _cycleResetTimer;
+  Timer? _idleResetTimer;
   DateTime? _lastDataTime;
+  DateTime? _lastPlayingTime;
+  DateTime? _lastIdleResetAt;
 
   bool _initialized = false;
 
@@ -121,6 +124,9 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
   // Service health tracking
   final Map<String, ServiceHealthState> _serviceHealth = {};
+
+  // Ensure we register listeners only once per notifier lifecycle
+  bool _watchersStarted = false;
 
   // Track if we've already triggered Sonos discovery for the current Speaker device
   // Reset when device changes or when Sonos data is received
@@ -137,6 +143,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       _dataWatchTimer?.cancel();
       _servicePausedTimer?.cancel();
       _cycleResetTimer?.cancel();
+      _idleResetTimer?.cancel();
     });
 
     // Initialize asynchronously
@@ -162,6 +169,10 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
     // Start listening to service changes
     _startServiceWatchers();
+
+    // Seed last-playing timestamp so idle reset doesn't fire immediately
+    _lastPlayingTime ??= DateTime.now();
+    _startIdleResetWatcher();
 
     // Activate the first available service
     final activatedService =
@@ -224,6 +235,9 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
   }
 
   void _startServiceWatchers() {
+    if (_watchersStarted) return;
+    _watchersStarted = true;
+
     // Watch auth state changes to stop everything on logout
     ref.listen<AuthState>(authStateProvider, (prev, next) {
       if (prev?.isAuthenticated == true && !next.isAuthenticated) {
@@ -701,6 +715,11 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     final device = payload['device'] as Map<String, dynamic>?;
     final provider = payload['provider'] as String?;
     final isPlaying = playback?['is_playing'] as bool? ?? false;
+
+    // Track last time we observed active playback for idle reset watchdog.
+    if (isPlaying) {
+      _lastPlayingTime = DateTime.now();
+    }
 
     // Check if this is empty/stopped data
     // final isStopped = (playback?['status'] as String?) == 'stopped' ||
@@ -1482,6 +1501,57 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     });
   }
 
+  void _startIdleResetWatcher() {
+    _idleResetTimer?.cancel();
+
+    final intervalSec = _config.serviceIdleCycleResetSec;
+    final idleThresholdSec = _config.serviceIdleTimeSec;
+
+    // Disable when interval <= 0 or threshold <= 0
+    if (intervalSec <= 0 || idleThresholdSec <= 0) {
+      return;
+    }
+
+    _log(
+        'Starting idle reset watcher (interval=${intervalSec}s, threshold=${idleThresholdSec}s)');
+
+    _idleResetTimer = Timer.periodic(
+      Duration(seconds: intervalSec),
+      (_) => _checkIdleReset(idleThresholdSec),
+    );
+  }
+
+  void _checkIdleReset(int idleThresholdSec) {
+    // If currently playing, refresh last-playing marker and skip
+    // if (state.isPlaying) {
+    //   _log('Idle check: currently playing - skip');
+    //   return;
+    // }
+
+    final lastPlay = _lastPlayingTime ?? DateTime.now();
+    final idleForSec = DateTime.now().difference(lastPlay).inSeconds;
+
+    // Avoid repeated resets in rapid succession
+    if (_lastIdleResetAt != null) {
+      final sinceReset = DateTime.now().difference(_lastIdleResetAt!).inSeconds;
+      if (sinceReset < idleThresholdSec) {
+        _log(
+            'Idle check: skip (recent reset ${sinceReset}s ago < threshold=${idleThresholdSec}s)');
+        return;
+      }
+    }
+
+    if (idleForSec >= idleThresholdSec) {
+      _log(
+          'Idle reset: no playback for ${idleForSec}s (threshold=${idleThresholdSec}s) - resetting services');
+      _lastIdleResetAt = DateTime.now();
+      reset();
+    } else {
+      _log(
+          'Idle check: idle ${idleForSec}s < threshold=${idleThresholdSec}s - no reset');
+    }
+  }
+
   /// Called when user settings change (e.g., from settings page)
   void updateServicesEnabled({
     required bool spotifyEnabled,
@@ -1644,7 +1714,10 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     _dataWatchTimer?.cancel();
     _cancelPauseTimer();
     _cycleResetTimer?.cancel();
+    _idleResetTimer?.cancel();
     _lastDataTime = null;
+    _lastPlayingTime = null;
+    _lastIdleResetAt = null;
     _initialized = false;
 
     // Reset cycling state
@@ -1675,9 +1748,13 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     _cancelPauseTimer();
     _cycleResetTimer?.cancel();
     _cycleResetTimer = null;
+    _idleResetTimer?.cancel();
+    _idleResetTimer = null;
 
     // Reset state
     _lastDataTime = null;
+    _lastPlayingTime = null;
+    _lastIdleResetAt = null;
     _initialized = false;
     _resetCyclingState();
     _lastIsPlaying.clear();

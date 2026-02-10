@@ -134,6 +134,8 @@ class EnvConfig {
     required this.enableServiceCycling,
     required this.serviceCycleResetSec,
     required this.serviceTransitionGraceSec,
+    required this.serviceIdleCycleResetSec,
+    required this.serviceIdleTimeSec,
     this.sonosPollIntervalSec,
   });
 
@@ -171,6 +173,8 @@ class EnvConfig {
   final bool enableServiceCycling;
   final int serviceCycleResetSec;
   final int serviceTransitionGraceSec;
+  final int serviceIdleCycleResetSec;
+  final int serviceIdleTimeSec;
 
   /// Get the fallback config for a specific service type
   ServiceFallbackConfig getFallbackConfig(ServiceType service) {
@@ -369,6 +373,12 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
   final serviceTransitionGraceSec =
       int.tryParse(dotenv.env['SERVICE_TRANSITION_GRACE_SEC'] ?? '') ?? 2;
 
+  // Idle reset safeguards
+  final serviceIdleCycleResetSec =
+      int.tryParse(dotenv.env['SERVICE_IDLE_CYCLE_RESET_SEC'] ?? '') ?? 0;
+  final serviceIdleTimeSec =
+      int.tryParse(dotenv.env['SERVICE_IDLE_TIME_SEC'] ?? '') ?? 0;
+
   return EnvConfig(
     apiBaseUrl: api,
     eventsWsUrl: ws,
@@ -402,6 +412,8 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
     enableServiceCycling: enableServiceCycling,
     serviceCycleResetSec: serviceCycleResetSec,
     serviceTransitionGraceSec: serviceTransitionGraceSec,
+    serviceIdleCycleResetSec: serviceIdleCycleResetSec,
+    serviceIdleTimeSec: serviceIdleTimeSec,
   );
 });
 
