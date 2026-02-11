@@ -112237,7 +112237,7 @@ r=J.d(s,!0)
 m=m.h(0,"sonos_enabled")
 q=J.d(m,!0)
 m=o.d
-s=A.b_p("Sonos",m?n:new A.aIT(o),"Local network only (requires only Sonos devices)",q)
+s=A.b_p("Sonos",m?n:new A.aIT(o),"Local network (requires only Sonos devices)",q)
 p=t.D
 s=A.b([B.a5p,B.aZ,s,B.aZ,A.b_p("Spotify",m?n:new A.aIU(o),"Spotify cloud network (requires Spotify Premium account)",r)],p)
 if(m)B.c.Z(s,A.b([B.CL,B.LQ],p))
