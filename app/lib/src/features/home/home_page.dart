@@ -461,18 +461,19 @@ class _SettingsToggles extends StatelessWidget {
             style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18)),
         const SizedBox(height: 12),
         _toggleRow(
-          label: 'Spotify',
-          subtitle: 'Live Now Playing and control',
-          value: spotify,
-          onChanged: saving ? null : (v) => onSpotifyChanged(v),
-        ),
-        const SizedBox(height: 10),
-        _toggleRow(
           label: 'Sonos',
-          subtitle: 'Fallback and group playback',
+          subtitle: 'Local network (requires only Sonos devices)',
           value: sonos,
           onChanged: saving ? null : (v) => onSonosChanged(v),
         ),
+        const SizedBox(height: 12),
+        _toggleRow(
+          label: 'Spotify',
+          subtitle: 'Spotify cloud network (requires Spotify Premium account)',
+          value: spotify,
+          onChanged: saving ? null : (v) => onSpotifyChanged(v),
+        ),
+        
         if (saving) ...[
           const SizedBox(height: 10),
           const LinearProgressIndicator(minHeight: 4),
