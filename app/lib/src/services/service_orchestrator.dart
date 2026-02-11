@@ -1563,9 +1563,9 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
           'Idle reset: no playback for ${idleForSec}s (threshold=${idleThresholdSec}s) - resetting services');
       _lastIdleResetAt = DateTime.now();
       reset();
-    } else {
-      _log(
-          'Idle check: idle ${idleForSec}s < threshold=${idleThresholdSec}s - no reset');
+    // } else {
+    //   _log(
+    //       'Idle check: idle ${idleForSec}s < threshold=${idleThresholdSec}s - no reset');
     }
   }
 
