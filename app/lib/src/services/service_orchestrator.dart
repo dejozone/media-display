@@ -276,6 +276,16 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     final currentService = next.currentService;
     final prevService = prev?.currentService;
 
+    // When priority manager is re-running initial activation after reconnect,
+    // it briefly has no current service while it prepares to select one. If
+    // there are enabled services, skip handling to avoid emitting "No service
+    // to activate" and sending a user-settings config before the service is
+    // chosen. If all services are disabled, allow normal handling so we still
+    // send the disabling config.
+    if (currentService == null && next.enabledServices.isNotEmpty) {
+      return;
+    }
+
     if (currentService != prevService) {
       // Prevent switching to a lower-priority Spotify service during a global
       // pause when the current service is still healthy. In this state the

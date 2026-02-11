@@ -1086,6 +1086,10 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       isTransitioning: false,
       clearTransitionStartTime: true,
       clearLastDataTime: true,
+      // Ensure current/previous are cleared so activation emits and orchestrator
+      // re-sends config after reconnect.
+      clearCurrentService: true,
+      clearPreviousService: true,
     );
 
     _log('Re-running initial activation after reconnect');
@@ -1149,7 +1153,6 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       clearCurrentService: true,
       clearPreviousService: true,
     );
-
   }
 
   /// Stop all retry timers
