@@ -324,13 +324,32 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
                   ref
                       .read(servicePriorityProvider.notifier)
                       .onWebSocketReconnected();
-                  // After priority resets and re-activates, send config for the
-                  // newly selected highest-priority service.
-                  Future.microtask(() => sendConfig());
+                  // Priority restart will activate and send the correct config; avoid
+                  // an extra sendConfig that would duplicate the service config.
                 } else {
                   _hasConnectedOnce = true;
-                  // First connection: send config now to start services.
-                  Future.microtask(() => sendConfig());
+
+                  // If we reach the first confirmed connection while already on a
+                  // fallback service (e.g., directSpotify because WS was down),
+                  // force a priority restart so we can switch back to the highest
+                  // service now that the socket is healthy.
+                  final priority = ref.read(servicePriorityProvider);
+                  final firstEnabled = priority.effectiveOrder.isNotEmpty
+                      ? priority.effectiveOrder.first
+                      : null;
+                  final current = priority.currentService;
+                  final hadFallbackActive =
+                      current != null && firstEnabled != null && current != firstEnabled;
+                  if (hadFallbackActive) {
+                    _log(
+                        'First ready with fallback active ($current); forcing priority re-evaluation');
+                    ref
+                        .read(servicePriorityProvider.notifier)
+                        .onWebSocketReconnected();
+                  } else {
+                    // First-ever ready on the expected primary path: send initial config.
+                    Future.microtask(() => sendConfig(caller: 'ready:first'));
+                  }
                 }
               }
             } else if (type == 'service_status') {
@@ -928,7 +947,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     await _fetchTokenViaRestApi();
   }
 
-  Future<void> sendConfig({bool forceTokenRequest = false}) async {
+  Future<void> sendConfig({bool forceTokenRequest = false, String caller = 'unknown'}) async {
     // Skip config when not authenticated (logout path)
     if (!ref.read(authStateProvider).isAuthenticated) {
       _log('sendConfig skipped - not authenticated');
@@ -939,7 +958,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     // This ensures the new service-based config is used instead of the legacy polling mode logic
     final priority = ref.read(servicePriorityProvider);
     if (priority.currentService != null) {
-      await sendConfigForService(priority.currentService!);
+      await sendConfigForService(priority.currentService!, caller: caller);
       return;
     }
 
