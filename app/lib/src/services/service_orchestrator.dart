@@ -128,6 +128,10 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
   // Ensure we register listeners only once per notifier lifecycle
   bool _watchersStarted = false;
 
+  // Suppress priority change handling during explicit resets to avoid
+  // transient null-service churn/config pushes.
+  bool _suppressPriorityChanges = false;
+
   // Track if we've already triggered Sonos discovery for the current Speaker device
   // Reset when device changes or when Sonos data is received
   String? _lastSpeakerDeviceName;
@@ -174,14 +178,12 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     _lastPlayingTime ??= DateTime.now();
     _startIdleResetWatcher();
 
-    // Activate the first available service
-    final activatedService =
-        ref.read(servicePriorityProvider.notifier).activateFirstAvailable();
-    if (activatedService == null) {
-      // No services enabled on init - no need to send disable config
-      // because the server isn't running anything yet
-      _log('No services enabled on init - server not running anything');
-    }
+    // Re-enable priority change handling now that initialization is ready
+    _suppressPriorityChanges = false;
+
+    // Run the full initial activation flow (like first login) so config is sent
+    // even after a reset.
+    ref.read(servicePriorityProvider.notifier).restartInitialActivation();
   }
 
   /// Probe a service for recovery (used by priority manager)
@@ -267,6 +269,10 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
   void _handleServicePriorityChange(
       ServicePriorityState? prev, ServicePriorityState next) {
+    if (_suppressPriorityChanges) {
+      return;
+    }
+
     final currentService = next.currentService;
     final prevService = prev?.currentService;
 
@@ -416,6 +422,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
           ServiceType.directSpotify,
           keepSonosEnabled: keepSonos,
           keepSpotifyPollingForRecovery: keepSpotifyForRecovery,
+          caller: '_activateDirectSpotify',
         );
 
     // Reset timeout timer
@@ -439,11 +446,11 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     // recover and take over when healthy (higher priority rules apply).
     final keepSpotifyForRecovery =
         isFallback && service == ServiceType.localSonos;
-    ref.read(eventsWsProvider.notifier).connect();
     ref.read(eventsWsProvider.notifier).sendConfigForService(
           service,
           keepSonosEnabled: keepSonos,
           keepSpotifyPollingForRecovery: keepSpotifyForRecovery,
+          caller: '_activateCloudService',
         );
 
     // Reset timeout timer
@@ -1726,6 +1733,9 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
   void reset() {
     _log('Reset requested');
 
+    // Suppress priority change reactions while we tear down and restart
+    _suppressPriorityChanges = true;
+
     _timeoutTimer?.cancel();
     _dataWatchTimer?.cancel();
     _cancelPauseTimer();
@@ -1743,6 +1753,8 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     // Clear service health tracking
     _serviceHealth.clear();
 
+    // Reset internal state without dropping the WebSocket connection.
+    ref.read(eventsWsProvider.notifier).resetSessionStateForColdRestart();
     ref.read(servicePriorityProvider.notifier).reset();
     ref.read(spotifyDirectProvider.notifier).stopPolling();
 

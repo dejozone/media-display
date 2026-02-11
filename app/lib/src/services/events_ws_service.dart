@@ -80,6 +80,28 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     _disconnect(scheduleRetry: false, resetFirstConnectFlag: true);
   }
 
+  /// Reset session bookkeeping to mimic a cold start while keeping the
+  /// existing WebSocket connection alive. This lets idle-resets reuse the
+  /// socket but re-send the initial config and retry-policy snapshot.
+  void resetSessionStateForColdRestart() {
+    final env = ref.read(envConfigProvider);
+    final retryWindowLabel =
+        env.wsRetryWindowSec <= 0 ? 'forever' : '${env.wsRetryWindowSec}s';
+    _log('Retry policy initialized: interval=${env.wsRetryIntervalMs}ms, '
+        'active=${env.wsRetryActiveSec}s, cooldown=${env.wsRetryCooldownSec}s, '
+        'window=$retryWindowLabel');
+
+    _initialConfigSent = false;
+    _lastEnabledSent.clear();
+    _lastConfigSent = null;
+    _lastConfigJson = null;
+    _lastConfigSentAt = null;
+    _tokenRequested = false;
+    _lastTokenRequestTime = null;
+    _wsTokenReceived = false;
+    _useDirectPolling = false;
+  }
+
   bool _tokenRequested = false;
   DateTime? _lastTokenRequestTime;
   bool _wsTokenReceived =
@@ -675,7 +697,8 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   /// the server to continue retrying and emit health status when it recovers)
   Future<void> sendConfigForService(ServiceType service,
       {bool keepSonosEnabled = false,
-      bool keepSpotifyPollingForRecovery = false}) async {
+      bool keepSpotifyPollingForRecovery = false,
+      String caller = 'unknown'}) async {
     try {
       if (!ref.read(authStateProvider).isAuthenticated) {
         _log('sendConfigForService skipped - not authenticated');
@@ -857,7 +880,10 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       _initialConfigSent = true;
 
       // Send the config
-      await _sendConfigPayload(payload, logLabel: 'service config');
+      await _sendConfigPayload(
+        payload,
+        logLabel: 'service config (service=$service, caller=$caller)',
+      );
     } catch (e) {
       _log('sendConfigForService error: $e');
     }

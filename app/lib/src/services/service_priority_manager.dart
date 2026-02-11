@@ -360,6 +360,8 @@ typedef ServiceProbeCallback = Future<bool> Function(ServiceType service);
 class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
   Timer? _retryTimer;
   Timer? _recoveryTimer;
+  // Per-service timers to enforce fallbackTimeThresholdSec even when no new errors arrive
+  final Map<ServiceType, Timer?> _fallbackTimers = {};
   ServiceProbeCallback? _probeCallback;
 
   EnvConfig get _config => ref.read(envConfigProvider);
@@ -394,6 +396,7 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     ref.onDispose(() {
       _retryTimer?.cancel();
       _recoveryTimer?.cancel();
+      _cancelAllFallbackTimers();
     });
 
     _log('Configured priority order: ${config.priorityOrderOfServices}');
@@ -610,6 +613,8 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     final newErrors = Map<ServiceType, int>.from(state.errorCounts);
     newErrors[service] = 0;
 
+    _cancelFallbackTimer(service);
+
     // Clear retry window if we were recovering
     final newRetryWindows =
         Map<ServiceType, DateTime?>.from(state.retryWindowStarts);
@@ -660,25 +665,38 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
 
     final newErrors = Map<ServiceType, int>.from(state.errorCounts);
     final currentCount = newErrors[service] ?? 0;
-    newErrors[service] = currentCount + 1;
+    final nextCount = currentCount + 1;
+    newErrors[service] = nextCount;
 
-    // Track when the first error in the current window occurred for time-based fallback
+    // Anchor the window to the first error in the current streak. Do NOT reset
+    // on subsequent errors so the time threshold applies to the full set of
+    // attempts (e.g., 3 errors must land within 10s total).
     final newRetryWindows =
         Map<ServiceType, DateTime?>.from(state.retryWindowStarts);
     final now = DateTime.now();
-    newRetryWindows[service] = newRetryWindows[service] ?? now;
+    final windowStart = (currentCount == 0)
+        ? now
+        : (newRetryWindows[service] ?? now); // fallback to now if missing
+    newRetryWindows[service] = windowStart;
 
     final timeThreshold = fallbackConfig.fallbackTimeThresholdSec;
-    final elapsedSinceFirstError = newRetryWindows[service] != null
-        ? now.difference(newRetryWindows[service]!).inSeconds
-        : 0;
+    final elapsedSinceFirstError = now.difference(windowStart).inSeconds;
+
+    // Start/refresh a timer that will enforce the total window even if no
+    // additional errors arrive. Only start on the first error in the streak.
+    if (currentCount == 0 && timeThreshold > 0) {
+      _cancelFallbackTimer(service);
+      _fallbackTimers[service] = Timer(Duration(seconds: timeThreshold), () {
+        _handleFallbackWindowExpiry(service, windowStart);
+      });
+    }
 
     // Treat fallbackTimeThresholdSec as the maximum window to accumulate
     // errorThreshold samples. Whichever happens first (count reached OR window
     // elapsed) triggers fallback.
     final windowExpired =
         timeThreshold > 0 && elapsedSinceFirstError >= timeThreshold;
-    final countReached = newErrors[service]! >= effectiveThreshold;
+    final countReached = nextCount >= effectiveThreshold;
 
     // _log('Error on $service '
     //     '(${newErrors[service]}/$effectiveThreshold)');
@@ -699,6 +717,7 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     final thresholdReached = countReached || windowExpired;
 
     if (thresholdReached) {
+      _cancelFallbackTimer(service);
       if (windowExpired && !countReached) {
         _log(
             '$service fallback window expired after ${elapsedSinceFirstError}s before reaching errorThreshold=${fallbackConfig.errorThreshold}');
@@ -737,6 +756,56 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
         retryWindowStarts: newRetryWindows,
       );
     }
+  }
+
+  void _handleFallbackWindowExpiry(ServiceType service, DateTime windowStart) {
+    final fallbackConfig = _config.getFallbackConfig(service);
+
+    // If window start changed or service already in cooldown/disabled, ignore.
+    final trackedStart = state.retryWindowStarts[service];
+    if (trackedStart == null || trackedStart.isAfter(windowStart)) return;
+    final status = state.serviceStatuses[service];
+    if (status == ServiceStatus.cooldown || status == ServiceStatus.disabled) {
+      return;
+    }
+
+    // Enter cooldown and trigger fallback as if time threshold was reached.
+    final newStatuses =
+        Map<ServiceType, ServiceStatus>.from(state.serviceStatuses)
+          ..[service] = ServiceStatus.cooldown;
+    final newCooldowns = Map<ServiceType, DateTime?>.from(state.cooldownEnds)
+      ..[service] = DateTime.now().add(
+        Duration(seconds: fallbackConfig.retryCooldownSec),
+      );
+
+    // Keep existing error counts/window; we only need to move to cooldown.
+    state = state.copyWith(
+      serviceStatuses: newStatuses,
+      cooldownEnds: newCooldowns,
+    );
+
+    // For cloud services, ensure awaiting-recovery is set.
+    if (service.isCloudService && !state.awaitingRecovery.contains(service)) {
+      final awaiting = Set<ServiceType>.from(state.awaitingRecovery)
+        ..add(service);
+      state = state.copyWith(awaitingRecovery: awaiting);
+    }
+
+    _log(
+        '$service fallback window expired after ${fallbackConfig.fallbackTimeThresholdSec}s (timer)');
+    _triggerFallback(service);
+  }
+
+  void _cancelFallbackTimer(ServiceType service) {
+    _fallbackTimers[service]?.cancel();
+    _fallbackTimers.remove(service);
+  }
+
+  void _cancelAllFallbackTimers() {
+    for (final t in _fallbackTimers.values) {
+      t?.cancel();
+    }
+    _fallbackTimers.clear();
   }
 
   /// Report a timeout from a service
@@ -978,6 +1047,7 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     _retryTimer = null;
     _recoveryTimer?.cancel();
     _recoveryTimer = null;
+    _cancelAllFallbackTimers();
 
     // Reset statuses for enabled services back to standby (keep disabled as-is)
     final resetStatuses =
@@ -1025,18 +1095,68 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     }
   }
 
+  /// Public hook to re-run the initial activation flow (used on resets)
+  void restartInitialActivation() {
+    _log('Re-running initial activation (explicit restart)');
+    _restartInitialActivationAfterReconnect();
+  }
+
   /// Reset all services to initial state
   void reset() {
+    _log('Resetting priority state to initial');
+
     _retryTimer?.cancel();
+    _retryTimer = null;
     _recoveryTimer?.cancel();
     _recoveryTimer = null;
-    state = build();
+    _cancelAllFallbackTimers();
+
+    // Reset statuses for enabled services back to standby (keep disabled as-is)
+    final resetStatuses =
+        Map<ServiceType, ServiceStatus>.from(state.serviceStatuses);
+    for (final entry in resetStatuses.entries.toList()) {
+      if (entry.value != ServiceStatus.disabled) {
+        resetStatuses[entry.key] = ServiceStatus.standby;
+      }
+    }
+
+    // Clear all bookkeeping so retries/fallbacks start fresh
+    final resetErrors = <ServiceType, int>{
+      for (final s in ServiceType.values) s: 0,
+    };
+    final resetCooldowns = <ServiceType, DateTime?>{
+      for (final s in ServiceType.values) s: null,
+    };
+    final resetRetryWindows = <ServiceType, DateTime?>{
+      for (final s in ServiceType.values) s: null,
+    };
+    final resetLastRetries = <ServiceType, DateTime?>{
+      for (final s in ServiceType.values) s: null,
+    };
+
+    state = state.copyWith(
+      serviceStatuses: resetStatuses,
+      errorCounts: resetErrors,
+      cooldownEnds: resetCooldowns,
+      retryWindowStarts: resetRetryWindows,
+      lastRetryAttempts: resetLastRetries,
+      awaitingRecovery: const {},
+      unhealthyServices: const {},
+      recoveryStates: const {},
+      isTransitioning: false,
+      clearTransitionStartTime: true,
+      clearLastDataTime: true,
+      clearCurrentService: true,
+      clearPreviousService: true,
+    );
+
   }
 
   /// Stop all retry timers
   void stopRetryTimers() {
     _retryTimer?.cancel();
     _retryTimer = null;
+    _cancelAllFallbackTimers();
   }
 
   /// Stop all retry/recovery activity for services below the active one.
