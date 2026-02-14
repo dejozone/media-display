@@ -342,7 +342,7 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
     _fallbackStartTime ??= now;
 
     final failureDuration = now.difference(_fallbackStartTime!);
-    final retryWindowSec = env.directSpotifyRetryWindowSec;
+    final retryWindowSec = env.directSpotifyRetryTimeSec;
     final windowExceeded =
         retryWindowSec > 0 && failureDuration.inSeconds >= retryWindowSec;
     if (windowExceeded) {
@@ -432,7 +432,7 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
       // If retry window exceeded (0 = unlimited), trigger cooldown or stop retries
       if (_fallbackStartTime != null) {
         final failureDuration = now.difference(_fallbackStartTime!);
-        final retryWindowSec = env.directSpotifyRetryWindowSec;
+        final retryWindowSec = env.directSpotifyRetryTimeSec;
         final windowExceeded =
             retryWindowSec > 0 && failureDuration.inSeconds >= retryWindowSec;
         if (windowExceeded) {

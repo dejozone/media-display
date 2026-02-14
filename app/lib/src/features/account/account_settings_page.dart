@@ -116,8 +116,9 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
     }
 
     // Fallback to avatars on the user payload for backward compatibility
-    return _providerAvatarList(user)
-        .any((e) => (e['provider']?.toString().toLowerCase() == 'spotify'));
+    return _providerAvatarList(
+      user,
+    ).any((e) => (e['provider']?.toString().toLowerCase() == 'spotify'));
   }
 
   Future<void> _saveProfile() async {
@@ -215,7 +216,9 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
       ref
           .read(eventsWsProvider.notifier)
           .updateCachedSettings(updatedSettingsMap);
-      ref.read(serviceOrchestratorProvider.notifier).updateServicesEnabled(
+      ref
+          .read(serviceOrchestratorProvider.notifier)
+          .updateServicesEnabled(
             spotifyEnabled: spotifyEnabled,
             sonosEnabled: sonosEnabled,
           );
@@ -236,8 +239,9 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
     });
     try {
       final auth = ref.read(authServiceProvider);
-      await auth
-          .setPendingOauthRedirect(GoRouterState.of(context).uri.toString());
+      await auth.setPendingOauthRedirect(
+        GoRouterState.of(context).uri.toString(),
+      );
       final url = await auth.getSpotifyAuthUrl();
       if (!mounted) return;
       final ok = await launchUrl(
@@ -351,10 +355,12 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
   @override
   Widget build(BuildContext context) {
     final traversalShortcuts = <ShortcutActivator, Intent>{
-      SingleActivator(LogicalKeyboardKey.arrowDown):
-          DirectionalFocusIntent(TraversalDirection.down),
-      SingleActivator(LogicalKeyboardKey.arrowUp):
-          DirectionalFocusIntent(TraversalDirection.up),
+      SingleActivator(LogicalKeyboardKey.arrowDown): DirectionalFocusIntent(
+        TraversalDirection.down,
+      ),
+      SingleActivator(LogicalKeyboardKey.arrowUp): DirectionalFocusIntent(
+        TraversalDirection.up,
+      ),
     };
 
     final spotifyLinked = _hasSpotifyIdentity();
@@ -377,7 +383,9 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
                 child: SafeArea(
                   child: SingleChildScrollView(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 20, vertical: 18),
+                      horizontal: 20,
+                      vertical: 18,
+                    ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -416,16 +424,22 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
                           if (error != null)
                             Padding(
                               padding: const EdgeInsets.only(bottom: 12),
-                              child: Text(error!,
-                                  style: const TextStyle(
-                                      color: Color(0xFFFF8C8C))),
+                              child: Text(
+                                error!,
+                                style: const TextStyle(
+                                  color: Color(0xFFFF8C8C),
+                                ),
+                              ),
                             ),
                           if (success != null)
                             Padding(
                               padding: const EdgeInsets.only(bottom: 12),
-                              child: Text(success!,
-                                  style: const TextStyle(
-                                      color: Color(0xFF9FB1D0))),
+                              child: Text(
+                                success!,
+                                style: const TextStyle(
+                                  color: Color(0xFF9FB1D0),
+                                ),
+                              ),
                             ),
                           FocusTraversalOrder(
                             order: const NumericFocusOrder(1),
@@ -433,24 +447,30 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Text('Profile',
-                                      style: TextStyle(
-                                          fontSize: 18,
-                                          fontWeight: FontWeight.w700)),
+                                  const Text(
+                                    'Profile',
+                                    style: TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
                                   const SizedBox(height: 12),
                                   _field('Email', _emailController),
                                   const SizedBox(height: 12),
                                   _field('Username', _usernameController),
                                   const SizedBox(height: 12),
                                   _field(
-                                      'Display Name', _displayNameController),
+                                    'Display Name',
+                                    _displayNameController,
+                                  ),
                                   const SizedBox(height: 14),
                                   Row(
                                     children: [
                                       _FocusableButton(
                                         onPressed: saving ? null : _saveProfile,
-                                        child:
-                                            Text(saving ? 'Saving…' : 'Save'),
+                                        child: Text(
+                                          saving ? 'Saving…' : 'Save',
+                                        ),
                                       ),
                                     ],
                                   ),
@@ -465,10 +485,13 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Text('Service Providers',
-                                      style: TextStyle(
-                                          fontSize: 18,
-                                          fontWeight: FontWeight.w700)),
+                                  const Text(
+                                    'Service Providers',
+                                    style: TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
                                   const SizedBox(height: 10),
                                   _serviceToggle(
                                     label: 'Spotify',
@@ -485,7 +508,8 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
                           FocusTraversalOrder(
                             order: const NumericFocusOrder(3),
                             child: _AvatarManagementSection(
-                              userId: user?['user_id']?.toString() ??
+                              userId:
+                                  user?['user_id']?.toString() ??
                                   user?['id']?.toString() ??
                                   '',
                               onAvatarChanged: _load,
@@ -559,7 +583,8 @@ Widget _field(String label, TextEditingController controller) {
             filled: true,
             fillColor: Color(0xFF1A2333),
             border: OutlineInputBorder(
-                borderSide: BorderSide(color: Color(0xFF2A3347))),
+              borderSide: BorderSide(color: Color(0xFF2A3347)),
+            ),
           ),
         ),
       ),
@@ -567,17 +592,21 @@ Widget _field(String label, TextEditingController controller) {
   );
 }
 
-Widget _serviceToggle(
-    {required String label,
-    required bool value,
-    required ValueChanged<bool>? onToggle}) {
+Widget _serviceToggle({
+  required String label,
+  required bool value,
+  required ValueChanged<bool>? onToggle,
+}) {
   return FocusTraversalOrder(
     order: const NumericFocusOrder(2.0),
     child: Row(
       children: [
         Expanded(
-            child: Text(label,
-                style: const TextStyle(fontWeight: FontWeight.w600))),
+          child: Text(
+            label,
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+        ),
         Focus(
           onKeyEvent: (node, event) {
             if (event is KeyDownEvent) {
@@ -683,8 +712,9 @@ class _CropDialog extends StatelessWidget {
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
                       TextButton(
-                          onPressed: cropping ? null : onCancel,
-                          child: const Text('Cancel')),
+                        onPressed: cropping ? null : onCancel,
+                        child: const Text('Cancel'),
+                      ),
                       const SizedBox(width: 10),
                       ElevatedButton(
                         onPressed: cropping ? null : () => controller.crop(),
@@ -725,15 +755,12 @@ class _AvatarManagementSectionState
 
   // HEIC/HEIF only supported on mobile/desktop, not web
   Set<String> get _allowedExtensions => {
-        'png',
-        'jpg',
-        'jpeg',
-        'bmp',
-        if (!kIsWeb) ...[
-          'heic',
-          'heif',
-        ],
-      };
+    'png',
+    'jpg',
+    'jpeg',
+    'bmp',
+    if (!kIsWeb) ...['heic', 'heif'],
+  };
 
   String _extensionFromName(String name) {
     final dotIndex = name.lastIndexOf('.');
@@ -752,8 +779,10 @@ class _AvatarManagementSectionState
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-              content: Text(
-                  'Maximum of $maxAvatars avatars reached. Delete one first.')),
+            content: Text(
+              'Maximum of $maxAvatars avatars reached. Delete one first.',
+            ),
+          ),
         );
       }
       return;
@@ -769,6 +798,8 @@ class _AvatarManagementSectionState
       final pickedFile = await picker.pickImage(
         source: ImageSource.gallery,
         requestFullMetadata: false,
+        maxWidth: 2048,
+        maxHeight: 2048,
       );
 
       if (pickedFile == null) {
@@ -779,8 +810,9 @@ class _AvatarManagementSectionState
       final ext = _extensionFromName(pickedFile.name);
       if (!_allowedExtensions.contains(ext)) {
         if (mounted) {
-          final formats =
-              kIsWeb ? 'PNG, JPG, or BMP' : 'PNG, JPG, BMP, or HEIC';
+          final formats = kIsWeb
+              ? 'PNG, JPG, or BMP'
+              : 'PNG, JPG, BMP, or HEIC';
           setState(() {
             _error = 'Unsupported file type. Use $formats.';
             _uploading = false;
@@ -846,8 +878,8 @@ class _AvatarManagementSectionState
       if (mounted &&
           context.findAncestorStateOfType<_AccountSettingsPageState>() !=
               null) {
-        final pageState =
-            context.findAncestorStateOfType<_AccountSettingsPageState>()!;
+        final pageState = context
+            .findAncestorStateOfType<_AccountSettingsPageState>()!;
         pageState.setState(() {
           pageState._pendingImageBytes = rawBytes;
           pageState.showCropper = true;
@@ -875,12 +907,17 @@ class _AvatarManagementSectionState
       if (decoded == null) {
         throw Exception('Could not decode cropped image');
       }
-      final resized = img.copyResize(decoded,
-          width: 150, height: 150, interpolation: img.Interpolation.average);
+      final resized = img.copyResize(
+        decoded,
+        width: 150,
+        height: 150,
+        interpolation: img.Interpolation.average,
+      );
 
       final isPng = _pendingFilename.endsWith('.png');
-      final encoded =
-          isPng ? img.encodePng(resized) : img.encodeJpg(resized, quality: 92);
+      final encoded = isPng
+          ? img.encodePng(resized)
+          : img.encodeJpg(resized, quality: 92);
 
       final operations = ref.read(avatarOperationsProvider);
       await operations.uploadAvatarBytes(
@@ -919,15 +956,15 @@ class _AvatarManagementSectionState
       await userService.fetchMe(forceRefresh: true);
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Avatar selected')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Avatar selected')));
       widget.onAvatarChanged();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to select avatar: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to select avatar: $e')));
       }
     }
   }
@@ -966,15 +1003,15 @@ class _AvatarManagementSectionState
       await userService.fetchMe(forceRefresh: true);
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Avatar deleted')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Avatar deleted')));
       widget.onAvatarChanged();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to delete: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to delete: $e')));
       }
     }
   }
@@ -982,9 +1019,7 @@ class _AvatarManagementSectionState
   @override
   Widget build(BuildContext context) {
     if (widget.userId.isEmpty) {
-      return _glassCard(
-        child: const Text('Loading avatar management...'),
-      );
+      return _glassCard(child: const Text('Loading avatar management...'));
     }
 
     final avatarsAsync = ref.watch(avatarsProvider(widget.userId));
@@ -996,11 +1031,15 @@ class _AvatarManagementSectionState
         error: (error, stack) => Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Avatar',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+            const Text(
+              'Avatar',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+            ),
             const SizedBox(height: 12),
-            Text('Error loading avatars: $error',
-                style: const TextStyle(color: Colors.red)),
+            Text(
+              'Error loading avatars: $error',
+              style: const TextStyle(color: Colors.red),
+            ),
             const SizedBox(height: 8),
             ElevatedButton(
               onPressed: () => ref.invalidate(avatarsProvider(widget.userId)),
@@ -1016,9 +1055,10 @@ class _AvatarManagementSectionState
             children: [
               Row(
                 children: [
-                  const Text('Avatar',
-                      style:
-                          TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                  const Text(
+                    'Avatar',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                  ),
                   const Spacer(),
                   Text(
                     '${avatars.length}/$maxAvatars',
@@ -1035,8 +1075,10 @@ class _AvatarManagementSectionState
               ),
               if (_error != null) ...[
                 const SizedBox(height: 8),
-                Text(_error!,
-                    style: const TextStyle(color: Colors.red, fontSize: 12)),
+                Text(
+                  _error!,
+                  style: const TextStyle(color: Colors.red, fontSize: 12),
+                ),
               ],
               const SizedBox(height: 12),
               if (avatars.isEmpty)
@@ -1045,12 +1087,16 @@ class _AvatarManagementSectionState
                     padding: const EdgeInsets.symmetric(vertical: 20),
                     child: Column(
                       children: [
-                        Icon(Icons.account_circle_outlined,
-                            size: 60,
-                            color: Colors.white.withValues(alpha: 0.3)),
+                        Icon(
+                          Icons.account_circle_outlined,
+                          size: 60,
+                          color: Colors.white.withValues(alpha: 0.3),
+                        ),
                         const SizedBox(height: 12),
-                        const Text('No avatars yet',
-                            style: TextStyle(color: Color(0xFF9FB1D0))),
+                        const Text(
+                          'No avatars yet',
+                          style: TextStyle(color: Color(0xFF9FB1D0)),
+                        ),
                       ],
                     ),
                   ),
@@ -1061,8 +1107,10 @@ class _AvatarManagementSectionState
                     // Calculate size for circular avatars (max 100px)
                     final availableWidth = constraints.maxWidth;
                     final spacing = 12.0;
-                    final crossAxisCount =
-                        (availableWidth / 112).floor().clamp(3, 6);
+                    final crossAxisCount = (availableWidth / 112).floor().clamp(
+                      3,
+                      6,
+                    );
                     final itemSize =
                         ((availableWidth - (spacing * (crossAxisCount - 1))) /
                                 crossAxisCount)
@@ -1099,7 +1147,8 @@ class _AvatarManagementSectionState
                     ? const SizedBox(
                         width: 16,
                         height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2))
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
                     : const Icon(Icons.upload, size: 18),
                 label: Text(_uploading ? 'Uploading...' : 'Upload New Avatar'),
               ),
@@ -1108,8 +1157,10 @@ class _AvatarManagementSectionState
                   padding: const EdgeInsets.only(top: 6),
                   child: Text(
                     'Max $maxAvatars avatars. Delete one to upload more.',
-                    style:
-                        const TextStyle(color: Color(0xFFFF8C8C), fontSize: 11),
+                    style: const TextStyle(
+                      color: Color(0xFFFF8C8C),
+                      fontSize: 11,
+                    ),
                   ),
                 ),
             ],
@@ -1121,10 +1172,7 @@ class _AvatarManagementSectionState
 }
 
 class _FocusableButton extends StatefulWidget {
-  const _FocusableButton({
-    required this.child,
-    this.onPressed,
-  });
+  const _FocusableButton({required this.child, this.onPressed});
 
   final Widget child;
   final VoidCallback? onPressed;
@@ -1246,8 +1294,8 @@ class _AvatarGridItemState extends State<_AvatarGridItem> {
                 color: _focused
                     ? const Color(0xFF5AC8FA)
                     : (widget.avatar.isSelected
-                        ? const Color(0xFF5AC8FA)
-                        : Colors.white.withValues(alpha: 0.08)),
+                          ? const Color(0xFF5AC8FA)
+                          : Colors.white.withValues(alpha: 0.08)),
                 width: _focused ? 3.0 : (widget.avatar.isSelected ? 2.5 : 1.5),
               ),
               boxShadow: _focused
@@ -1270,13 +1318,16 @@ class _AvatarGridItemState extends State<_AvatarGridItem> {
                             widget.avatar.url,
                             fit: BoxFit.cover,
                             errorBuilder: (_, __, ___) => Icon(
-                                Icons.broken_image,
-                                size: widget.size * 0.4,
-                                color: const Color(0xFF9FB1D0)),
+                              Icons.broken_image,
+                              size: widget.size * 0.4,
+                              color: const Color(0xFF9FB1D0),
+                            ),
                           )
-                        : Icon(Icons.account_circle,
+                        : Icon(
+                            Icons.account_circle,
                             size: widget.size * 0.5,
-                            color: const Color(0xFF9FB1D0)),
+                            color: const Color(0xFF9FB1D0),
+                          ),
                   ),
                 ),
                 // Provider indicator badge at bottom
@@ -1322,8 +1373,11 @@ class _AvatarGridItemState extends State<_AvatarGridItem> {
                           ),
                         ],
                       ),
-                      child: Icon(Icons.check,
-                          size: iconSize, color: Colors.white),
+                      child: Icon(
+                        Icons.check,
+                        size: iconSize,
+                        color: Colors.white,
+                      ),
                     ),
                   ),
                 // Delete button (shown for all avatars)
@@ -1347,8 +1401,11 @@ class _AvatarGridItemState extends State<_AvatarGridItem> {
                           ),
                         ],
                       ),
-                      child: Icon(Icons.delete,
-                          size: iconSize, color: Colors.white),
+                      child: Icon(
+                        Icons.delete,
+                        size: iconSize,
+                        color: Colors.white,
+                      ),
                     ),
                   ),
                 ),

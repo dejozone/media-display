@@ -473,7 +473,6 @@ class _SettingsToggles extends StatelessWidget {
           value: spotify,
           onChanged: saving ? null : (v) => onSpotifyChanged(v),
         ),
-        
         if (saving) ...[
           const SizedBox(height: 10),
           const LinearProgressIndicator(minHeight: 4),
@@ -760,7 +759,7 @@ class _EqualizerIndicator extends StatefulWidget {
 }
 
 class _EqualizerIndicatorState extends State<_EqualizerIndicator>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   late final AnimationController _controller;
   late final AnimationController _blinkController;
   late final Animation<double> _blink;
@@ -844,6 +843,8 @@ class _EqualizerIndicatorState extends State<_EqualizerIndicator>
         case ServiceType.cloudSpotify:
           return lightBlueColor;
         case ServiceType.localSonos:
+          return cyanColor;
+        case ServiceType.nativeLocalSonos:
           return cyanColor;
         case null:
           return redColor;

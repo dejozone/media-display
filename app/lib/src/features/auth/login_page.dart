@@ -3,10 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 import 'package:go_router/go_router.dart';
 import 'package:media_display/src/services/auth_service.dart';
-// import 'package:media_display/src/config/env.dart';
 import 'package:media_display/src/services/auth_state.dart';
+import 'package:media_display/src/services/token_storage.dart';
 import 'package:media_display/src/widgets/app_modal.dart';
 
 class LoginPage extends ConsumerStatefulWidget {
@@ -38,16 +39,23 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     try {
       final url = await loader();
       if (!mounted) return;
-      final ok = await launchUrl(
-        url,
-        mode: LaunchMode.platformDefault,
-        webOnlyWindowName: kIsWeb ? '_self' : null,
-      );
-      if (!ok) {
-        setState(() {
-          _error = 'Failed to open browser for login';
-        });
-        await _showFriendlyError();
+      if (kIsWeb) {
+        final ok = await launchUrl(
+          url,
+          mode: LaunchMode.platformDefault,
+          webOnlyWindowName: '_self',
+        );
+        if (!ok) {
+          setState(() => _error = 'Failed to open browser for login');
+          await _showFriendlyError();
+        }
+      } else {
+        await Navigator.of(context, rootNavigator: true).push(
+          MaterialPageRoute(
+            builder: (_) => _InAppAuthScreen(initialUrl: url),
+            fullscreenDialog: true,
+          ),
+        );
       }
     } catch (e) {
       setState(() {
@@ -72,6 +80,8 @@ class _LoginPageState extends ConsumerState<LoginPage> {
       // If already logged in, go to home
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
+          Navigator.of(context, rootNavigator: true)
+              .popUntil((route) => route.isFirst);
           context.go('/home');
         }
       });
@@ -122,6 +132,101 @@ class _LoginPageState extends ConsumerState<LoginPage> {
         ),
       ),
     );
+  }
+}
+
+class _InAppAuthScreen extends ConsumerStatefulWidget {
+  const _InAppAuthScreen({required this.initialUrl});
+
+  final Uri initialUrl;
+
+  @override
+  ConsumerState<_InAppAuthScreen> createState() => _InAppAuthScreenState();
+}
+
+class _InAppAuthScreenState extends ConsumerState<_InAppAuthScreen> {
+  late final WebViewController _controller;
+  bool _completed = false;
+  final _tokenStorage = TokenStorage();
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onNavigationRequest: (request) {
+            final uri = Uri.tryParse(request.url);
+            if (uri != null && _maybeHandleRedirect(uri)) {
+              return NavigationDecision.prevent;
+            }
+            return NavigationDecision.navigate;
+          },
+        ),
+      )
+      ..loadRequest(widget.initialUrl);
+  }
+
+  @override
+  void dispose() {
+    _controller.clearCache();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    ref.listen<AuthState>(authStateProvider, (prev, next) {
+      if (!mounted || _completed) return;
+      if (next.isAuthenticated) {
+        _completed = true;
+        final nav = Navigator.of(context, rootNavigator: true);
+        nav.popUntil((route) => route.isFirst);
+      }
+    });
+
+    final authState = ref.watch(authStateProvider);
+    if (authState.isAuthenticated && !_completed) {
+      _completed = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          final nav = Navigator.of(context, rootNavigator: true);
+          nav.popUntil((route) => route.isFirst);
+        }
+      });
+    }
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Sign In')),
+      body: SafeArea(child: WebViewWidget(controller: _controller)),
+    );
+  }
+
+  bool _maybeHandleRedirect(Uri uri) {
+    final token = uri.queryParameters['jwt'] ?? uri.queryParameters['token'];
+    if (token == null || token.isEmpty) return false;
+
+    _completeWithToken(token);
+    return true;
+  }
+
+  Future<void> _completeWithToken(String token) async {
+    if (_completed) return;
+    _completed = true;
+    try {
+      await _tokenStorage.save(token);
+      await ref.read(authStateProvider.notifier).setToken(token);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Login failed: $e')),
+        );
+      }
+      return;
+    }
+
+    if (!mounted) return;
+    Navigator.of(context, rootNavigator: true).popUntil((r) => r.isFirst);
   }
 }
 

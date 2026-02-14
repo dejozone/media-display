@@ -1,5 +1,7 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:media_display/src/services/api_client.dart';
 import 'package:media_display/src/services/token_storage.dart';
@@ -35,15 +37,20 @@ class AuthService {
     return Uri.parse(url);
   }
 
-  Future<void> completeOAuth({required String provider, required String code, String? state}) async {
+  Future<void> completeOAuth(
+      {required String provider, required String code, String? state}) async {
     try {
-      final res = await _dio.get<Map<String, dynamic>>(
+      final res = await _dio.get(
         '/api/auth/$provider/callback',
         queryParameters: {'code': code, 'state': state},
       );
-      final data = res.data ?? {};
-      final token = data['jwt'] as String?;
-      if (token == null) throw Exception('Missing token');
+
+      final data = _normalizeJsonMap(res.data);
+      final token = _extractToken(data);
+      if (token == null) {
+        debugPrint('completeOAuth: missing token in payload: $data');
+        throw Exception('Missing token');
+      }
       await _storage.save(token);
       await _authNotifier.setToken(token);
     } on DioException catch (e) {
@@ -51,13 +58,40 @@ class AuthService {
       final payload = e.response?.data;
       if (status == 409 && payload is Map<String, dynamic>) {
         final codeVal = payload['code']?.toString();
-        final msgVal = payload['error']?.toString() ?? payload['message']?.toString();
+        final msgVal =
+            payload['error']?.toString() ?? payload['message']?.toString();
         if (codeVal != null) {
-          throw OAuthApiException(code: codeVal, message: msgVal, status: status);
+          throw OAuthApiException(
+              code: codeVal, message: msgVal, status: status);
         }
       }
       rethrow;
     }
+  }
+
+  Map<String, dynamic> _normalizeJsonMap(dynamic raw) {
+    if (raw is Map<String, dynamic>) return raw;
+    if (raw is String) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map<String, dynamic>) return decoded;
+      } catch (_) {
+        // fall through
+      }
+    }
+    return <String, dynamic>{};
+  }
+
+  String? _extractToken(Map<String, dynamic> data) {
+    final direct = data['jwt'] ?? data['token'];
+    if (direct is String && direct.isNotEmpty) return direct;
+
+    final nested = data['data'];
+    if (nested is Map<String, dynamic>) {
+      final nestedToken = nested['jwt'] ?? nested['token'];
+      if (nestedToken is String && nestedToken.isNotEmpty) return nestedToken;
+    }
+    return null;
   }
 
   Future<void> logout() async {
@@ -87,5 +121,6 @@ class OAuthApiException implements Exception {
   final int? status;
 
   @override
-  String toString() => 'OAuthApiException(code: $code, message: $message, status: $status)';
+  String toString() =>
+      'OAuthApiException(code: $code, message: $message, status: $status)';
 }

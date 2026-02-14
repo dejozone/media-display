@@ -39,7 +39,7 @@
     },
     {
       "name": "characters",
-      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/characters-1.4.0",
+      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/characters-1.4.1",
       "packageUri": "lib/",
       "languageVersion": "3.4"
     },
@@ -81,7 +81,7 @@
     },
     {
       "name": "cross_file",
-      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/cross_file-0.3.5+1",
+      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/cross_file-0.3.5+2",
       "packageUri": "lib/",
       "languageVersion": "3.8"
     },
@@ -93,7 +93,7 @@
     },
     {
       "name": "dio",
-      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/dio-5.9.0",
+      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/dio-5.9.1",
       "packageUri": "lib/",
       "languageVersion": "2.18"
     },
@@ -111,7 +111,7 @@
     },
     {
       "name": "ffi",
-      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/ffi-2.1.5",
+      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/ffi-2.2.0",
       "packageUri": "lib/",
       "languageVersion": "3.7"
     },
@@ -147,9 +147,9 @@
     },
     {
       "name": "flutter",
-      "rootUri": "file:///Users/hthai00/fvm/versions/3.38.9/packages/flutter",
+      "rootUri": "file:///opt/homebrew/share/flutter/packages/flutter",
       "packageUri": "lib/",
-      "languageVersion": "3.8"
+      "languageVersion": "3.9"
     },
     {
       "name": "flutter_dotenv",
@@ -177,21 +177,21 @@
     },
     {
       "name": "flutter_riverpod",
-      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/flutter_riverpod-3.2.0",
+      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/flutter_riverpod-3.2.1",
       "packageUri": "lib/",
       "languageVersion": "3.7"
     },
     {
       "name": "flutter_test",
-      "rootUri": "file:///Users/hthai00/fvm/versions/3.38.9/packages/flutter_test",
+      "rootUri": "file:///opt/homebrew/share/flutter/packages/flutter_test",
       "packageUri": "lib/",
-      "languageVersion": "3.8"
+      "languageVersion": "3.9"
     },
     {
       "name": "flutter_web_plugins",
-      "rootUri": "file:///Users/hthai00/fvm/versions/3.38.9/packages/flutter_web_plugins",
+      "rootUri": "file:///opt/homebrew/share/flutter/packages/flutter_web_plugins",
       "packageUri": "lib/",
-      "languageVersion": "3.8"
+      "languageVersion": "3.9"
     },
     {
       "name": "frontend_server_client",
@@ -207,7 +207,7 @@
     },
     {
       "name": "go_router",
-      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/go_router-17.0.1",
+      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/go_router-17.1.0",
       "packageUri": "lib/",
       "languageVersion": "3.9"
     },
@@ -243,7 +243,7 @@
     },
     {
       "name": "image_picker_android",
-      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/image_picker_android-0.8.13+10",
+      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/image_picker_android-0.8.13+13",
       "packageUri": "lib/",
       "languageVersion": "3.9"
     },
@@ -255,9 +255,9 @@
     },
     {
       "name": "image_picker_ios",
-      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/image_picker_ios-0.8.13+3",
+      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/image_picker_ios-0.8.13+6",
       "packageUri": "lib/",
-      "languageVersion": "3.9"
+      "languageVersion": "3.10"
     },
     {
       "name": "image_picker_linux",
@@ -290,12 +290,6 @@
       "languageVersion": "3.4"
     },
     {
-      "name": "js",
-      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/js-0.6.7",
-      "packageUri": "lib/",
-      "languageVersion": "2.19"
-    },
-    {
       "name": "leak_tracker",
       "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/leak_tracker-11.0.2",
       "packageUri": "lib/",
@@ -315,7 +309,7 @@
     },
     {
       "name": "lints",
-      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/lints-6.0.0",
+      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/lints-6.1.0",
       "packageUri": "lib/",
       "languageVersion": "3.8"
     },
@@ -327,15 +321,15 @@
     },
     {
       "name": "matcher",
-      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/matcher-0.12.17",
+      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/matcher-0.12.18",
       "packageUri": "lib/",
-      "languageVersion": "3.4"
+      "languageVersion": "3.7"
     },
     {
       "name": "material_color_utilities",
-      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/material_color_utilities-0.11.1",
+      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/material_color_utilities-0.13.0",
       "packageUri": "lib/",
-      "languageVersion": "2.17"
+      "languageVersion": "3.5"
     },
     {
       "name": "meta",
@@ -423,7 +417,7 @@
     },
     {
       "name": "riverpod",
-      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/riverpod-3.2.0",
+      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/riverpod-3.2.1",
       "packageUri": "lib/",
       "languageVersion": "3.7"
     },
@@ -435,7 +429,7 @@
     },
     {
       "name": "shared_preferences_android",
-      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/shared_preferences_android-2.4.18",
+      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/shared_preferences_android-2.4.20",
       "packageUri": "lib/",
       "languageVersion": "3.9"
     },
@@ -495,9 +489,9 @@
     },
     {
       "name": "sky_engine",
-      "rootUri": "file:///Users/hthai00/fvm/versions/3.38.9/bin/cache/pkg/sky_engine",
+      "rootUri": "file:///opt/homebrew/share/flutter/bin/cache/pkg/sky_engine",
       "packageUri": "lib/",
-      "languageVersion": "3.8"
+      "languageVersion": "3.9"
     },
     {
       "name": "source_map_stack_trace",
@@ -513,7 +507,7 @@
     },
     {
       "name": "source_span",
-      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/source_span-1.10.1",
+      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/source_span-1.10.2",
       "packageUri": "lib/",
       "languageVersion": "3.1"
     },
@@ -549,21 +543,21 @@
     },
     {
       "name": "test",
-      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/test-1.26.3",
+      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/test-1.28.0",
       "packageUri": "lib/",
-      "languageVersion": "3.5"
+      "languageVersion": "3.7"
     },
     {
       "name": "test_api",
-      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/test_api-0.7.7",
+      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/test_api-0.7.8",
       "packageUri": "lib/",
-      "languageVersion": "3.5"
+      "languageVersion": "3.7"
     },
     {
       "name": "test_core",
-      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/test_core-0.6.12",
+      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/test_core-0.6.14",
       "packageUri": "lib/",
-      "languageVersion": "3.5"
+      "languageVersion": "3.7"
     },
     {
       "name": "typed_data",
@@ -585,9 +579,9 @@
     },
     {
       "name": "url_launcher_ios",
-      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/url_launcher_ios-6.3.6",
+      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/url_launcher_ios-6.4.0",
       "packageUri": "lib/",
-      "languageVersion": "3.9"
+      "languageVersion": "3.10"
     },
     {
       "name": "url_launcher_linux",
@@ -639,9 +633,9 @@
     },
     {
       "name": "web",
-      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/web-0.5.1",
+      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/web-1.1.1",
       "packageUri": "lib/",
-      "languageVersion": "3.3"
+      "languageVersion": "3.4"
     },
     {
       "name": "web_socket",
@@ -660,6 +654,30 @@
       "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/webkit_inspection_protocol-1.2.1",
       "packageUri": "lib/",
       "languageVersion": "3.0"
+    },
+    {
+      "name": "webview_flutter",
+      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/webview_flutter-4.13.1",
+      "packageUri": "lib/",
+      "languageVersion": "3.8"
+    },
+    {
+      "name": "webview_flutter_android",
+      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/webview_flutter_android-4.10.11",
+      "packageUri": "lib/",
+      "languageVersion": "3.9"
+    },
+    {
+      "name": "webview_flutter_platform_interface",
+      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/webview_flutter_platform_interface-2.14.0",
+      "packageUri": "lib/",
+      "languageVersion": "3.6"
+    },
+    {
+      "name": "webview_flutter_wkwebview",
+      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/webview_flutter_wkwebview-3.23.6",
+      "packageUri": "lib/",
+      "languageVersion": "3.9"
     },
     {
       "name": "xdg_directories",
@@ -687,8 +705,8 @@
     }
   ],
   "generator": "pub",
-  "generatorVersion": "3.10.8",
-  "flutterRoot": "file:///Users/hthai00/fvm/versions/3.38.9",
-  "flutterVersion": "3.38.9",
+  "generatorVersion": "3.11.0",
+  "flutterRoot": "file:///opt/homebrew/share/flutter",
+  "flutterVersion": "3.41.0",
   "pubCache": "file:///Users/hthai00/.pub-cache"
 }

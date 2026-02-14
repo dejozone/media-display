@@ -185,7 +185,16 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     if (_channel != null && _connectionConfirmed) {
       _connecting = false; // Reset since we're not actually connecting
       if (!skipSendConfig) {
-        await sendConfig();
+        // Ensure a service is activated so service-specific config is sent
+        final priorityNotifier = ref.read(servicePriorityProvider.notifier);
+        final priorityState = ref.read(servicePriorityProvider);
+        final currentService = priorityState.currentService ??
+            priorityNotifier.activateFirstAvailable();
+        if (currentService != null) {
+          await sendConfigForService(currentService, caller: 'connect:reuse');
+        } else {
+          await sendConfig();
+        }
       }
       return;
     }
@@ -201,6 +210,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
         cancelRetryTimer: false,
       );
       final env = ref.read(envConfigProvider);
+      // _log('Selected platform mode=${env.platformMode.label}');
       final uri = Uri.parse('${env.eventsWsUrl}?token=${auth.token}');
 
       WebSocketChannel? channel;
@@ -663,8 +673,9 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       final sonosPoll = asIntOrNull(settings?['sonos_poll_interval_sec']) ??
           env.sonosPollIntervalSec;
 
-      // Request token if Spotify is enabled
-      final needToken = userSpotifyEnabled;
+      // Always request a Spotify token when WebSocket is connected so the
+      // server can emit access/refresh tokens for any mode/platform.
+      final needToken = true;
 
       _log('sendConfigForUserSettings: '
           'enabled=(spotify=$userSpotifyEnabled, sonos=$userSonosEnabled), '
@@ -807,7 +818,9 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       // This ensures we have a token ready for direct polling fallback even when
       // another service (like Sonos) is currently active.
       // When Spotify is disabled, explicitly send false to cancel token task on server.
-      final needToken = userSpotifyEnabled;
+      // Always request a Spotify token when WebSocket is connected so the
+      // server can emit access/refresh tokens for any mode/platform.
+      final needToken = true;
 
       // Build minimal enabled/poll maps so unspecified services remain untouched
       // on the server. Only include the service being switched (and any explicitly
@@ -864,6 +877,18 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
         if (shouldExplicitlyEnableSpotifyForRecovery()) {
           setSpotify(true);
         } else {
+          setSpotify(false);
+          poll.remove('spotify');
+        }
+      } else if (service == ServiceType.nativeLocalSonos) {
+        // Native/on-device Sonos bridge: disable backend Sonos polling while
+        // the native bridge is active. Keep Spotify token handling intact so
+        // fallback to Spotify remains possible.
+        setSonos(false);
+
+        if (shouldExplicitlyEnableSpotifyForRecovery()) {
+          setSpotify(true);
+        } else if (shouldExplicitlyDisableSpotify()) {
           setSpotify(false);
           poll.remove('spotify');
         }
@@ -1052,40 +1077,13 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
           })() ??
           env.sonosPollIntervalSec;
 
-      // Request token if Spotify enabled and we don't have a valid token
-      // Check if we have a token that's not expired (with 60s buffer)
-      final directState = ref.read(spotifyDirectProvider);
-      final hasValidToken = directState.accessToken != null &&
-          directState.tokenExpiresAt != null &&
-          directState.tokenExpiresAt! >
-              (DateTime.now().millisecondsSinceEpoch ~/ 1000) + 60;
+      // Always request a Spotify token when WebSocket is connected so the
+      // server can emit access/refresh tokens for any mode/platform.
+      final needToken = true;
 
-      // Debounce token requests - don't request more than once per 5 seconds
-      final now = DateTime.now();
-      final tokenRequestDebounced = _lastTokenRequestTime != null &&
-          now.difference(_lastTokenRequestTime!).inSeconds < 5;
-
-      // Track if this is the first config after a fresh connection
-      final isInitialConfig = !_initialConfigSent;
-
-      // Request token if:
-      // 1. This is initial config after connect (server needs to start token refresh scheduler)
-      // 2. OR Spotify was just toggled ON (server needs to restart token refresh scheduler)
-      // 3. OR forced refresh request (proactive refresh before expiry)
-      // 4. OR we don't have a valid token and not debounced
-      final needToken = spotifyEnabled &&
-          (isInitialConfig ||
-              spotifyJustEnabled ||
-              forceTokenRequest ||
-              (!hasValidToken && !tokenRequestDebounced));
-
-      // Debug logging to understand token request decisions
+      // Track token request timestamp for visibility
+      _lastTokenRequestTime = DateTime.now();
       _log('sendConfig decision: spotifyEnabled=$spotifyEnabled, '
-          'isInitialConfig=$isInitialConfig, '
-          'spotifyJustEnabled=$spotifyJustEnabled, '
-          'hasValidToken=$hasValidToken (token=${directState.accessToken != null}, '
-          'expiresAt=${directState.tokenExpiresAt}), '
-          'debounced=$tokenRequestDebounced (lastReq=$_lastTokenRequestTime), '
           'forceRefresh=$forceTokenRequest => needToken=$needToken');
 
       // Disable backend services when in direct polling mode
@@ -1093,6 +1091,13 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
           spotifyEnabled && directMode == SpotifyPollingMode.fallback;
       final backendSonosEnabled = sonosEnabled &&
           (directMode == SpotifyPollingMode.fallback || !spotifyEnabled);
+
+      // Check cached token validity for direct polling startup fallback
+      final directState = ref.read(spotifyDirectProvider);
+      final hasValidToken = directState.accessToken != null &&
+          directState.tokenExpiresAt != null &&
+          directState.tokenExpiresAt! >
+              (DateTime.now().millisecondsSinceEpoch ~/ 1000) + 60;
 
       final payload = {
         'type': 'config',
@@ -1118,7 +1123,8 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
         return;
       }
 
-      // If no channel exists, we need to connect first
+      // If no channel exists, we need to connect first; also ensure a service
+      // is activated so we send service-specific configs once connected.
       if (_channel == null) {
         final auth = ref.read(authStateProvider);
         if (!auth.isAuthenticated || _connecting) return;
@@ -1134,13 +1140,11 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
           }
           return;
         }
+        // Activate a service before connecting to avoid legacy config path.
+        final priorityNotifier = ref.read(servicePriorityProvider.notifier);
+        priorityNotifier.activateFirstAvailable();
         await _connect(auth, caller: 'sendConfig');
         return; // _connect will call sendConfig again once connected
-      }
-
-      // Only update debounce timestamp when we actually send the request
-      if (needToken) {
-        _lastTokenRequestTime = DateTime.now();
       }
 
       // Mark initial config as sent

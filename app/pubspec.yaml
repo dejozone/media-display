@@ -19,14 +19,15 @@ dependencies:
   flutter_dotenv: ^6.0.0
   shared_preferences: ^2.2.2
   url_launcher: ^6.3.0
+  webview_flutter: ^4.7.0
   web_socket_channel: ^3.0.3
   # Optional: logging utilities
   logging: ^1.2.0
   image_picker: ^1.2.1
-  image_picker_for_web: ^3.1.1
   crop_your_image: ^2.0.0
   image: ^4.1.7
   flutter_heic_to_jpg: ^1.0.0
+  xml: ^6.5.0
 
 dev_dependencies:
   flutter_test:

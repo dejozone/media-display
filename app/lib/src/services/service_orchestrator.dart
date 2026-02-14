@@ -9,6 +9,8 @@ import 'package:media_display/src/services/service_health.dart';
 import 'package:media_display/src/services/service_priority_manager.dart';
 import 'package:media_display/src/services/settings_service.dart';
 import 'package:media_display/src/services/spotify_direct_service.dart';
+import 'package:media_display/src/services/native_sonos_service.dart';
+import 'package:media_display/src/services/native_sonos_bridge.dart';
 import 'package:media_display/src/services/user_service.dart';
 import 'package:media_display/src/utils/logging.dart';
 
@@ -140,6 +142,8 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
   EnvConfig get _config => ref.read(envConfigProvider);
 
+  bool get _nativeSonosSupported => createNativeSonosBridge().isSupported;
+
   @override
   UnifiedPlaybackState build() {
     ref.onDispose(() {
@@ -162,6 +166,11 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
     // Set up service status callback to receive health updates from WebSocket
     ref.read(eventsWsProvider.notifier).onServiceStatus = _handleServiceStatus;
+
+    // Log platform mode and configured priority order for visibility
+    final env = _config;
+    _log('Platform mode=${env.platformMode.label} priority='
+        '${env.priorityOrderOfServices.map((s) => s.toConfigString()).join(',')}');
 
     // Set up probe callback for service recovery
     ref
@@ -210,6 +219,10 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
             .read(eventsWsProvider.notifier)
             .requestServiceStatus(const ['sonos']);
         return false;
+
+      case ServiceType.nativeLocalSonos:
+        // Native Sonos: probe locally (if supported)
+        return ref.read(nativeSonosProvider.notifier).probe();
     }
   }
 
@@ -230,6 +243,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       ref.read(servicePriorityProvider.notifier).updateEnabledServices(
             spotifyEnabled: spotifyEnabled,
             sonosEnabled: sonosEnabled,
+            nativeSonosSupported: _nativeSonosSupported,
           );
     } catch (e) {
       _log('Failed to load settings: $e');
@@ -256,6 +270,11 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     // Watch direct Spotify service
     ref.listen<SpotifyDirectState>(spotifyDirectProvider, (prev, next) {
       _handleDirectSpotifyChange(next);
+    });
+
+    // Watch native/local Sonos bridge
+    ref.listen<NativeSonosState>(nativeSonosProvider, (prev, next) {
+      _handleNativeSonosChange(next);
     });
 
     // Watch WebSocket/cloud service
@@ -386,6 +405,8 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
     if (service.isDirectPolling) {
       _activateDirectSpotify(isFallback: isFallback);
+    } else if (service.isNativeSonos) {
+      _activateNativeSonos(isFallback: isFallback);
     } else {
       // cloud_spotify or local_sonos
       _activateCloudService(service, isFallback: isFallback);
@@ -464,6 +485,43 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
         );
 
     // Reset timeout timer
+    _resetTimeoutTimer();
+  }
+
+  void _activateNativeSonos({bool isFallback = false}) {
+    if (!_nativeSonosSupported) {
+      _log(
+          'Native local Sonos not supported on this platform; skipping activation');
+      ref
+          .read(servicePriorityProvider.notifier)
+          .reportError(ServiceType.nativeLocalSonos);
+      return;
+    }
+
+    _log('Activating native local Sonos (fallback=$isFallback)');
+
+    // Stop direct polling if it was running
+    ref.read(spotifyDirectProvider.notifier).stopPolling();
+
+    // Tell backend to pause streaming while native bridge is active. We still
+    // keep tokens available for Spotify fallback.
+    ref.read(eventsWsProvider.notifier).sendConfigForService(
+          ServiceType.nativeLocalSonos,
+          keepSonosEnabled: false,
+          keepSpotifyPollingForRecovery: false,
+          caller: '_activateNativeSonos',
+        );
+
+    // Start native bridge (event-driven; pollInterval optional)
+    final pollInterval = _config.nativeSonosPollIntervalSec ??
+        (_config.nativeLocalSonosFallback.timeoutSec > 0
+            ? _config.nativeLocalSonosFallback.timeoutSec
+            : null);
+    _log('Starting native Sonos bridge with pollIntervalSec=$pollInterval');
+    ref.read(nativeSonosProvider.notifier).start(
+          pollIntervalSec: pollInterval,
+        );
+
     _resetTimeoutTimer();
   }
 
@@ -549,6 +607,88 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       }
 
       _processPayload(spotifyState.payload!, ServiceType.directSpotify);
+    }
+  }
+
+  void _handleNativeSonosChange(NativeSonosState bridgeState) {
+    final priority = ref.read(servicePriorityProvider);
+    final currentService = priority.currentService;
+    final isCurrent = currentService == ServiceType.nativeLocalSonos;
+
+    _log(
+        'NativeSonos update: isCurrent=$isCurrent connected=${bridgeState.connected} '
+        'hasPayload=${bridgeState.payload != null} error=${bridgeState.error}');
+
+    // Ignore background updates when service not active and no payload
+    if (!isCurrent && bridgeState.payload == null) {
+      return;
+    }
+
+    if (!bridgeState.connected) {
+      if (isCurrent) {
+        // Allow a brief startup period when the bridge is running but not yet connected.
+        if (bridgeState.isRunning) {
+          _log(
+              'NativeSonos starting up; waiting for connection before fallback');
+          return;
+        }
+        // If we still have a payload, avoid penalizing immediately (likely a restart)
+        if (bridgeState.payload != null) {
+          _log('NativeSonos restart with cached payload; skip error report');
+          return;
+        }
+        _log('NativeSonos not connected; reporting error/fallback');
+        ref
+            .read(servicePriorityProvider.notifier)
+            .reportError(ServiceType.nativeLocalSonos);
+      }
+      return;
+    }
+
+    if (bridgeState.payload == null) return;
+
+    final payload = bridgeState.payload!;
+    final track = payload['track'] as Map<String, dynamic>?;
+    final playback = payload['playback'] as Map<String, dynamic>?;
+    final isPlaying = playback?['is_playing'] as bool? ?? false;
+    final status = playback?['status'] as String?;
+    final hasTrackInfo = _hasValidTrackInfo(track);
+
+    _lastIsPlaying[ServiceType.nativeLocalSonos] = isPlaying;
+
+    if (isPlaying) {
+      _cancelPauseTimer();
+      if (!_waitingForPrimaryResume ||
+          _originalPrimaryService == ServiceType.nativeLocalSonos) {
+        _resetCyclingState();
+      }
+    } else if (_config.enableServiceCycling &&
+        isCurrent &&
+        !_waitingForPrimaryResume) {
+      _handleSonosPausedWithStatus(
+        ServiceType.nativeLocalSonos,
+        status,
+        hasTrackInfo: hasTrackInfo,
+      );
+    }
+
+    // Update UI/state when active, or when it is playing, or when it has track
+    // info and the current service is not actively playing.
+    final currentPlaying =
+        currentService != null && (_lastIsPlaying[currentService] ?? false);
+    final shouldUpdateUI =
+        isCurrent || isPlaying || (hasTrackInfo && !currentPlaying);
+
+    if (shouldUpdateUI) {
+      _processPayload(payload, ServiceType.nativeLocalSonos);
+
+      // If a lower-priority service is active, promote native local Sonos now.
+      if (!isCurrent) {
+        _log('NativeSonos delivered payload; promoting to nativeLocalSonos');
+        ref
+            .read(servicePriorityProvider.notifier)
+            .activateService(ServiceType.nativeLocalSonos);
+      }
     }
   }
 
@@ -704,7 +844,11 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
           // Use status-based logic for Sonos (with track info awareness)
           if (effectiveService == ServiceType.localSonos) {
-            _handleSonosPausedWithStatus(status, hasTrackInfo: hasTrackInfo);
+            _handleSonosPausedWithStatus(
+              ServiceType.localSonos,
+              status,
+              hasTrackInfo: hasTrackInfo,
+            );
           } else {
             _handleServicePaused(effectiveService);
           }
@@ -1040,7 +1184,11 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     // Determine the service type for this provider
     final serviceType = provider == 'sonos'
         ? ServiceType.localSonos
-        : (provider == 'spotify' ? ServiceType.cloudSpotify : null);
+        : (provider == 'spotify'
+            ? ServiceType.cloudSpotify
+            : (provider == 'native_sonos'
+                ? ServiceType.nativeLocalSonos
+                : null));
 
     if (serviceType == null) {
       _log('Unknown provider: $provider');
@@ -1175,7 +1323,11 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
   /// Get the current health state for a service
   ServiceHealthState? getServiceHealth(ServiceType service) {
-    final provider = service == ServiceType.localSonos ? 'sonos' : 'spotify';
+    final provider = switch (service) {
+      ServiceType.localSonos => 'sonos',
+      ServiceType.nativeLocalSonos => 'native_sonos',
+      _ => 'spotify',
+    };
     return _serviceHealth[provider];
   }
 
@@ -1193,7 +1345,9 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       if (!entry.value.status.isHealthy) {
         final serviceType = entry.key == 'sonos'
             ? ServiceType.localSonos
-            : (entry.key == 'spotify' ? ServiceType.cloudSpotify : null);
+            : (entry.key == 'native_sonos'
+                ? ServiceType.nativeLocalSonos
+                : (entry.key == 'spotify' ? ServiceType.cloudSpotify : null));
         if (serviceType != null) {
           unhealthyServices.add(serviceType);
         }
@@ -1260,17 +1414,19 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
   ///
   /// NOTE: Even if Sonos has never played this session, we still cycle
   /// (with idle wait time) to discover if other services are playing.
-  void _handleSonosPausedWithStatus(String? status,
-      {bool hasTrackInfo = true}) {
+  void _handleSonosPausedWithStatus(
+    ServiceType service,
+    String? status, {
+    bool hasTrackInfo = true,
+  }) {
     // Skip if we already have a pause timer running for Sonos
-    if (_pausedService == ServiceType.localSonos &&
-        _servicePausedTimer != null) {
+    if (_pausedService == service && _servicePausedTimer != null) {
       return;
     }
 
     // Skip if Sonos has already been checked this cycle and found not playing
     // This prevents infinite loops when all services are paused/stopped
-    if (_checkedNotPlaying.contains(ServiceType.localSonos)) {
+    if (_checkedNotPlaying.contains(service)) {
       return;
     }
 
@@ -1279,21 +1435,30 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
     // Determine wait time based on Sonos status and track info
     final int waitSec;
+    final pausedWait = service == ServiceType.nativeLocalSonos
+        ? _config.nativeLocalSonosPausedWaitSec
+        : _config.localSonosPausedWaitSec;
+    final stoppedWait = service == ServiceType.nativeLocalSonos
+        ? _config.nativeLocalSonosStoppedWaitSec
+        : _config.localSonosStoppedWaitSec;
+    final idleWait = service == ServiceType.nativeLocalSonos
+        ? _config.nativeLocalSonosIdleWaitSec
+        : _config.localSonosIdleWaitSec;
     final normalizedStatus = (status ?? 'idle').toLowerCase();
 
     // "paused" but no track info means user has switched away from Sonos
     // This should ALWAYS use the short idle wait time - the user has actively
     // switched to another device/app, so we should check other services quickly
     if (normalizedStatus == 'paused' && !hasTrackInfo) {
-      waitSec = _config.localSonosIdleWaitSec;
+      waitSec = idleWait;
     } else {
       switch (normalizedStatus) {
         case 'paused':
           // True pause with track info - user may resume
-          waitSec = _config.localSonosPausedWaitSec;
+          waitSec = pausedWait;
           break;
         case 'stopped':
-          waitSec = _config.localSonosStoppedWaitSec;
+          waitSec = stoppedWait;
           break;
         case 'transitioning':
         case 'buffering':
@@ -1304,7 +1469,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
           return;
         default:
           // idle, no_media, or unknown - use idle wait time
-          waitSec = _config.localSonosIdleWaitSec;
+          waitSec = idleWait;
       }
     }
 
@@ -1313,9 +1478,9 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       return;
     }
 
-    _pausedService = ServiceType.localSonos;
+    _pausedService = service;
     _servicePausedTimer = Timer(Duration(seconds: waitSec), () {
-      _onServicePauseTimerExpired(ServiceType.localSonos);
+      _onServicePauseTimerExpired(service);
     });
   }
 
@@ -1563,9 +1728,9 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
           'Idle reset: no playback for ${idleForSec}s (threshold=${idleThresholdSec}s) - resetting services');
       _lastIdleResetAt = DateTime.now();
       reset();
-    // } else {
-    //   _log(
-    //       'Idle check: idle ${idleForSec}s < threshold=${idleThresholdSec}s - no reset');
+      // } else {
+      //   _log(
+      //       'Idle check: idle ${idleForSec}s < threshold=${idleThresholdSec}s - no reset');
     }
   }
 
@@ -1589,7 +1754,9 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       if (!entry.value.status.isHealthy) {
         final serviceType = entry.key == 'sonos'
             ? ServiceType.localSonos
-            : (entry.key == 'spotify' ? ServiceType.cloudSpotify : null);
+            : (entry.key == 'native_sonos'
+                ? ServiceType.nativeLocalSonos
+                : (entry.key == 'spotify' ? ServiceType.cloudSpotify : null));
         if (serviceType != null) {
           unhealthyServices.add(serviceType);
         }
@@ -1611,6 +1778,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     ref.read(servicePriorityProvider.notifier).updateEnabledServices(
           spotifyEnabled: spotifyEnabled,
           sonosEnabled: sonosEnabled,
+          nativeSonosSupported: _nativeSonosSupported,
           unhealthyServices: unhealthyServices,
         );
 
@@ -1751,6 +1919,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     ref.read(eventsWsProvider.notifier).resetSessionStateForColdRestart();
     ref.read(servicePriorityProvider.notifier).reset();
     ref.read(spotifyDirectProvider.notifier).stopPolling();
+    ref.read(nativeSonosProvider.notifier).stop();
 
     state = const UnifiedPlaybackState(isLoading: true);
 
@@ -1787,6 +1956,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     // Stop services
     ref.read(servicePriorityProvider.notifier).reset();
     ref.read(spotifyDirectProvider.notifier).stopPolling();
+    ref.read(nativeSonosProvider.notifier).stop();
     ref.read(eventsWsProvider.notifier).disconnectOnLogout();
 
     // Clear playback state
@@ -1818,6 +1988,11 @@ final isCloudSpotifyActiveProvider = Provider<bool>((ref) {
 /// Convenience provider to check if we're using local Sonos
 final isLocalSonosActiveProvider = Provider<bool>((ref) {
   return ref.watch(activeServiceProvider) == ServiceType.localSonos;
+});
+
+/// Convenience provider to check if we're using native/local (on-device) Sonos
+final isNativeLocalSonosActiveProvider = Provider<bool>((ref) {
+  return ref.watch(activeServiceProvider) == ServiceType.nativeLocalSonos;
 });
 
 /// Convenience provider to check if we're using any cloud service
