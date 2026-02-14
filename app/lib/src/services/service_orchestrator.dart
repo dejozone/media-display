@@ -295,6 +295,19 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     final currentService = next.currentService;
     final prevService = prev?.currentService;
 
+    // If we were on native-local Sonos and Sonos gets disabled or we switch
+    // away, tear down the native bridge so it stops receiving NOTIFY events.
+    final sonosDisabled =
+        !next.enabledServices.contains(ServiceType.nativeLocalSonos);
+    final leftNativeSonos = prevService == ServiceType.nativeLocalSonos &&
+        currentService != ServiceType.nativeLocalSonos;
+    if (leftNativeSonos ||
+        (sonosDisabled && currentService != ServiceType.nativeLocalSonos)) {
+      _log(
+          'Stopping native Sonos bridge (reason=${leftNativeSonos ? 'service switched' : 'sonos disabled'})');
+      ref.read(nativeSonosProvider.notifier).stop();
+    }
+
     // When priority manager is re-running initial activation after reconnect,
     // it briefly has no current service while it prepares to select one. If
     // there are enabled services, skip handling to avoid emitting "No service
@@ -1598,6 +1611,34 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     return null;
   }
 
+  /// Return the highest-priority Sonos service (native preferred) that is
+  /// present in the configured priority list and currently enabled. If the
+  /// list omits Sonos entirely, fall back to the first enabled Sonos variant
+  /// (nativeLocalSonos preferred over localSonos).
+  ServiceType? _preferredSonosService(ServicePriorityState priority) {
+    const sonosCandidates = [
+      ServiceType.nativeLocalSonos,
+      ServiceType.localSonos,
+    ];
+
+    // Respect explicit priority order first
+    for (final service in _config.priorityOrderOfServices) {
+      if (sonosCandidates.contains(service) &&
+          priority.enabledServices.contains(service)) {
+        return service;
+      }
+    }
+
+    // Fallback: choose the first enabled Sonos variant (native preferred)
+    for (final candidate in sonosCandidates) {
+      if (priority.enabledServices.contains(candidate)) {
+        return candidate;
+      }
+    }
+
+    return null;
+  }
+
   /// Called when the primary service we were waiting for resumes
   void _handlePrimaryServiceResumed() {
     final primaryService = _originalPrimaryService;
@@ -1796,6 +1837,32 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     final priority = ref.read(servicePriorityProvider);
     final currentService = priority.currentService;
     final newEnabledServices = priority.enabledServices.toSet();
+
+    // If Sonos was just enabled, proactively activate the highest-priority
+    // Sonos variant present in the priority list (nativeLocalSonos preferred
+    // by list order). If the list omits Sonos entirely, fall back to the first
+    // enabled Sonos variant. Do this before evaluating generic switches so the
+    // Sonos bridge starts immediately when toggled on.
+    final sonosJustEnabled =
+        (!previousEnabledServices.contains(ServiceType.nativeLocalSonos) &&
+                newEnabledServices.contains(ServiceType.nativeLocalSonos)) ||
+            (!previousEnabledServices.contains(ServiceType.localSonos) &&
+                newEnabledServices.contains(ServiceType.localSonos));
+
+    if (sonosJustEnabled) {
+      final preferredSonos = _preferredSonosService(priority);
+      if (preferredSonos != null) {
+        final shouldSwitchToSonos = currentService == null ||
+            _isHigherPriority(preferredSonos, currentService);
+        if (shouldSwitchToSonos) {
+          _log('Sonos enabled; activating $preferredSonos');
+          ref
+              .read(servicePriorityProvider.notifier)
+              .activateService(preferredSonos);
+          return; // Listener will handle activation/config
+        }
+      }
+    }
 
     // Detect if services changed and whether a switch occurred
     final servicesChanged = previousEnabledServices != newEnabledServices;
