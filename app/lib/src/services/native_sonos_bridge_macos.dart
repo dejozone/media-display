@@ -33,9 +33,10 @@ class NativeSonosBridge {
   String? _currentAlbum;
   List<String> _currentArtists = const [];
   String? _currentAlbumArt;
+  String? _currentTrackId;
   int? _currentDurationMs;
   int? _currentProgressMs;
-  List<String> _groupDevices = const [];
+  List<_GroupDevice> _groupDevices = const [];
 
   static const _httpTimeout = Duration(seconds: 10);
 
@@ -114,8 +115,12 @@ class NativeSonosBridge {
       final playbackStatus = _transportState.toLowerCase();
       final deviceName = _deviceName ?? 'Sonos';
       final groupDevices = _groupDevices
-          .where((name) => name.isNotEmpty)
-          .map((name) => {'name': name})
+          .where((gd) => gd.name.isNotEmpty)
+          .map((gd) => {
+                'name': gd.name,
+                if (gd.location != null && gd.location!.isNotEmpty)
+                  'location': gd.location,
+              })
           .toList();
 
       // Build shared blocks once so we can place them both top-level and under data
@@ -137,6 +142,7 @@ class NativeSonosBridge {
         'data': {
           // Track: use server shape
           'track': {
+            if (_currentTrackId != null) 'id': _currentTrackId,
             'title': _currentTitle ?? '',
             'artist': _currentArtists.isNotEmpty ? _currentArtists.first : '',
             'album': _currentAlbum,
@@ -308,7 +314,7 @@ class NativeSonosBridge {
           .where((e) => e.name.local.toLowerCase() == 'lastchange')
           .firstOrNull;
       if (lastChange == null) return;
-      final lastChangeRaw = lastChange.text.trim();
+      final lastChangeRaw = lastChange.innerText.trim();
       if (lastChangeRaw.isEmpty) return;
 
       final lcDoc = xml.XmlDocument.parse(lastChangeRaw);
@@ -366,7 +372,12 @@ class NativeSonosBridge {
     try {
       final doc = xml.XmlDocument.parse(didl);
       final item = doc.findAllElements('item').firstOrNull;
+      // _log('DIDL item=${item?.toXmlString(pretty: true)}', level: Level.FINE);
       if (item == null) return;
+      final trackId = _findTrackId(item);
+      if (trackId != null && trackId.isNotEmpty) {
+        _currentTrackId = trackId;
+      }
       _currentTitle = _findText(item, const ['title']);
       _currentAlbum = _findText(item, const ['album']);
       final creator = _findText(item, const ['creator', 'artist']);
@@ -377,6 +388,25 @@ class NativeSonosBridge {
     } catch (e) {
       _log('DIDL parse error: $e', level: Level.FINE);
     }
+  }
+
+  String? _findTrackId(xml.XmlElement root) {
+    try {
+      for (final res in root.findAllElements('res')) {
+        final text = res.innerText.trim();
+        if (text.isEmpty) continue;
+        final match = RegExp(r'track:([^?&#/]+)').firstMatch(text);
+        if (match != null) {
+          return match.group(1);
+        }
+      }
+    } catch (_) {}
+
+    final attrId = root.getAttribute('id');
+    if (attrId != null && attrId.isNotEmpty) {
+      return attrId;
+    }
+    return null;
   }
 
   int? _findDurationMs(xml.XmlElement root) {
@@ -417,7 +447,7 @@ class NativeSonosBridge {
     final lowered = localNames.map((e) => e.toLowerCase()).toSet();
     for (final el in root.descendants.whereType<xml.XmlElement>()) {
       if (lowered.contains(el.name.local.toLowerCase())) {
-        return el.text;
+        return el.innerText;
       }
     }
     return null;
@@ -604,7 +634,7 @@ class NativeSonosBridge {
           .where((e) => e.name.local.toLowerCase() == 'zonegroupstate')
           .firstOrNull;
       if (zgStateNode == null) return null;
-      final innerRaw = zgStateNode.text.trim();
+      final innerRaw = zgStateNode.innerText.trim();
       if (innerRaw.isEmpty) return null;
 
       final zgDoc = xml.XmlDocument.parse(innerRaw);
@@ -624,11 +654,12 @@ class NativeSonosBridge {
             (m) => (m.getAttribute('ZoneName') ?? '').toLowerCase() == 'boost');
         if (allBoost) continue;
 
-        final groupNames = <String>[];
+        final groupDevices = <_GroupDevice>[];
         for (final member in members) {
           final name = member.getAttribute('ZoneName');
+          final location = member.getAttribute('Location');
           if (name != null && name.isNotEmpty) {
-            groupNames.add(name);
+            groupDevices.add(_GroupDevice(name: name, location: location));
           }
         }
 
@@ -654,7 +685,7 @@ class NativeSonosBridge {
             isCoordinator: true,
             model: model,
             roomName: zoneName,
-            groupDevices: groupNames,
+            groupDevices: groupDevices,
           );
         }
       }
@@ -705,7 +736,7 @@ class _SonosDevice {
   final String? model;
   final String? roomName;
   final String? friendlyName;
-  final List<String>? groupDevices;
+  final List<_GroupDevice>? groupDevices;
 
   _SonosDevice copyWith(
       {String? ip,
@@ -715,7 +746,7 @@ class _SonosDevice {
       String? model,
       String? roomName,
       String? friendlyName,
-      List<String>? groupDevices}) {
+      List<_GroupDevice>? groupDevices}) {
     return _SonosDevice(
       ip: ip ?? this.ip,
       name: name ?? this.name,
@@ -727,6 +758,12 @@ class _SonosDevice {
       groupDevices: groupDevices ?? this.groupDevices,
     );
   }
+}
+
+class _GroupDevice {
+  const _GroupDevice({required this.name, this.location});
+  final String name;
+  final String? location;
 }
 
 extension _FirstOrNull<E> on Iterable<E> {
