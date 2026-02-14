@@ -51,9 +51,8 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   late final WsRetryPolicy _retryPolicy;
   bool _connecting = false;
   bool _connectionConfirmed = false;
-  bool _hasConnectedOnce =
+    bool _hasConnectedOnce =
       false; // Track first successful WS ready in this auth session
-  bool _initialConfigSent = false; // Track if initial config sent after connect
   Map<String, dynamic>? _lastSettings;
   bool _useDirectPolling = false;
 
@@ -72,7 +71,6 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     _lastConfigJson = null;
     _lastConfigSentAt = null;
     _tokenRequested = false;
-    _lastTokenRequestTime = null;
     _wsTokenReceived = false;
     _lastEnabledSent.clear();
     _configRetryTimer?.cancel();
@@ -91,22 +89,18 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
         'active=${env.wsRetryActiveSec}s, cooldown=${env.wsRetryCooldownSec}s, '
         'window=$retryWindowLabel');
 
-    _initialConfigSent = false;
     _lastEnabledSent.clear();
     _lastConfigSent = null;
     _lastConfigJson = null;
     _lastConfigSentAt = null;
     _tokenRequested = false;
-    _lastTokenRequestTime = null;
     _wsTokenReceived = false;
     _useDirectPolling = false;
   }
 
   bool _tokenRequested = false;
-  DateTime? _lastTokenRequestTime;
   bool _wsTokenReceived =
       false; // Track if WS has sent a token (prefer WS over REST)
-  bool _lastSpotifyEnabled = false; // Track previous Spotify enabled state
   // Track last enabled states sent during the current WebSocket connection
   // to avoid re-sending redundant enabled=true toggles. Reset on disconnect.
   final Map<String, bool> _lastEnabledSent = {};
@@ -479,11 +473,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     if (resetFirstConnectFlag) {
       _hasConnectedOnce = false;
     }
-    _initialConfigSent = false; // Reset so next connect requests token
     _wsTokenReceived = false; // Reset so REST API can be used as fallback
-    _lastTokenRequestTime =
-        null; // Reset debounce - any pending token request was lost
-    _lastSpotifyEnabled = false; // Reset so next enable triggers token request
     _lastEnabledSent.clear(); // Reset per-connection enable tracking
     _lastConfigJson = null;
 
@@ -707,12 +697,10 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
         if (_channel != null) {
           await _sendConfigPayload(payload,
               logLabel: 'user settings (post-connect)');
-          _initialConfigSent = true;
         }
         return;
       }
 
-      _initialConfigSent = true;
       await _sendConfigPayload(payload, logLabel: 'user settings');
     } catch (e) {
       _log('sendConfigForUserSettings error: $e');
@@ -916,13 +904,9 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
         if (_channel != null) {
           await _sendConfigPayload(payload,
               logLabel: 'service config (post-connect)');
-          _initialConfigSent = true;
         }
         return;
       }
-
-      // Mark initial config as sent
-      _initialConfigSent = true;
 
       // Send the config
       await _sendConfigPayload(
@@ -1021,10 +1005,6 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       final sonosEnabled = settings['sonos_enabled'] == true;
       final hasService = spotifyEnabled || sonosEnabled;
 
-      // Detect if Spotify was just toggled ON
-      final spotifyJustEnabled = spotifyEnabled && !_lastSpotifyEnabled;
-      _lastSpotifyEnabled = spotifyEnabled; // Update tracking
-
       // Determine if we should use direct polling
       final directMode = ref.read(spotifyDirectProvider).mode;
       _useDirectPolling =
@@ -1081,8 +1061,6 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       // server can emit access/refresh tokens for any mode/platform.
       final needToken = true;
 
-      // Track token request timestamp for visibility
-      _lastTokenRequestTime = DateTime.now();
       _log('sendConfig decision: spotifyEnabled=$spotifyEnabled, '
           'forceRefresh=$forceTokenRequest => needToken=$needToken');
 
@@ -1146,9 +1124,6 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
         await _connect(auth, caller: 'sendConfig');
         return; // _connect will call sendConfig again once connected
       }
-
-      // Mark initial config as sent
-      _initialConfigSent = true;
 
       // Cancel any pending retry timer since we have a valid channel
       _retryTimer?.cancel();

@@ -648,8 +648,12 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     if (bridgeState.payload == null) return;
 
     final payload = bridgeState.payload!;
-    final track = payload['track'] as Map<String, dynamic>?;
-    final playback = payload['playback'] as Map<String, dynamic>?;
+    final data = payload['data'] as Map<String, dynamic>? ?? const {};
+    final track = data['track'] as Map<String, dynamic>?;
+    final playback = data['playback'] as Map<String, dynamic>?;
+    final device = data['device'] as Map<String, dynamic>?;
+    final provider =
+        data['provider'] as String? ?? payload['provider'] as String?;
     final isPlaying = playback?['is_playing'] as bool? ?? false;
     final status = playback?['status'] as String?;
     final hasTrackInfo = _hasValidTrackInfo(track);
@@ -680,7 +684,13 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
         isCurrent || isPlaying || (hasTrackInfo && !currentPlaying);
 
     if (shouldUpdateUI) {
-      _processPayload(payload, ServiceType.nativeLocalSonos);
+      // Normalize to the flat shape expected by _processPayload
+      _processPayload({
+        'track': track,
+        'playback': playback,
+        'device': device,
+        'provider': provider,
+      }, ServiceType.nativeLocalSonos);
 
       // If a lower-priority service is active, promote native local Sonos now.
       if (!isCurrent) {

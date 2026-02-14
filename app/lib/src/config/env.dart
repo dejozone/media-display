@@ -369,15 +369,6 @@ List<ServiceType> _parsePriorityOrder(
     return List<ServiceType>.from(allowed);
   }
 
-  // Ensure any allowed services not explicitly listed are appended so we never
-  // end up with an empty effective order when a toggled-on service is omitted
-  // from the environment configuration.
-  for (final service in allowed) {
-    if (!result.contains(service)) {
-      result.add(service);
-    }
-  }
-
   return result;
 }
 

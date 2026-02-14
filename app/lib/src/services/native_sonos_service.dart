@@ -46,65 +46,40 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
   StreamSubscription<NativeSonosMessage>? _subscription;
 
   bool _isCoordinatorPayload(Map<String, dynamic> payload) {
-    // Check common shapes for a coordinator flag in the payload
-    final direct =
-        payload['coordinator'] == true || payload['isCoordinator'] == true;
-    final group = payload['group'];
-    final groupCoordinator = group is Map<String, dynamic>
-        ? (group['coordinator'] == true || group['isCoordinator'] == true)
-        : false;
-    final player = payload['player'];
-    final playerCoordinator = player is Map<String, dynamic>
-        ? (player['coordinator'] == true || player['isCoordinator'] == true)
-        : false;
-    return direct || groupCoordinator || playerCoordinator;
+    // Expect coordinator flag only under data
+    final data = payload['data'];
+    if (data is Map<String, dynamic>) {
+      final device = data['device'];
+      if (device is Map<String, dynamic>) {
+        return device['coordinator'] == true || device['isCoordinator'] == true;
+      }
+    }
+    return false;
   }
 
   void _logPayloadSummary(Map<String, dynamic> payload) {
-    final player = payload['player'];
-    final playerName = player is Map<String, dynamic>
-        ? (player['name'] ?? player['title'] ?? player['displayName'])
+    final data = payload['data'];
+    final device = data is Map<String, dynamic> ? data['device'] : null;
+    final deviceName = device is Map<String, dynamic>
+        ? (device['name'] ?? device['displayName'])
         : null;
-    final playerIsCoordinator = player is Map<String, dynamic>
-        ? (player['coordinator'] == true || player['isCoordinator'] == true)
-        : null;
-
-    final group = payload['group'];
-    final groupName = group is Map<String, dynamic>
-        ? (group['coordinatorName'] ?? group['name'])
-        : null;
-    final groupIsCoordinator = group is Map<String, dynamic>
-        ? (group['coordinator'] == true || group['isCoordinator'] == true)
+    final isCoordinator = device is Map<String, dynamic>
+        ? (device['coordinator'] == true || device['isCoordinator'] == true)
         : null;
 
     final keys = payload.keys.join(',');
     _log(
-        'Native Sonos payload summary: keys=[$keys], player=$playerName (isCoordinator=$playerIsCoordinator), group=$groupName (isCoordinator=$groupIsCoordinator)');
+        'Native Sonos payload summary: keys=[$keys], device=$deviceName (isCoordinator=$isCoordinator)');
   }
 
   String? _coordinatorName(Map<String, dynamic> payload) {
     // Try common fields for identifying the coordinator device name
-    final player = payload['player'];
-    if (player is Map<String, dynamic>) {
-      final name = player['name'] ?? player['title'] ?? player['displayName'];
-      if (name is String && name.isNotEmpty) return name;
-    }
-
-    final group = payload['group'];
-    if (group is Map<String, dynamic>) {
-      final name = group['coordinatorName'] ?? group['name'];
-      if (name is String && name.isNotEmpty) return name;
-    }
-
-    final device = payload['device'];
+    final data = payload['data'];
+    final device = data is Map<String, dynamic> ? data['device'] : null;
     if (device is Map<String, dynamic>) {
       final name = device['name'] ?? device['displayName'];
       if (name is String && name.isNotEmpty) return name;
     }
-
-    final friendly = payload['friendlyName'];
-    if (friendly is String && friendly.isNotEmpty) return friendly;
-
     return null;
   }
 
@@ -117,7 +92,17 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
   }
 
   Future<void> start({int? pollIntervalSec}) async {
-    await stop();
+    // If already running and connected, avoid tearing down and re-subscribing.
+    if (state.isRunning && state.connected) {
+      _log('Native Sonos already running and connected; skipping restart');
+      return;
+    }
+
+    // Only tear down when we were already running; initial start should not
+    // emit a transient stop event that triggers fallback timers.
+    if (state.isRunning) {
+      await stop();
+    }
 
     final bridge = _bridge ??= createNativeSonosBridge();
     _log(

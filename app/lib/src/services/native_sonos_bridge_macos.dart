@@ -15,7 +15,6 @@ class NativeSonosBridge {
   final _controller = StreamController<NativeSonosMessage>.broadcast();
   Timer? _pollTimer;
   bool _running = false;
-  bool _discoveryComplete = false;
   String? _deviceIp;
   String? _deviceName;
   bool _deviceIsCoordinator = false;
@@ -25,6 +24,8 @@ class NativeSonosBridge {
   HttpServer? _eventServer;
   String? _subscriptionSid;
   Timer? _subscriptionRenewTimer;
+  Timer? _emitDebounce;
+  int _notifyCount = 0;
 
   // Last known playback state from events
   String _transportState = 'UNKNOWN';
@@ -32,6 +33,9 @@ class NativeSonosBridge {
   String? _currentAlbum;
   List<String> _currentArtists = const [];
   String? _currentAlbumArt;
+  int? _currentDurationMs;
+  int? _currentProgressMs;
+  List<String> _groupDevices = const [];
 
   static const _httpTimeout = Duration(seconds: 10);
 
@@ -53,7 +57,7 @@ class NativeSonosBridge {
       _deviceName = device.name;
       _deviceIsCoordinator = device.isCoordinator;
       _coordinatorUuid = device.uuid;
-      _discoveryComplete = true;
+      _groupDevices = device.groupDevices ?? const [];
       return true;
     } catch (_) {
       _log('Probe failed (swallowed for probe semantics)', level: Level.FINE);
@@ -74,7 +78,7 @@ class NativeSonosBridge {
     _deviceName = device.name;
     _deviceIsCoordinator = true; // We only emit a single chosen coordinator
     _coordinatorUuid = device.uuid;
-    _discoveryComplete = true;
+    _groupDevices = device.groupDevices ?? const [];
     _log('Using coordinator $_deviceName@$_deviceIp', level: Level.INFO);
     await _ensureEventSubscription(_deviceIp!);
     _running = true;
@@ -87,12 +91,14 @@ class NativeSonosBridge {
     _running = false;
     _pollTimer?.cancel();
     _pollTimer = null;
+    _emitDebounce?.cancel();
+    _emitDebounce = null;
     await _unsubscribeFromEvents();
     await _stopEventServer();
     _log('Stopping native Sonos bridge', level: Level.FINE);
     _controller.add(NativeSonosMessage(
       serviceStatus: {
-        'provider': 'native_sonos',
+        'provider': 'sonos',
         'provider_display_name': 'Sonos',
         'status': 'stopped',
       },
@@ -105,37 +111,54 @@ class NativeSonosBridge {
     try {
       final activeStates = {'PLAYING', 'TRANSITIONING', 'BUFFERING'};
       final isPlaying = activeStates.contains(_transportState);
+      final playbackStatus = _transportState.toLowerCase();
+      final deviceName = _deviceName ?? 'Sonos';
+      final groupDevices = _groupDevices
+          .where((name) => name.isNotEmpty)
+          .map((name) => {'name': name})
+          .toList();
+
+      // Build shared blocks once so we can place them both top-level and under data
+      final deviceBlock = {
+        'name': deviceName,
+        'type': 'speaker',
+        'group_devices': groupDevices,
+        'ip': _deviceIp,
+        'uuid': _coordinatorUuid,
+        'coordinator': _deviceIsCoordinator,
+      };
+
       final payload = <String, dynamic>{
-        'provider': 'native_sonos',
+        // Server-aligned envelope
+        'type': 'now_playing',
+        'provider': 'sonos',
         'provider_display_name': 'Sonos',
-        'coordinator': true,
-        'device': {
-          'name': _deviceName ?? 'Sonos',
-          'ip': _deviceIp,
-          'coordinator': _deviceIsCoordinator,
-          'uuid': _coordinatorUuid,
-        },
-        'player': {
-          'name': _deviceName ?? 'Sonos',
-          'ip': _deviceIp,
-          'coordinator': _deviceIsCoordinator,
-        },
-        'group': {
-          'name': _deviceName ?? 'Sonos',
-          'coordinator': _deviceIsCoordinator,
-        },
-        'playback': {
-          'is_playing': isPlaying,
-          'status': _transportState,
-        },
-        'track': {
-          'title': _currentTitle ?? '',
-          'album': _currentAlbum,
-          'artists': _currentArtists,
-          'album_art_url': _currentAlbumArt,
+
+        'data': {
+          // Track: use server shape
+          'track': {
+            'title': _currentTitle ?? '',
+            'artist': _currentArtists.isNotEmpty ? _currentArtists.first : '',
+            'album': _currentAlbum,
+            'artwork_url': _currentAlbumArt,
+            'duration_ms': _currentDurationMs,
+          },
+
+          // Playback: server shape + progress placeholder
+          'playback': {
+            'is_playing': isPlaying,
+            'progress_ms': _currentProgressMs,
+            'timestamp': null,
+            'status': playbackStatus,
+          },
+
+          // Device: server-required fields plus native identifiers
+          'device': deviceBlock,
+          'provider': 'sonos',
         },
       };
-      _log('Emitting native payload: $payload', level: Level.FINE);
+      _log('Emitting native payload: ${jsonEncode(payload)}',
+          level: Level.FINE);
       _controller.add(NativeSonosMessage(payload: payload));
     } catch (e) {
       _log('Error emitting payload: $e', level: Level.FINE);
@@ -164,6 +187,12 @@ class NativeSonosBridge {
   }
 
   Future<void> _subscribeToAvTransport(String host) async {
+    if (_subscriptionSid != null) {
+      _log('Already subscribed to AVTransport sid=$_subscriptionSid, skipping',
+          level: Level.FINE);
+      return;
+    }
+
     final callback = await _localCallbackUrl();
     if (callback == null) {
       _log('No reachable local IP for event callback; skipping subscription',
@@ -254,8 +283,12 @@ class NativeSonosBridge {
         return;
       }
 
+      final seqHeader = request.headers.value('seq');
+      final seq = int.tryParse(seqHeader ?? '');
+
       final body = await utf8.decodeStream(request);
-      _parseEventBody(body);
+      _logNotify(request, body);
+      _parseEventBody(body, seq: seq);
       request.response.statusCode = HttpStatus.ok;
       await request.response.close();
     } catch (e) {
@@ -267,7 +300,7 @@ class NativeSonosBridge {
     }
   }
 
-  void _parseEventBody(String body) {
+  void _parseEventBody(String body, {int? seq}) {
     try {
       final doc = xml.XmlDocument.parse(body);
       final lastChange = doc.descendants
@@ -306,10 +339,27 @@ class NativeSonosBridge {
         }
       }
 
-      _emitPayload();
+      _scheduleEmit(seq: seq);
     } catch (e) {
       _log('Event parse error: $e', level: Level.FINE);
     }
+  }
+
+  void _logNotify(HttpRequest request, String body) {
+    final sid = request.headers.value('sid') ?? _subscriptionSid ?? '<none>';
+    final seq = request.headers.value('seq') ?? '<none>';
+    _notifyCount += 1;
+    _log('NOTIFY #$_notifyCount sid=$sid seq=$seq bytes=${body.length}',
+        level: Level.FINE);
+  }
+
+  void _scheduleEmit({int? seq}) {
+    if (!_running) return;
+    _emitDebounce?.cancel();
+    // Debounce NOTIFY bursts; emit once per short window.
+    _emitDebounce = Timer(const Duration(seconds: 1), () {
+      _emitPayload();
+    });
   }
 
   void _parseDidl(String didl) {
@@ -323,8 +373,43 @@ class NativeSonosBridge {
       _currentArtists =
           creator != null && creator.isNotEmpty ? [creator] : const [];
       _currentAlbumArt = _findText(item, const ['albumarturi', 'albumarturl']);
+      _currentDurationMs = _findDurationMs(item) ?? _currentDurationMs;
     } catch (e) {
       _log('DIDL parse error: $e', level: Level.FINE);
+    }
+  }
+
+  int? _findDurationMs(xml.XmlElement root) {
+    try {
+      for (final res in root.findAllElements('res')) {
+        final dur = res.getAttribute('duration');
+        final parsed = _parseDurationMs(dur);
+        if (parsed != null) return parsed;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  int? _parseDurationMs(String? duration) {
+    if (duration == null || duration.isEmpty) return null;
+    // Formats like HH:MM:SS or HH:MM:SS.mmm
+    final parts = duration.split(':');
+    if (parts.length < 2) return null;
+    int hours = 0, minutes = 0;
+    double seconds = 0;
+    try {
+      if (parts.length == 3) {
+        hours = int.parse(parts[0]);
+        minutes = int.parse(parts[1]);
+        seconds = double.parse(parts[2]);
+      } else if (parts.length == 2) {
+        minutes = int.parse(parts[0]);
+        seconds = double.parse(parts[1]);
+      }
+      final totalMs = ((hours * 3600) + (minutes * 60) + seconds) * 1000;
+      return totalMs.round();
+    } catch (_) {
+      return null;
     }
   }
 
@@ -393,11 +478,16 @@ class NativeSonosBridge {
     });
 
     final completer = Completer<_SonosDevice?>();
+    var found = false;
     final attemptedHosts = <String>{};
     const maxHosts = 4; // Avoid hammering many responders; bail after a few
+    StreamSubscription<RawSocketEvent>? sub;
 
     Future<void> _finalize(_SonosDevice? chosen) async {
       if (completer.isCompleted) return;
+      found = true;
+      socket.readEventsEnabled = false;
+      await sub?.cancel();
       _deviceIsCoordinator = chosen?.isCoordinator ?? false;
       completer.complete(chosen);
       socket.close();
@@ -408,8 +498,32 @@ class NativeSonosBridge {
       await _finalize(null);
     });
 
-    socket.listen((event) async {
-      if (completer.isCompleted) return;
+    final pendingHosts = <String>[];
+    var processing = false;
+    Future<void> _processNext() async {
+      if (processing || found || pendingHosts.isEmpty) return;
+      processing = true;
+      final host = pendingHosts.removeAt(0);
+      final coord = await _fetchCoordinatorFromZoneGroup(host);
+      if (found) {
+        processing = false;
+        return;
+      }
+      if (coord != null) {
+        _log(
+            'Coordinator discovered via $host => ${coord.name}@${coord.ip} (uuid=${coord.uuid})',
+            level: Level.FINE);
+        await _finalize(coord);
+        processing = false;
+        return;
+      }
+      processing = false;
+      // Continue with next host if any
+      await _processNext();
+    }
+
+    sub = socket.listen((event) async {
+      if (completer.isCompleted || found) return;
       if (event == RawSocketEvent.read) {
         final dg = socket.receive();
         if (dg == null) return;
@@ -422,14 +536,8 @@ class NativeSonosBridge {
         if (attemptedHosts.contains(host)) return;
         if (attemptedHosts.length >= maxHosts) return;
         attemptedHosts.add(host);
-
-        final coord = await _fetchCoordinatorFromZoneGroup(host);
-        if (coord != null) {
-          _log(
-              'Coordinator discovered via $host => ${coord.name}@${coord.ip} (uuid=${coord.uuid})',
-              level: Level.FINE);
-          await _finalize(coord);
-        }
+        pendingHosts.add(host);
+        await _processNext();
       }
     }, onError: (_) {
       _finalize(null);
@@ -447,6 +555,7 @@ class NativeSonosBridge {
       name: _deviceName!,
       uuid: _coordinatorUuid,
       isCoordinator: true,
+      groupDevices: _groupDevices,
     );
   }
 
@@ -515,9 +624,23 @@ class NativeSonosBridge {
             (m) => (m.getAttribute('ZoneName') ?? '').toLowerCase() == 'boost');
         if (allBoost) continue;
 
+        final groupNames = <String>[];
+        for (final member in members) {
+          final name = member.getAttribute('ZoneName');
+          if (name != null && name.isNotEmpty) {
+            groupNames.add(name);
+          }
+        }
+
         for (final member in members) {
           final uuid = member.getAttribute('UUID') ?? '';
           if (uuid.toUpperCase() != coordinatorId.toUpperCase()) continue;
+
+          // IdleState: 0 = active, 1 = idle. Skip idle coordinators.
+          final idleState = member.getAttribute('IdleState');
+          if (idleState != null && idleState != '0') {
+            continue;
+          }
 
           final location = member.getAttribute('Location');
           final zoneName = member.getAttribute('ZoneName') ?? 'Sonos';
@@ -531,6 +654,7 @@ class NativeSonosBridge {
             isCoordinator: true,
             model: model,
             roomName: zoneName,
+            groupDevices: groupNames,
           );
         }
       }
@@ -557,17 +681,6 @@ class NativeSonosBridge {
     return null;
   }
 
-  void _logXml(String context, String body, {int max = 1200}) {
-    final trimmed = body.length > max ? '${body.substring(0, max)}...' : body;
-    final decoded = trimmed
-        .replaceAll('&lt;', '<')
-        .replaceAll('&gt;', '>')
-        .replaceAll('&amp;', '&')
-        .replaceAll('&quot;', '"')
-        .replaceAll('&apos;', "'");
-    _log('$context xml=${decoded.replaceAll('\n', '\\n')}', level: Level.FINE);
-  }
-
   void _log(String message,
       {Level level = Level.INFO, Object? error, StackTrace? stackTrace}) {
     _logger.log(level, message, error, stackTrace);
@@ -582,7 +695,8 @@ class _SonosDevice {
       this.isCoordinator = false,
       this.model,
       this.roomName,
-      this.friendlyName});
+      this.friendlyName,
+      this.groupDevices});
 
   final String ip;
   final String name;
@@ -591,6 +705,7 @@ class _SonosDevice {
   final String? model;
   final String? roomName;
   final String? friendlyName;
+  final List<String>? groupDevices;
 
   _SonosDevice copyWith(
       {String? ip,
@@ -599,7 +714,8 @@ class _SonosDevice {
       bool? isCoordinator,
       String? model,
       String? roomName,
-      String? friendlyName}) {
+      String? friendlyName,
+      List<String>? groupDevices}) {
     return _SonosDevice(
       ip: ip ?? this.ip,
       name: name ?? this.name,
@@ -608,6 +724,7 @@ class _SonosDevice {
       model: model ?? this.model,
       roomName: roomName ?? this.roomName,
       friendlyName: friendlyName ?? this.friendlyName,
+      groupDevices: groupDevices ?? this.groupDevices,
     );
   }
 }
