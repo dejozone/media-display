@@ -169,21 +169,25 @@ class ServicePriorityState {
   bool isServiceAvailable(ServiceType service) {
     final status = serviceStatuses[service];
     final isUnhealthy = unhealthyServices.contains(service);
+    final inRecovery = recoveryStates.containsKey(service);
     final awaiting =
         awaitingRecovery.contains(service) && service.isCloudService;
     return status != ServiceStatus.cooldown &&
-        status != ServiceStatus.disabled &&
-        !isUnhealthy &&
-        !awaiting;
+      status != ServiceStatus.disabled &&
+      !isUnhealthy &&
+      !awaiting &&
+      !inRecovery;
   }
 
   /// Check availability while ignoring awaiting-recovery flags (used as a last resort).
   bool isServiceAvailableIgnoringAwaiting(ServiceType service) {
     final status = serviceStatuses[service];
     final isUnhealthy = unhealthyServices.contains(service);
+    final inRecovery = recoveryStates.containsKey(service);
     return status != ServiceStatus.cooldown &&
-        status != ServiceStatus.disabled &&
-        !isUnhealthy;
+      status != ServiceStatus.disabled &&
+      !isUnhealthy &&
+      !inRecovery;
   }
 
   /// Get the next available service based on priority
@@ -656,7 +660,7 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
   }
 
   /// Report an error from a service
-  void reportError(ServiceType service, {bool is401 = false}) {
+  void reportError(ServiceType service, {bool is401 = false, Object? error}) {
     // 401 errors should trigger token refresh, not fallback
     if (is401) {
       _log('401 error on $service - triggering token refresh, not fallback');
@@ -732,9 +736,10 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
 
     final thresholdForLog =
         usingFallbackThresholds ? fallbackThreshold : effectiveThreshold;
+    final errDetail = error != null ? ' err=${_shortError(error)}' : '';
     _log(
       'Error on $service '
-      '(${newErrors[service]}/$thresholdForLog toward FALLBACK_ERROR_THRESHOLD=${fallbackConfig.errorThreshold})',
+      '(${newErrors[service]}/$thresholdForLog toward FALLBACK_ERROR_THRESHOLD=${fallbackConfig.errorThreshold})$errDetail',
     );
 
     final newStatuses =
@@ -1481,7 +1486,7 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
   }
 
   /// Called when a recovery probe fails
-  void onRecoveryProbeFailed(ServiceType service) {
+  void onRecoveryProbeFailed(ServiceType service, {Object? error}) {
     final recoveryState = state.recoveryStates[service];
     if (recoveryState == null) return;
 
@@ -1491,7 +1496,9 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     // configured retry interval within the window.
     final newFailures = recoveryState.consecutiveFailures + 1;
 
-    _log('Recovery probe failed for $service (failures=$newFailures)');
+    final errDetail = error != null ? ' err=${_shortError(error)}' : '';
+    _log(
+        'Recovery probe failed for $service (failures=$newFailures)$errDetail');
     final updatedState = recoveryState.copyWith(
       consecutiveFailures: newFailures,
       lastProbeTime: DateTime.now(),
@@ -1542,6 +1549,7 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     final servicesToRemove = <ServiceType>[];
     final updatedStates =
         Map<ServiceType, ServiceRecoveryState>.from(state.recoveryStates);
+    var recoveryChanged = false;
     final now = DateTime.now();
 
     for (final entry in state.recoveryStates.entries) {
@@ -1551,6 +1559,24 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       // Get service-specific config
       final fallbackConfig = _config.getFallbackConfig(service);
       final maxWindow = fallbackConfig.retryTimeSec;
+
+      // If we're in cooldown, wait until it ends before evaluating window timing.
+      if (recoveryState.inCooldown) {
+        if (recoveryState.cooldownEndTime != null &&
+            now.isAfter(recoveryState.cooldownEndTime!)) {
+          // Cooldown ended
+          recoveryState = recoveryState.copyWith(
+            inCooldown: false,
+            clearCooldownEndTime: true,
+            windowStartTime: DateTime.now(),
+          );
+          updatedStates[service] = recoveryState;
+          recoveryChanged = true;
+        } else {
+          // Still in cooldown - skip further processing for this service
+          continue;
+        }
+      }
 
       // If the recovery window is exhausted, enter cooldown and restart window
       // after cooldown instead of abandoning recovery.
@@ -1566,25 +1592,9 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
             windowStartTime: DateTime.now(),
           );
           updatedStates[service] = recoveryState;
+          recoveryChanged = true;
           _log(
               'Recovery window exhausted for $service after ${windowElapsed}s; cooling down for ${fallbackConfig.retryCooldownSec}s');
-          continue;
-        }
-      }
-
-      // Check if in cooldown
-      if (recoveryState.inCooldown) {
-        if (recoveryState.cooldownEndTime != null &&
-            now.isAfter(recoveryState.cooldownEndTime!)) {
-          // Cooldown ended
-          recoveryState = recoveryState.copyWith(
-            inCooldown: false,
-            clearCooldownEndTime: true,
-            windowStartTime: DateTime.now(),
-          );
-          updatedStates[service] = recoveryState;
-        } else {
-          // Still in cooldown - skip
           continue;
         }
       }
@@ -1593,6 +1603,7 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       if (!state.enabledServices.contains(service)) {
         _log('$service no longer enabled - stopping recovery');
         servicesToRemove.add(service);
+        recoveryChanged = true;
         continue;
       }
 
@@ -1605,6 +1616,7 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
         if (serviceIndex >= currentIndex) {
           // No longer higher priority - stop recovery
           servicesToRemove.add(service);
+          recoveryChanged = true;
           continue;
         }
       }
@@ -1629,7 +1641,8 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       updatedStates.remove(service);
     }
 
-    if (updatedStates.length != state.recoveryStates.length) {
+    if (recoveryChanged ||
+        updatedStates.length != state.recoveryStates.length) {
       state = state.copyWith(recoveryStates: updatedStates);
     }
 
@@ -1666,7 +1679,7 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     }
 
     try {
-      _log('Probing $service for recovery');
+      // _log('Probing $service for recovery');
       final isHealthy = await _probeCallback!(service);
       if (isHealthy) {
         onServiceRecovered(service);
@@ -1676,14 +1689,19 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
         if (service.isCloudService) {
           return;
         }
-        _log('Recovery probe failed for $service');
-        onRecoveryProbeFailed(service);
+        // _log('Recovery probe failed for $service');
+        onRecoveryProbeFailed(service, error: 'probe returned unhealthy');
       }
     } catch (e) {
       _log('Probe error for $service: $e');
-      onRecoveryProbeFailed(service);
+      onRecoveryProbeFailed(service, error: e);
     }
   }
+}
+
+String _shortError(Object error) {
+  final s = error.toString();
+  return s.length > 200 ? '${s.substring(0, 200)}…' : s;
 }
 
 /// Provider for service priority management

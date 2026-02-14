@@ -104,7 +104,7 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
       await stop();
     }
 
-    final bridge = _bridge ??= createNativeSonosBridge();
+    final bridge = _bridge ??= createNativeSonosBridge(enableProgress: true);
     _log(
         'Native Sonos bridge created (supported=${bridge.isSupported}, type=${bridge.runtimeType})',
         level: Level.FINE);
@@ -176,7 +176,7 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
         level: Level.FINE);
     if (!bridge.isSupported) return false;
     try {
-      _log('Probing native Sonos bridge for devices/coordinator');
+      // _log('Probing native Sonos bridge for devices/coordinator');
       final result = await bridge.probe();
       _log('Native Sonos probe result: ${result ? 'success' : 'no devices'}');
       return result;

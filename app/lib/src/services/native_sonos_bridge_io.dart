@@ -11,9 +11,13 @@ export 'package:media_display/src/services/native_sonos_bridge_stub.dart'
 /// Factory-resolved bridge for non-web platforms.
 /// On macOS, uses the native SSDP-based bridge; otherwise falls back to stub.
 class NativeSonosBridge {
-  NativeSonosBridge()
-      : _macos = Platform.isMacOS ? macos_bridge.NativeSonosBridge() : null,
-        _stub = Platform.isMacOS ? null : stub_bridge.NativeSonosBridge();
+  NativeSonosBridge({bool enableProgress = true})
+      : _macos = Platform.isMacOS
+            ? macos_bridge.NativeSonosBridge(enableProgress: enableProgress)
+            : null,
+        _stub = Platform.isMacOS
+            ? null
+            : stub_bridge.NativeSonosBridge(enableProgress: enableProgress);
 
   final macos_bridge.NativeSonosBridge? _macos;
   final stub_bridge.NativeSonosBridge? _stub;

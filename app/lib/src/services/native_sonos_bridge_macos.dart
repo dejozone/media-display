@@ -9,7 +9,9 @@ import 'package:xml/xml.dart' as xml;
 
 /// macOS-native Sonos bridge that mirrors the backend coordinator selection.
 class NativeSonosBridge {
-  NativeSonosBridge() : _logger = appLogger('NativeSonosBridgeMacOS');
+  NativeSonosBridge({bool enableProgress = true})
+      : _enableProgress = enableProgress,
+        _logger = appLogger('NativeSonosBridgeMacOS');
 
   final Logger _logger;
   final _controller = StreamController<NativeSonosMessage>.broadcast();
@@ -37,6 +39,11 @@ class NativeSonosBridge {
   int? _currentDurationMs;
   int? _currentProgressMs;
   List<_GroupDevice> _groupDevices = const [];
+  bool _enableProgress;
+  DateTime? _lastPositionFetch;
+  String? _lastPositionTrackId;
+  String? _lastPositionState;
+  DateTime? _positionBackoffUntil;
 
   static const _httpTimeout = Duration(seconds: 10);
 
@@ -110,6 +117,8 @@ class NativeSonosBridge {
     if (!_running || _deviceIp == null) return;
 
     try {
+      await _maybeRefreshPosition();
+
       final activeStates = {'PLAYING', 'TRANSITIONING', 'BUFFERING'};
       final isPlaying = activeStates.contains(_transportState);
       final playbackStatus = _transportState.toLowerCase();
@@ -154,7 +163,7 @@ class NativeSonosBridge {
           'playback': {
             'is_playing': isPlaying,
             'progress_ms': _currentProgressMs,
-            'timestamp': null,
+            'timestamp': DateTime.now().millisecondsSinceEpoch,
             'status': playbackStatus,
           },
 
@@ -309,6 +318,7 @@ class NativeSonosBridge {
   void _parseEventBody(String body, {int? seq}) {
     try {
       final doc = xml.XmlDocument.parse(body);
+      // _log('sonos event: ${doc.toXmlString(pretty: true)}', level: Level.FINE);
       final lastChange = doc.descendants
           .whereType<xml.XmlElement>()
           .where((e) => e.name.local.toLowerCase() == 'lastchange')
@@ -390,6 +400,97 @@ class NativeSonosBridge {
     }
   }
 
+  Future<void> _maybeRefreshPosition() async {
+    if (!_enableProgress) {
+      _currentProgressMs = null;
+      return;
+    }
+
+    if (_positionBackoffUntil != null &&
+        DateTime.now().isBefore(_positionBackoffUntil!)) {
+      return;
+    }
+
+    const activeStates = {'PLAYING', 'BUFFERING'};
+    if (!activeStates.contains(_transportState)) return;
+
+    final now = DateTime.now();
+    final trackChanged = _lastPositionTrackId != _currentTrackId;
+    final stateChanged = _lastPositionState != _transportState;
+    final tooRecent = _lastPositionFetch != null &&
+        now.difference(_lastPositionFetch!) < const Duration(seconds: 1);
+
+    if (!trackChanged && !stateChanged && tooRecent) return;
+
+    await _refreshPosition(host: _deviceIp);
+    _lastPositionFetch = now;
+    _lastPositionTrackId = _currentTrackId;
+    _lastPositionState = _transportState;
+  }
+
+  Future<void> _refreshPosition({String? host}) async {
+    // Sonos does not include position in AVTransport events; fetch it via GetPositionInfo.
+    host ??= _deviceIp;
+    _log(
+        'Attempting to refresh position via GetPositionInfo for $_deviceName at $host',
+        level: Level.FINE);
+    if (host == null) return;
+    try {
+      _log('Fetching position via GetPositionInfo', level: Level.FINE);
+      final client = HttpClient();
+      final req = await client.postUrl(
+          Uri.parse('http://$host:1400/MediaRenderer/AVTransport/Control'));
+      req.headers
+          .set(HttpHeaders.contentTypeHeader, 'text/xml; charset="utf-8"');
+      req.headers.set('SOAPACTION',
+          '"urn:schemas-upnp-org:service:AVTransport:1#GetPositionInfo"');
+      const envelope = '<?xml version="1.0" encoding="utf-8"?>\n'
+          '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">\n'
+          '  <s:Body>\n'
+          '    <u:GetPositionInfo xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">\n'
+          '      <InstanceID>0</InstanceID>\n'
+          '    </u:GetPositionInfo>\n'
+          '  </s:Body>\n'
+          '</s:Envelope>';
+      req.write(envelope);
+
+      final resp = await req.close();
+      if (resp.statusCode != 200) {
+        final bodyText = await resp.transform(utf8.decoder).join();
+        _log(
+            'GetPositionInfo failed with status ${resp.statusCode} ${resp.reasonPhrase} $bodyText',
+            level: Level.FINE);
+        client.close(force: true);
+        return;
+      }
+      final body = await resp.transform(utf8.decoder).join();
+      _log('GetPositionInfo response: $body', level: Level.FINE);
+      client.close(force: true);
+
+      final doc = xml.XmlDocument.parse(body);
+      final relTime = doc.findAllElements('RelTime').firstOrNull?.innerText;
+      final trackDuration =
+          doc.findAllElements('TrackDuration').firstOrNull?.innerText;
+
+      _log('GetPositionInfo relTime=$relTime trackDuration=$trackDuration',
+          level: Level.FINE);
+
+      final relMs = _parseDurationMs(relTime);
+      if (relMs != null) {
+        _currentProgressMs = relMs;
+      }
+      final durMs = _parseDurationMs(trackDuration);
+      if (durMs != null && _currentDurationMs == null) {
+        _currentDurationMs = durMs;
+      }
+
+      // Success resets error streak/backoff
+      _positionBackoffUntil = null;
+    } catch (e) {
+      _log('GetPositionInfo error: $e', level: Level.FINE);
+    }
+  }
+
   String? _findTrackId(xml.XmlElement root) {
     try {
       for (final res in root.findAllElements('res')) {
@@ -422,6 +523,7 @@ class NativeSonosBridge {
 
   int? _parseDurationMs(String? duration) {
     if (duration == null || duration.isEmpty) return null;
+    if (duration.toUpperCase() == 'NOT_IMPLEMENTED') return null;
     // Formats like HH:MM:SS or HH:MM:SS.mmm
     final parts = duration.split(':');
     if (parts.length < 2) return null;

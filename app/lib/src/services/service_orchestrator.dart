@@ -505,9 +505,9 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     if (!_nativeSonosSupported) {
       _log(
           'Native local Sonos not supported on this platform; skipping activation');
-      ref
-          .read(servicePriorityProvider.notifier)
-          .reportError(ServiceType.nativeLocalSonos);
+      ref.read(servicePriorityProvider.notifier).reportError(
+          ServiceType.nativeLocalSonos,
+          error: 'native bridge not supported on this platform');
       return;
     }
 
@@ -575,7 +575,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       // Report error to priority manager
       ref
           .read(servicePriorityProvider.notifier)
-          .reportError(ServiceType.directSpotify);
+          .reportError(ServiceType.directSpotify, error: spotifyState.error);
     }
 
     // Check for fallback mode
@@ -583,9 +583,9 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
         spotifyState.mode == SpotifyPollingMode.offline) {
       _log(
           'Direct Spotify in fallback/offline mode - triggering service fallback');
-      ref
-          .read(servicePriorityProvider.notifier)
-          .reportError(ServiceType.directSpotify);
+      ref.read(servicePriorityProvider.notifier).reportError(
+          ServiceType.directSpotify,
+          error: 'mode=${spotifyState.mode.name}');
       return;
     }
 
@@ -651,9 +651,9 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
           return;
         }
         _log('NativeSonos not connected; reporting error/fallback');
-        ref
-            .read(servicePriorityProvider.notifier)
-            .reportError(ServiceType.nativeLocalSonos);
+        ref.read(servicePriorityProvider.notifier).reportError(
+            ServiceType.nativeLocalSonos,
+            error: bridgeState.error ?? 'disconnected');
       }
       return;
     }
@@ -670,6 +670,12 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     final isPlaying = playback?['is_playing'] as bool? ?? false;
     final status = playback?['status'] as String?;
     final hasTrackInfo = _hasValidTrackInfo(track);
+    final statusLower = status?.toLowerCase() ?? '';
+    final startupWithoutTrack = isCurrent &&
+        !hasTrackInfo &&
+        (statusLower.isEmpty ||
+            statusLower == 'unknown' ||
+            statusLower == 'idle');
 
     _lastIsPlaying[ServiceType.nativeLocalSonos] = isPlaying;
 
@@ -681,7 +687,8 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       }
     } else if (_config.enableServiceCycling &&
         isCurrent &&
-        !_waitingForPrimaryResume) {
+        !_waitingForPrimaryResume &&
+        !startupWithoutTrack) {
       _handleSonosPausedWithStatus(
         ServiceType.nativeLocalSonos,
         status,

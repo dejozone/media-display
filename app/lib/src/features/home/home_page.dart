@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:dio/dio.dart';
 import 'package:go_router/go_router.dart';
 import 'package:media_display/src/services/auth_service.dart';
 import 'package:media_display/src/services/auth_state.dart';
@@ -110,7 +111,7 @@ class _HomePageState extends ConsumerState<HomePage>
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() => error = e.toString());
+      setState(() => error = _friendlyError(e));
     } finally {
       if (mounted) setState(() => loading = false);
     }
@@ -156,7 +157,7 @@ class _HomePageState extends ConsumerState<HomePage>
       // Note: No need to call ws.sendConfig() here - the orchestrator already
       // sends config when it activates/switches services
     } catch (e) {
-      if (mounted) setState(() => error = e.toString());
+      if (mounted) setState(() => error = _friendlyError(e));
     } finally {
       if (mounted) setState(() => savingSettings = false);
     }
@@ -241,7 +242,7 @@ class _HomePageState extends ConsumerState<HomePage>
           setState(() => error = 'Failed to open Spotify login');
         }
       } catch (e) {
-        if (mounted) setState(() => error = e.toString());
+        if (mounted) setState(() => error = _friendlyError(e));
       } finally {
         if (mounted) setState(() => launchingSpotify = false);
       }
@@ -254,6 +255,16 @@ class _HomePageState extends ConsumerState<HomePage>
 
   Future<void> _handleSonosToggle(bool enable) async {
     await _updateSettings({'sonos_enabled': enable});
+  }
+
+  String _friendlyError(Object e) {
+    if (e is DioException) {
+      final code = e.response?.statusCode;
+      if (code != null && code >= 400) {
+        return 'There is a server issue. Please check back later (code: $code)';
+      }
+    }
+    return e.toString();
   }
 
   @override

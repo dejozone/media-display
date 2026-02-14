@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:dio/dio.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
@@ -92,7 +93,7 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
       _displayNameController.text = acc['display_name']?.toString() ?? '';
     } catch (e) {
       if (!mounted) return;
-      error = e.toString();
+      error = _friendlyError(e);
     } finally {
       if (mounted) setState(() => loading = false);
     }
@@ -155,7 +156,7 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
       success = 'Saved';
     } catch (e) {
       if (!mounted) return;
-      error = e.toString();
+      error = _friendlyError(e);
     } finally {
       if (mounted) setState(() => saving = false);
     }
@@ -216,15 +217,13 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
       ref
           .read(eventsWsProvider.notifier)
           .updateCachedSettings(updatedSettingsMap);
-      ref
-          .read(serviceOrchestratorProvider.notifier)
-          .updateServicesEnabled(
+      ref.read(serviceOrchestratorProvider.notifier).updateServicesEnabled(
             spotifyEnabled: spotifyEnabled,
             sonosEnabled: sonosEnabled,
           );
     } catch (e) {
       if (!mounted) return;
-      error = e.toString();
+      error = _friendlyError(e);
     } finally {
       if (mounted) setState(() => saving = false);
     }
@@ -254,7 +253,7 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
       }
     } catch (e) {
       if (!mounted) return;
-      setState(() => error = e.toString());
+      setState(() => error = _friendlyError(e));
     } finally {
       if (mounted) {
         setState(() {
@@ -508,8 +507,7 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
                           FocusTraversalOrder(
                             order: const NumericFocusOrder(3),
                             child: _AvatarManagementSection(
-                              userId:
-                                  user?['user_id']?.toString() ??
+                              userId: user?['user_id']?.toString() ??
                                   user?['id']?.toString() ??
                                   '',
                               onAvatarChanged: _load,
@@ -755,12 +753,12 @@ class _AvatarManagementSectionState
 
   // HEIC/HEIF only supported on mobile/desktop, not web
   Set<String> get _allowedExtensions => {
-    'png',
-    'jpg',
-    'jpeg',
-    'bmp',
-    if (!kIsWeb) ...['heic', 'heif'],
-  };
+        'png',
+        'jpg',
+        'jpeg',
+        'bmp',
+        if (!kIsWeb) ...['heic', 'heif'],
+      };
 
   String _extensionFromName(String name) {
     final dotIndex = name.lastIndexOf('.');
@@ -810,9 +808,8 @@ class _AvatarManagementSectionState
       final ext = _extensionFromName(pickedFile.name);
       if (!_allowedExtensions.contains(ext)) {
         if (mounted) {
-          final formats = kIsWeb
-              ? 'PNG, JPG, or BMP'
-              : 'PNG, JPG, BMP, or HEIC';
+          final formats =
+              kIsWeb ? 'PNG, JPG, or BMP' : 'PNG, JPG, BMP, or HEIC';
           setState(() {
             _error = 'Unsupported file type. Use $formats.';
             _uploading = false;
@@ -878,8 +875,8 @@ class _AvatarManagementSectionState
       if (mounted &&
           context.findAncestorStateOfType<_AccountSettingsPageState>() !=
               null) {
-        final pageState = context
-            .findAncestorStateOfType<_AccountSettingsPageState>()!;
+        final pageState =
+            context.findAncestorStateOfType<_AccountSettingsPageState>()!;
         pageState.setState(() {
           pageState._pendingImageBytes = rawBytes;
           pageState.showCropper = true;
@@ -890,7 +887,7 @@ class _AvatarManagementSectionState
     } catch (e) {
       if (mounted) {
         setState(() {
-          _error = e.toString();
+          _error = _friendlyError(e);
           _uploading = false;
         });
       }
@@ -915,9 +912,8 @@ class _AvatarManagementSectionState
       );
 
       final isPng = _pendingFilename.endsWith('.png');
-      final encoded = isPng
-          ? img.encodePng(resized)
-          : img.encodeJpg(resized, quality: 92);
+      final encoded =
+          isPng ? img.encodePng(resized) : img.encodeJpg(resized, quality: 92);
 
       final operations = ref.read(avatarOperationsProvider);
       await operations.uploadAvatarBytes(
@@ -939,7 +935,7 @@ class _AvatarManagementSectionState
     } catch (e) {
       if (mounted) {
         setState(() {
-          _error = e.toString();
+          _error = _friendlyError(e);
         });
       }
     }
@@ -1108,9 +1104,9 @@ class _AvatarManagementSectionState
                     final availableWidth = constraints.maxWidth;
                     final spacing = 12.0;
                     final crossAxisCount = (availableWidth / 112).floor().clamp(
-                      3,
-                      6,
-                    );
+                          3,
+                          6,
+                        );
                     final itemSize =
                         ((availableWidth - (spacing * (crossAxisCount - 1))) /
                                 crossAxisCount)
@@ -1294,8 +1290,8 @@ class _AvatarGridItemState extends State<_AvatarGridItem> {
                 color: _focused
                     ? const Color(0xFF5AC8FA)
                     : (widget.avatar.isSelected
-                          ? const Color(0xFF5AC8FA)
-                          : Colors.white.withValues(alpha: 0.08)),
+                        ? const Color(0xFF5AC8FA)
+                        : Colors.white.withValues(alpha: 0.08)),
                 width: _focused ? 3.0 : (widget.avatar.isSelected ? 2.5 : 1.5),
               ),
               boxShadow: _focused
@@ -1416,4 +1412,14 @@ class _AvatarGridItemState extends State<_AvatarGridItem> {
       ),
     );
   }
+}
+
+String _friendlyError(Object e) {
+  if (e is DioException) {
+    final code = e.response?.statusCode;
+    if (code != null && code >= 400) {
+      return 'There is a server issue. Please check back later (code: $code)';
+    }
+  }
+  return e.toString();
 }
