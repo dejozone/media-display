@@ -114646,61 +114646,60 @@ if(p<a){$.cw().ag(B.j,"Idle check: skip (recent reset "+p+"s ago < threshold="+a
 return}}if(s>=a){$.cw().ag(B.j,"Idle reset: no playback for "+s+"s (threshold="+a+"s) - resetting services")
 o.ay=new A.bu(Date.now(),0,!1)
 o.f2()}},
-a9u(a1,a2){var s,r,q,p,o,n,m,l,k,j,i,h,g,f,e,d,c,b,a=this,a0=$.cw()
-a0.ag(B.j,"Services updated: spotify="+a2+", sonos="+a1)
-if(!a2){a0.ag(B.j,"Spotify disabled - stopping direct polling")
-A.P(a).M($.dO().gaY(),t.R).nY()}s=A.aQ(t.c)
-for(a0=a.dy,a0=new A.cC(a0,A.j(a0).i("cC<1,2>")).gO(0);a0.n();){r=a0.d
+a9u(a0,a1){var s,r,q,p,o,n,m,l,k,j,i,h,g,f,e,d,c,b=this,a=$.cw()
+a.ag(B.j,"Services updated: spotify="+a1+", sonos="+a0)
+if(!a1){a.ag(B.j,"Spotify disabled - stopping direct polling")
+A.P(b).M($.dO().gaY(),t.R).nY()}s=A.aQ(t.c)
+for(a=b.dy,a=new A.cC(a,A.j(a).i("cC<1,2>")).gO(0);a.n();){r=a.d
 if(r.b.b!==B.cG){q=r.a
 if(q==="sonos")p=B.v
 else if(q==="native_sonos")p=B.ai
 else{q=q==="spotify"?B.H:null
-p=q}if(p!=null)s.C(0,p)}}a0=s.j(0)
+p=q}if(p!=null)s.C(0,p)}}a=s.j(0)
 q=$.cw()
-q.ag(B.j,"Unhealthy services: "+a0)
-a0=A.P(a)
+q.ag(B.j,"Unhealthy services: "+a)
+a=A.P(b)
 o=$.cP()
 n=t.O
-a0.M(o.gaY(),n).a9x(s)
-a0=t.Y
-m=A.P(a).M(o,a0).b.hI(0)
-l=A.P(a).M(o,a0)
-A.P(a).M(o.gaY(),n).a9t(!1,a1,a2,s)
-k=A.P(a).M(o,a0)
+a.M(o.gaY(),n).a9x(s)
+a=t.Y
+m=A.P(b).M(o,a).b.hI(0)
+l=A.P(b).M(o,a)
+A.P(b).M(o.gaY(),n).a9t(!1,a0,a1,s)
+k=A.P(b).M(o,a)
 j=k.c
-a0=k.b
-i=a0.hI(0)
+a=k.b
+i=a.hI(0)
 if(!(!m.p(0,B.ai)&&i.p(0,B.ai)))h=!m.p(0,B.v)&&i.p(0,B.v)
 else h=!0
-if(h){g=a.avB(k)
-if(g!=null)if(j==null||a.Z8(g,j)){q.ag(B.j,"Sonos enabled; activating "+g.j(0))
-A.P(a).M(o.gaY(),n).mY(g)
+if(h){g=b.avB(k)
+if(g!=null)if(j==null||b.Z8(g,j)){q.ag(B.j,"Sonos enabled; activating "+g.j(0))
+A.P(b).M(o.gaY(),n).mY(g)
 return}}if(l.c!=j){if(j==null){q.ag(B.j,"Service switch cleared current service; sending user settings config")
-A.P(a).M($.fg().gaY(),t.g).kI()}else q.ag(B.j,"Service switch already handled by listener")
-return}if(j==null){if(A.P(a).M(o.gaY(),n).EW()==null&&i.ga3(i))q.ag(B.j,"No services to activate")}else if(!a0.p(0,j)){q.ag(B.j,"Current service "+j.j(0)+" is disabled but no switch - forcing")
-A.P(a).M(o.gaY(),n).EW()}else{if(m!==i){f=i.cH(m)
+A.P(b).M($.fg().gaY(),t.g).kI()}else q.ag(B.j,"Service switch already handled by listener")
+return}if(j==null){if(A.P(b).M(o.gaY(),n).EW()==null&&i.ga3(i))q.ag(B.j,"No services to activate")}else if(!a.p(0,j)){q.ag(B.j,"Current service "+j.j(0)+" is disabled but no switch - forcing")
+A.P(b).M(o.gaY(),n).EW()}else{if(m!==i){f=i.cH(m)
 e=m.cH(i)
-a0=a.gas9()
+a=b.gas9()
 l=A.j(f).i("aM<1>")
-d=A.dE(new A.aM(f,a0,l),l.i("m.E"))
+d=A.dE(new A.aM(f,a,l),l.i("m.E"))
 l=A.j(e).i("aM<1>")
-c=A.dE(new A.aM(e,a0,l),l.i("m.E"))
-if(c.a===0&&d.a!==0&&d.eZ(0,new A.atL(a,j)))q.ag(B.j,"Services changed without switch (lower-priority server additions only); suppressing user settings config")
+if(A.dE(new A.aM(e,a,l),l.i("m.E")).a===0&&d.a!==0&&d.eZ(0,new A.atL(b,j)))q.ag(B.j,"Services changed without switch (lower-priority server additions only); suppressing user settings config")
 else{q.ag(B.j,"Services changed without switch - sending user settings config")
-A.P(a).M($.fg().gaY(),t.g).kI()}}f=i.cH(m)
-if(f.gbW(f)&&a.cx.p(0,j)){q.ag(B.j,"New services enabled while current service not playing: "+f.j(0))
-a0=a.cx
-a0.V(0)
-a0.C(0,j)
-a0=a.Q
-if(a0!=null)a0.a1()
-a.Q=null
-b=a.XG()
-if(b!=null){q.ag(B.j,"Cycling to newly enabled service: "+b.j(0))
-a.cy=!0
-if(a.db==null)a.db=j
-A.P(a).M(o.gaY(),n).pg(b)}else{q.ag(B.j,"No new services available to try")
-a.a14()}}}},
+A.P(b).M($.fg().gaY(),t.g).kI()}}f=i.cH(m)
+if(f.gbW(f)&&b.cx.p(0,j)){q.ag(B.j,"New services enabled while current service not playing: "+f.j(0))
+a=b.cx
+a.V(0)
+a.C(0,j)
+a=b.Q
+if(a!=null)a.a1()
+b.Q=null
+c=b.XG()
+if(c!=null){q.ag(B.j,"Cycling to newly enabled service: "+c.j(0))
+b.cy=!0
+if(b.db==null)b.db=j
+A.P(b).M(o.gaY(),n).pg(c)}else{q.ag(B.j,"No new services available to try")
+b.a14()}}}},
 f2(){var s,r,q,p,o=this
 $.cw().ag(B.j,"Reset requested")
 o.fx=!0

@@ -1957,8 +1957,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
         final serverRemovals =
             newlyDisabledServices.where(_isServerManagedService).toSet();
 
-        final suppressForLowerServerAdds = currentService != null &&
-            serverRemovals.isEmpty &&
+        final suppressForLowerServerAdds = serverRemovals.isEmpty &&
             serverAdds.isNotEmpty &&
             serverAdds.every((s) => _isLowerPriority(s, currentService));
 
