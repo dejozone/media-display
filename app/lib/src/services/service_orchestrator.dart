@@ -114,6 +114,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
   DateTime? _lastIdleResetAt;
 
   bool _initialized = false;
+  bool _authInitListenerStarted = false;
 
   // Service cycling state
   ServiceType? _pausedService;
@@ -162,6 +163,26 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
   Future<void> _initialize() async {
     if (_initialized) return;
+
+    // Defer all orchestration until user is authenticated. The Home page may
+    // touch this notifier on the login screen; we should stay idle there.
+    final auth = ref.read(authStateProvider);
+    if (!auth.isAuthenticated) {
+      _log('Auth not available; deferring initialization until login');
+
+      // Listen once for auth to become available, then retry initialization.
+      if (!_authInitListenerStarted) {
+        _authInitListenerStarted = true;
+        ref.listen<AuthState>(authStateProvider, (prev, next) {
+          if (next.isAuthenticated) {
+            _log('Auth available; resuming initialization');
+            _initialize();
+          }
+        });
+      }
+      return;
+    }
+
     _initialized = true;
 
     // Set up service status callback to receive health updates from WebSocket
@@ -178,7 +199,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
         .setProbeCallback(_probeServiceForRecovery);
 
     // Load user settings to determine which services are enabled
-    await _loadServicesSettings();
+    final settingsLoaded = await _loadServicesSettings();
 
     // Start listening to service changes
     _startServiceWatchers();
@@ -191,8 +212,13 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     _suppressPriorityChanges = false;
 
     // Run the full initial activation flow (like first login) so config is sent
-    // even after a reset.
-    ref.read(servicePriorityProvider.notifier).restartInitialActivation();
+    // even after a reset. Skip if settings failed to load (e.g., temporary
+    // auth issues) to avoid activating with an empty priority list.
+    if (settingsLoaded) {
+      ref.read(servicePriorityProvider.notifier).restartInitialActivation();
+    } else {
+      _log('Skipping initial activation because settings failed to load');
+    }
   }
 
   /// Probe a service for recovery (used by priority manager)
@@ -226,11 +252,13 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     }
   }
 
-  Future<void> _loadServicesSettings() async {
+  Future<bool> _loadServicesSettings() async {
     try {
       final user = await ref.read(userServiceProvider).fetchMe();
       final userId = user['id']?.toString() ?? '';
-      if (userId.isEmpty) return;
+      if (userId.isEmpty) {
+        return false;
+      }
 
       final settings =
           await ref.read(settingsServiceProvider).fetchSettingsForUser(userId);
@@ -245,8 +273,11 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
             sonosEnabled: sonosEnabled,
             nativeSonosSupported: _nativeSonosSupported,
           );
+
+      return true;
     } catch (e) {
       _log('Failed to load settings: $e');
+      return false;
     }
   }
 

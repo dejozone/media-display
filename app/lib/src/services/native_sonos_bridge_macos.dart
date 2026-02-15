@@ -433,11 +433,11 @@ class NativeSonosBridge {
     // Sonos does not include position in AVTransport events; fetch it via GetPositionInfo.
     host ??= _deviceIp;
     _log(
-        'Attempting to refresh position via GetPositionInfo for $_deviceName at $host',
+        'Attempting to refresh content position via GetPositionInfo for $_deviceName at $host',
         level: Level.FINE);
     if (host == null) return;
     try {
-      _log('Fetching position via GetPositionInfo', level: Level.FINE);
+      _log('Fetching content position via GetPositionInfo', level: Level.FINE);
       final client = HttpClient();
       final req = await client.postUrl(
           Uri.parse('http://$host:1400/MediaRenderer/AVTransport/Control'));
