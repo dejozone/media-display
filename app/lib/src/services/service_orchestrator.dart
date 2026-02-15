@@ -305,7 +305,8 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
         currentService != ServiceType.nativeLocalSonos;
     final sonosNewlyDisabled = sonosWasEnabled && sonosDisabled;
     if (leftNativeSonos ||
-      (sonosNewlyDisabled && currentService != ServiceType.nativeLocalSonos)) {
+        (sonosNewlyDisabled &&
+            currentService != ServiceType.nativeLocalSonos)) {
       _log(
           'Stopping native Sonos bridge (reason=${leftNativeSonos ? 'service switched' : 'sonos disabled'})');
       ref.read(nativeSonosProvider.notifier).stop();
@@ -1162,6 +1163,12 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     );
   }
 
+  bool _isServerManagedService(ServiceType service) {
+    // Server-managed paths are handled by backend polling/streaming.
+    return service == ServiceType.localSonos ||
+        service == ServiceType.cloudSpotify;
+  }
+
   bool _isHigherPriority(ServiceType candidate, ServiceType reference) {
     final order = _config.priorityOrderOfServices;
     final idxCandidate = order.indexOf(candidate);
@@ -1904,7 +1911,8 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     // the server stops polling/streaming.
     if (switchOccurred) {
       if (currentService == null) {
-        _log('Service switch cleared current service; sending user settings config');
+        _log(
+            'Service switch cleared current service; sending user settings config');
         ref.read(eventsWsProvider.notifier).sendConfigForUserSettings();
       } else {
         _log('Service switch already handled by listener');
@@ -1935,8 +1943,33 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       // config to reflect the full enabled set and avoid multiple per-service
       // configs when toggling services without a switch.
       if (servicesChanged) {
-        _log('Services changed without switch - sending user settings config');
-        ref.read(eventsWsProvider.notifier).sendConfigForUserSettings();
+        final newlyEnabledServices =
+            newEnabledServices.difference(previousEnabledServices);
+        final newlyDisabledServices =
+            previousEnabledServices.difference(newEnabledServices);
+        // Consider only server-managed services (backend-polling). If the only
+        // changes are additions of lower-priority server-managed services while
+        // a higher-priority service remains active, suppress sending config to
+        // avoid enabling lower-tier polling (e.g., enabling Spotify while native
+        // Sonos is active).
+        final serverAdds =
+            newlyEnabledServices.where(_isServerManagedService).toSet();
+        final serverRemovals =
+            newlyDisabledServices.where(_isServerManagedService).toSet();
+
+        final suppressForLowerServerAdds = currentService != null &&
+            serverRemovals.isEmpty &&
+            serverAdds.isNotEmpty &&
+            serverAdds.every((s) => _isLowerPriority(s, currentService));
+
+        if (suppressForLowerServerAdds) {
+          _log(
+              'Services changed without switch (lower-priority server additions only); suppressing user settings config');
+        } else {
+          _log(
+              'Services changed without switch - sending user settings config');
+          ref.read(eventsWsProvider.notifier).sendConfigForUserSettings();
+        }
       }
 
       // Check if we should re-evaluate cycling

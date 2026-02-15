@@ -51,7 +51,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   late final WsRetryPolicy _retryPolicy;
   bool _connecting = false;
   bool _connectionConfirmed = false;
-    bool _hasConnectedOnce =
+  bool _hasConnectedOnce =
       false; // Track first successful WS ready in this auth session
   Map<String, dynamic>? _lastSettings;
   bool _useDirectPolling = false;
@@ -626,17 +626,17 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
         }
       }
 
-        // Honor priority order: if a server-hosted service isn't in the
-        // configured priority list, omit it entirely from the config payload.
-        final priorityOrder = env.priorityOrderOfServices;
-        final sonosAllowed =
+      // Honor priority order: if a server-hosted service isn't in the
+      // configured priority list, omit it entirely from the config payload.
+      final priorityOrder = env.priorityOrderOfServices;
+      final sonosAllowed =
           priorityOrder.contains(ServiceType.localSonos); // server Sonos
-        final cloudSpotifyAllowed =
+      final cloudSpotifyAllowed =
           priorityOrder.contains(ServiceType.cloudSpotify); // server Spotify
 
-        // Get user's enabled settings
-        final userSpotifyEnabled = settings?['spotify_enabled'] == true;
-        final userSonosEnabled = settings?['sonos_enabled'] == true;
+      // Get user's enabled settings
+      final userSpotifyEnabled = settings?['spotify_enabled'] == true;
+      final userSonosEnabled = settings?['sonos_enabled'] == true;
 
       // If both are disabled, delegate to sendDisableAllConfig unless we just
       // sent an equivalent disable payload very recently (to avoid duplicates
@@ -740,24 +740,24 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
         return;
       }
 
-        final baseWsConfig = service.webSocketConfig;
-        final priority = ref.read(servicePriorityProvider);
-        final env = ref.read(envConfigProvider);
+      final baseWsConfig = service.webSocketConfig;
+      final priority = ref.read(servicePriorityProvider);
+      final env = ref.read(envConfigProvider);
 
-        // Honor priority order: if server-hosted services are not present in the
-        // configured order, do not send any Sonos/Spotify server config toggles.
-        final priorityOrder = env.priorityOrderOfServices;
-        final sonosAllowed = priorityOrder.contains(ServiceType.localSonos);
-        final cloudSpotifyAllowed =
+      // Honor priority order: if server-hosted services are not present in the
+      // configured order, do not send any Sonos/Spotify server config toggles.
+      final priorityOrder = env.priorityOrderOfServices;
+      final sonosAllowed = priorityOrder.contains(ServiceType.localSonos);
+      final cloudSpotifyAllowed =
           priorityOrder.contains(ServiceType.cloudSpotify);
 
-        // If the requested service itself is not allowed, skip sending config.
-        if ((service == ServiceType.localSonos && !sonosAllowed) ||
+      // If the requested service itself is not allowed, skip sending config.
+      if ((service == ServiceType.localSonos && !sonosAllowed) ||
           (service == ServiceType.cloudSpotify && !cloudSpotifyAllowed)) {
         _log(
-          'sendConfigForService skipped for $service (not in priority order)');
+            'sendConfigForService skipped for $service (not in priority order)');
         return;
-        }
+      }
 
       // Update direct polling flag based on the service being activated
       // This is critical for the WebSocket listener to process/ignore incoming data correctly

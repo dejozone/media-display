@@ -461,13 +461,13 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
 
     // Update statuses for disabled services
     final newStatuses =
-      Map<ServiceType, ServiceStatus>.from(state.serviceStatuses);
+        Map<ServiceType, ServiceStatus>.from(state.serviceStatuses);
     final newErrors = Map<ServiceType, int>.from(state.errorCounts);
     final newCooldowns = Map<ServiceType, DateTime?>.from(state.cooldownEnds);
     final newRetryWindows =
-      Map<ServiceType, DateTime?>.from(state.retryWindowStarts);
+        Map<ServiceType, DateTime?>.from(state.retryWindowStarts);
     final newLastRetries =
-      Map<ServiceType, DateTime?>.from(state.lastRetryAttempts);
+        Map<ServiceType, DateTime?>.from(state.lastRetryAttempts);
     for (final service in ServiceType.values) {
       if (!enabled.contains(service)) {
         newStatuses[service] = ServiceStatus.disabled;
@@ -583,7 +583,8 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     final status = state.serviceStatuses[service];
     final inRecovery = state.recoveryStates.containsKey(service);
     if (status == ServiceStatus.cooldown || inRecovery) {
-      _log('Skipping activation of $service (status=$status, inRecovery=$inRecovery)');
+      _log(
+          'Skipping activation of $service (status=$status, inRecovery=$inRecovery)');
       return;
     }
 
@@ -1420,8 +1421,8 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     _fallbackThresholdConsumed[failedService] = true;
 
     final currentService = state.currentService;
-    final onlyEnabledFailed =
-        state.effectiveOrder.length == 1 && state.effectiveOrder.first == failedService;
+    final onlyEnabledFailed = state.effectiveOrder.length == 1 &&
+        state.effectiveOrder.first == failedService;
 
     // If nothing is currently active but this is the only enabled service,
     // allow recovery so probes can bring it back.
@@ -1434,7 +1435,9 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
         : -1;
 
     if (failedIndex < 0 || (currentIndex < 0 && !onlyEnabledFailed)) return;
-    if (currentService != null && failedIndex >= currentIndex && !onlyEnabledFailed) {
+    if (currentService != null &&
+        failedIndex >= currentIndex &&
+        !onlyEnabledFailed) {
       // Failed service is lower priority or same; skip unless it's the only enabled service
       return;
     }
@@ -1521,7 +1524,7 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     // Reset service status/bookkeeping so activation is not blocked by stale
     // cooldowns or retry windows.
     final newStatuses =
-      Map<ServiceType, ServiceStatus>.from(state.serviceStatuses);
+        Map<ServiceType, ServiceStatus>.from(state.serviceStatuses);
     newStatuses[service] = ServiceStatus.standby;
 
     final newErrors = Map<ServiceType, int>.from(state.errorCounts);
@@ -1531,11 +1534,11 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     newCooldowns[service] = null;
 
     final newRetryWindows =
-      Map<ServiceType, DateTime?>.from(state.retryWindowStarts);
+        Map<ServiceType, DateTime?>.from(state.retryWindowStarts);
     newRetryWindows[service] = null;
 
     final newLastRetries =
-      Map<ServiceType, DateTime?>.from(state.lastRetryAttempts);
+        Map<ServiceType, DateTime?>.from(state.lastRetryAttempts);
     newLastRetries[service] = null;
 
     state = state.copyWith(
@@ -1556,9 +1559,9 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     final currentStatus = state.serviceStatuses[service];
     final shouldPromote =
         (current == null && state.enabledServices.contains(service)) ||
-        (highestEnabled == service && current != service) ||
-        (serviceIndex >= 0 && serviceIndex < currentIndex) ||
-        (current == service && currentStatus != ServiceStatus.active);
+            (highestEnabled == service && current != service) ||
+            (serviceIndex >= 0 && serviceIndex < currentIndex) ||
+            (current == service && currentStatus != ServiceStatus.active);
 
     if (shouldPromote && state.enabledServices.contains(service)) {
       activateService(service);
