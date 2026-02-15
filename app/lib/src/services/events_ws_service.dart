@@ -910,7 +910,9 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
 
         if (shouldExplicitlyEnableSpotifyForRecovery()) {
           setSpotify(true);
-        } else if (shouldExplicitlyDisableSpotify()) {
+        } else {
+          // Always disable backend Spotify when native Sonos is active so the
+          // lower-priority cloud fallback fully stops after recovery.
           setSpotify(false);
           poll.remove('spotify');
         }

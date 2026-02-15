@@ -187,6 +187,15 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
   }
 
   void _handleMessage(NativeSonosMessage message) {
+    // Ignore stray messages after the bridge has been stopped. Without this,
+    // late payloads can flip state back to connected=true and block a fresh
+    // start when Sonos is re-enabled.
+    if (!state.isRunning) {
+      _log('Ignoring native Sonos message because bridge is not running',
+          level: Level.FINE);
+      return;
+    }
+
     if (message.serviceStatus != null) {
       _log('Native Sonos serviceStatus: ${message.serviceStatus}');
     }
