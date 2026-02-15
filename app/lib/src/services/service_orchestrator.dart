@@ -294,6 +294,8 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
     final currentService = next.currentService;
     final prevService = prev?.currentService;
+    final prevEnabled = prev?.enabledServices ?? const {};
+    final sonosWasEnabled = prevEnabled.contains(ServiceType.nativeLocalSonos);
 
     // If we were on native-local Sonos and Sonos gets disabled or we switch
     // away, tear down the native bridge so it stops receiving NOTIFY events.
@@ -301,8 +303,9 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
         !next.enabledServices.contains(ServiceType.nativeLocalSonos);
     final leftNativeSonos = prevService == ServiceType.nativeLocalSonos &&
         currentService != ServiceType.nativeLocalSonos;
+    final sonosNewlyDisabled = sonosWasEnabled && sonosDisabled;
     if (leftNativeSonos ||
-        (sonosDisabled && currentService != ServiceType.nativeLocalSonos)) {
+      (sonosNewlyDisabled && currentService != ServiceType.nativeLocalSonos)) {
       _log(
           'Stopping native Sonos bridge (reason=${leftNativeSonos ? 'service switched' : 'sonos disabled'})');
       ref.read(nativeSonosProvider.notifier).stop();
@@ -1876,9 +1879,17 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     final switchOccurred = previousActiveService != currentService;
 
     // If a switch already occurred (handled by listener via _activateService),
-    // we don't need to do anything here - the listener already sent config
+    // we usually don't need to do anything here - the listener already sent config.
+    // However, if the switch resulted in no current service (e.g., disabling
+    // the only active service), we still need to push user-settings config so
+    // the server stops polling/streaming.
     if (switchOccurred) {
-      _log('Service switch already handled by listener');
+      if (currentService == null) {
+        _log('Service switch cleared current service; sending user settings config');
+        ref.read(eventsWsProvider.notifier).sendConfigForUserSettings();
+      } else {
+        _log('Service switch already handled by listener');
+      }
       return;
     }
 

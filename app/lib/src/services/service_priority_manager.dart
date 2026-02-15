@@ -173,10 +173,10 @@ class ServicePriorityState {
     final awaiting =
         awaitingRecovery.contains(service) && service.isCloudService;
     return status != ServiceStatus.cooldown &&
-      status != ServiceStatus.disabled &&
-      !isUnhealthy &&
-      !awaiting &&
-      !inRecovery;
+        status != ServiceStatus.disabled &&
+        !isUnhealthy &&
+        !awaiting &&
+        !inRecovery;
   }
 
   /// Check availability while ignoring awaiting-recovery flags (used as a last resort).
@@ -185,9 +185,9 @@ class ServicePriorityState {
     final isUnhealthy = unhealthyServices.contains(service);
     final inRecovery = recoveryStates.containsKey(service);
     return status != ServiceStatus.cooldown &&
-      status != ServiceStatus.disabled &&
-      !isUnhealthy &&
-      !inRecovery;
+        status != ServiceStatus.disabled &&
+        !isUnhealthy &&
+        !inRecovery;
   }
 
   /// Get the next available service based on priority
@@ -437,6 +437,7 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     Set<ServiceType>? unhealthyServices,
   }) {
     final enabled = <ServiceType>{};
+    final previouslyEnabled = Set<ServiceType>.from(state.enabledServices);
 
     // Each service has its own requirements from user settings
     for (final service in ServiceType.values) {
@@ -460,19 +461,55 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
 
     // Update statuses for disabled services
     final newStatuses =
-        Map<ServiceType, ServiceStatus>.from(state.serviceStatuses);
+      Map<ServiceType, ServiceStatus>.from(state.serviceStatuses);
+    final newErrors = Map<ServiceType, int>.from(state.errorCounts);
+    final newCooldowns = Map<ServiceType, DateTime?>.from(state.cooldownEnds);
+    final newRetryWindows =
+      Map<ServiceType, DateTime?>.from(state.retryWindowStarts);
+    final newLastRetries =
+      Map<ServiceType, DateTime?>.from(state.lastRetryAttempts);
     for (final service in ServiceType.values) {
       if (!enabled.contains(service)) {
         newStatuses[service] = ServiceStatus.disabled;
       } else if (newStatuses[service] == ServiceStatus.disabled) {
+        // Newly re-enabled: reset error/retry state and fallback thresholds
         newStatuses[service] = ServiceStatus.standby;
+        newErrors[service] = 0;
+        newCooldowns[service] = null;
+        newRetryWindows[service] = null;
+        newLastRetries[service] = null;
+        _fallbackThresholdConsumed[service] = false;
       }
     }
 
     state = state.copyWith(
       enabledServices: enabled,
       serviceStatuses: newStatuses,
+      errorCounts: newErrors,
+      cooldownEnds: newCooldowns,
+      retryWindowStarts: newRetryWindows,
+      lastRetryAttempts: newLastRetries,
     );
+
+    // If a service just became disabled, stop any recovery tracking for it
+    final newlyDisabled = previouslyEnabled.difference(enabled);
+    if (newlyDisabled.isNotEmpty && state.recoveryStates.isNotEmpty) {
+      final newRecoveryStates =
+          Map<ServiceType, ServiceRecoveryState>.from(state.recoveryStates);
+      var recoveryChanged = false;
+      for (final svc in newlyDisabled) {
+        if (newRecoveryStates.remove(svc) != null) {
+          recoveryChanged = true;
+          _log('Stopping recovery for $svc (service disabled)');
+        }
+      }
+      if (recoveryChanged) {
+        state = state.copyWith(recoveryStates: newRecoveryStates);
+        if (newRecoveryStates.isEmpty) {
+          _stopRecoveryTimer();
+        }
+      }
+    }
 
     _log(
         'Updated enabled services: $enabled (spotify=$spotifyEnabled, sonos=$sonosEnabled)');
@@ -541,6 +578,15 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       return;
     }
 
+    // Do not activate a service that is in cooldown or active recovery to avoid
+    // immediate churn/loops when it was just failed or is being probed.
+    final status = state.serviceStatuses[service];
+    final inRecovery = state.recoveryStates.containsKey(service);
+    if (status == ServiceStatus.cooldown || inRecovery) {
+      _log('Skipping activation of $service (status=$status, inRecovery=$inRecovery)');
+      return;
+    }
+
     _log(
         'Activating $service (current=${state.currentService}, enabled=${state.enabledServices})');
 
@@ -549,7 +595,14 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
 
     // Deactivate current service
     if (state.currentService != null && state.currentService != service) {
-      newStatuses[state.currentService!] = ServiceStatus.standby;
+      final current = state.currentService!;
+      final currentStatus = newStatuses[current];
+      // Preserve cooldown/disabled states when switching so we don't
+      // immediately re-enable a service that just failed.
+      if (currentStatus != ServiceStatus.cooldown &&
+          currentStatus != ServiceStatus.disabled) {
+        newStatuses[current] = ServiceStatus.standby;
+      }
     }
 
     // Activate new service
@@ -890,6 +943,8 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
         _log('No fallback available from $failedService');
         // All services unavailable - stay on current and retry later
         _startRetryTimer(failedService);
+        // Even without a fallback target, begin recovery so probes can bring it back
+        startRecovery(failedService);
       }
     }
   }
@@ -1365,15 +1420,22 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     _fallbackThresholdConsumed[failedService] = true;
 
     final currentService = state.currentService;
-    if (currentService == null) return;
+    final onlyEnabledFailed =
+        state.effectiveOrder.length == 1 && state.effectiveOrder.first == failedService;
 
-    // Check if failed service is higher priority than current
+    // If nothing is currently active but this is the only enabled service,
+    // allow recovery so probes can bring it back.
+    if (currentService == null && !onlyEnabledFailed) return;
+
+    // Check if failed service is higher priority than current, unless it's the only option
     final failedIndex = state.configuredOrder.indexOf(failedService);
-    final currentIndex = state.configuredOrder.indexOf(currentService);
+    final currentIndex = currentService != null
+        ? state.configuredOrder.indexOf(currentService)
+        : -1;
 
-    if (failedIndex < 0 || currentIndex < 0) return;
-    if (failedIndex >= currentIndex) {
-      // Failed service is lower priority - don't start recovery
+    if (failedIndex < 0 || (currentIndex < 0 && !onlyEnabledFailed)) return;
+    if (currentService != null && failedIndex >= currentIndex && !onlyEnabledFailed) {
+      // Failed service is lower priority or same; skip unless it's the only enabled service
       return;
     }
 
@@ -1397,6 +1459,10 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
 
     // Start recovery timer if not already running
     _startRecoveryTimer();
+
+    // Kick an immediate probe when entering recovery so single-service paths
+    // don't wait for the first timer tick.
+    _probeService(failedService);
   }
 
   /// Stop recovery monitoring for a service
@@ -1514,7 +1580,10 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
   void _startRecoveryTimer() {
     // Determine the fastest probe interval among services under recovery
     final interval = _computeRecoveryTimerIntervalSec();
-    if (interval == null) return;
+    if (interval == null) {
+      _log('Recovery timer not started (no eligible recovery intervals)');
+      return;
+    }
 
     // Always restart to honor updated intervals
     _recoveryTimer?.cancel();
@@ -1610,7 +1679,9 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
       // Check if service is still lower priority than current
       // (current service might have changed)
       final currentService = state.currentService;
-      if (currentService != null) {
+      final onlyEnabledService = state.effectiveOrder.length == 1 &&
+          state.effectiveOrder.first == service;
+      if (currentService != null && !onlyEnabledService) {
         final serviceIndex = state.configuredOrder.indexOf(service);
         final currentIndex = state.configuredOrder.indexOf(currentService);
         if (serviceIndex >= currentIndex) {
