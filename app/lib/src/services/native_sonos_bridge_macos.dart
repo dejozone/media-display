@@ -9,10 +9,9 @@ import 'package:xml/xml.dart' as xml;
 
 /// macOS-native Sonos bridge that mirrors the backend coordinator selection.
 class NativeSonosBridge {
-  NativeSonosBridge({bool enableProgress = true})
-      : _enableProgress = enableProgress,
-        _logger = appLogger('NativeSonosBridgeMacOS');
+  NativeSonosBridge() : _logger = appLogger('NativeSonosBridgeMacOS');
 
+  static const _httpTimeout = Duration(seconds: 10);
   final Logger _logger;
   final _controller = StreamController<NativeSonosMessage>.broadcast();
   Timer? _pollTimer;
@@ -21,6 +20,7 @@ class NativeSonosBridge {
   String? _deviceName;
   bool _deviceIsCoordinator = false;
   String? _coordinatorUuid;
+  List<_GroupDevice> _groupDevices = const [];
 
   // Event subscription
   HttpServer? _eventServer;
@@ -39,15 +39,6 @@ class NativeSonosBridge {
   String? _currentTrackId;
   int? _currentDurationMs;
   int? _currentProgressMs;
-  List<_GroupDevice> _groupDevices = const [];
-  bool _enableProgress;
-  DateTime? _lastPositionFetch;
-  String? _lastPositionTrackId;
-  String? _lastPositionState;
-  DateTime? _positionBackoffUntil;
-
-  static const _httpTimeout = Duration(seconds: 10);
-
   bool get isSupported => Platform.isMacOS;
 
   Stream<NativeSonosMessage> get messages => _controller.stream;
@@ -114,12 +105,21 @@ class NativeSonosBridge {
     ));
   }
 
-  Future<void> _emitPayload() async {
+  Future<void> _emitPayload({bool isGetLiveMediaProgress = true}) async {
     if (!_running || _deviceIp == null) return;
 
     try {
-      await _maybeRefreshPosition();
-
+      if (isGetLiveMediaProgress) {
+        final liveMedia = await _getLiveMedia(host: _deviceIp);
+        if (liveMedia != null) {
+          final progressStr = liveMedia['current_progress_time'] as String?;
+          final progressMs = _parseDurationMs(progressStr);
+          if (progressMs != null) {
+            _currentProgressMs = progressMs;
+          }
+        }
+      }
+      
       final activeStates = {'PLAYING', 'TRANSITIONING', 'BUFFERING'};
       final isPlaying = activeStates.contains(_transportState);
       final playbackStatus = _transportState.toLowerCase();
@@ -401,59 +401,36 @@ class NativeSonosBridge {
     }
   }
 
-  Future<void> _maybeRefreshPosition() async {
-    if (!_enableProgress) {
-      _currentProgressMs = null;
-      return;
-    }
-
-    if (_positionBackoffUntil != null &&
-        DateTime.now().isBefore(_positionBackoffUntil!)) {
-      return;
-    }
-
-    const activeStates = {'PLAYING', 'BUFFERING'};
-    if (!activeStates.contains(_transportState)) return;
-
-    final now = DateTime.now();
-    final trackChanged = _lastPositionTrackId != _currentTrackId;
-    final stateChanged = _lastPositionState != _transportState;
-    final tooRecent = _lastPositionFetch != null &&
-        now.difference(_lastPositionFetch!) < const Duration(seconds: 1);
-
-    if (!trackChanged && !stateChanged && tooRecent) return;
-
-    await _refreshPosition(host: _deviceIp);
-    _lastPositionFetch = now;
-    _lastPositionTrackId = _currentTrackId;
-    _lastPositionState = _transportState;
-  }
-
-  Future<void> _refreshPosition({String? host}) async {
+  Future<Map<String, dynamic>?> _getLiveMedia({String? host}) async {
     // Sonos does not include position in AVTransport events; fetch it via GetPositionInfo.
-    host ??= _deviceIp;
     _log(
-        'Attempting to refresh content position via GetPositionInfo for $_deviceName at $host',
+        'Attempting get live data about the media via GetPositionInfo from $_deviceName at $host',
         level: Level.FINE);
-    if (host == null) return;
+    if (host == null) return null;
     try {
-      _log('Fetching content position via GetPositionInfo', level: Level.FINE);
-      final client = HttpClient();
+      _log('Fetching content position via GetPositionInfo (Channel=Master)',
+          level: Level.FINE);
+      // final client = HttpClient();
+      final client = HttpClient()..connectionTimeout = _httpTimeout;
       final req = await client.postUrl(
           Uri.parse('http://$host:1400/MediaRenderer/AVTransport/Control'));
+      final envelope = '''<?xml version="1.0" encoding="utf-8"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+  <s:Body>
+    <u:GetPositionInfo xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
+      <InstanceID>0</InstanceID>
+      <Channel>Master</Channel>
+    </u:GetPositionInfo>
+  </s:Body>
+</s:Envelope>''';
+
+      final bytes = utf8.encode(envelope);
       req.headers
-          .set(HttpHeaders.contentTypeHeader, 'text/xml; charset="utf-8"');
-      req.headers.set('SOAPACTION',
-          '"urn:schemas-upnp-org:service:AVTransport:1#GetPositionInfo"');
-      const envelope = '<?xml version="1.0" encoding="utf-8"?>\n'
-          '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">\n'
-          '  <s:Body>\n'
-          '    <u:GetPositionInfo xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">\n'
-          '      <InstanceID>0</InstanceID>\n'
-          '    </u:GetPositionInfo>\n'
-          '  </s:Body>\n'
-          '</s:Envelope>';
-      req.write(envelope);
+        ..contentType = ContentType('text', 'xml', charset: 'utf-8')
+        ..set('SOAPAction', '"urn:schemas-upnp-org:service:AVTransport:1#GetPositionInfo"')
+        ..chunkedTransferEncoding = false
+        ..contentLength = bytes.length;
+      req.add(bytes); // Mustuse this method to work with this API; writing (req.write()) to the request directly does not send the body correctly.
 
       final resp = await req.close();
       if (resp.statusCode != 200) {
@@ -462,8 +439,9 @@ class NativeSonosBridge {
             'GetPositionInfo failed with status ${resp.statusCode} ${resp.reasonPhrase} $bodyText',
             level: Level.FINE);
         client.close(force: true);
-        return;
+        return null;
       }
+
       final body = await resp.transform(utf8.decoder).join();
       _log('GetPositionInfo response: $body', level: Level.FINE);
       client.close(force: true);
@@ -472,23 +450,32 @@ class NativeSonosBridge {
       final relTime = doc.findAllElements('RelTime').firstOrNull?.innerText;
       final trackDuration =
           doc.findAllElements('TrackDuration').firstOrNull?.innerText;
+      final trackNum = doc.findAllElements('Track').firstOrNull?.innerText;
+      final trackUri = doc.findAllElements('TrackURI').firstOrNull?.innerText;
+      final trackMetaRaw =
+          doc.findAllElements('TrackMetaData').firstOrNull?.innerText;
 
       _log('GetPositionInfo relTime=$relTime trackDuration=$trackDuration',
           level: Level.FINE);
 
-      final relMs = _parseDurationMs(relTime);
-      if (relMs != null) {
-        _currentProgressMs = relMs;
-      }
-      final durMs = _parseDurationMs(trackDuration);
-      if (durMs != null && _currentDurationMs == null) {
-        _currentDurationMs = durMs;
-      }
+      final meta = _parseTrackMeta(trackMetaRaw);
 
-      // Success resets error streak/backoff
-      _positionBackoffUntil = null;
+      return {
+        'id': meta.id,
+        'parent_id': meta.parentId,
+        'original_media_id': meta.originalMediaId,
+        'num': trackNum,
+        'uri': trackUri,
+        'creator': meta.creator,
+        'title': meta.title,
+        'album_name': meta.album,
+        'artwork_url': meta.artworkUrl,
+        'duration': trackDuration,
+        'current_progress_time': relTime,
+      };
     } catch (e) {
       _log('GetPositionInfo error: $e', level: Level.FINE);
+      return null;
     }
   }
 
@@ -554,6 +541,44 @@ class NativeSonosBridge {
       }
     }
     return null;
+  }
+
+  _TrackMeta _parseTrackMeta(String? raw) {
+    if (raw == null || raw.isEmpty || raw == 'NOT_IMPLEMENTED') {
+      return const _TrackMeta();
+    }
+
+    try {
+      final doc = xml.XmlDocument.parse(raw);
+      final item = doc.findAllElements('item').firstOrNull;
+      if (item == null) return const _TrackMeta();
+
+      final res = item.findAllElements('res').firstOrNull?.innerText.trim();
+      final originalId = _extractSpotifyTrackId(res);
+
+      return _TrackMeta(
+        id: item.getAttribute('id'),
+        parentId: item.getAttribute('parentID'),
+        originalMediaId: originalId,
+        creator: _findText(item, const ['creator', 'artist']),
+        title: _findText(item, const ['title']),
+        album: _findText(item, const ['album']),
+        artworkUrl: _findText(
+          item, const ['albumArtURI', 'albumArtURL', 'albumarturi', 'albumarturl']),
+      );
+    } catch (_) {
+      return const _TrackMeta();
+    }
+  }
+
+  String? _extractSpotifyTrackId(String? resText) {
+    if (resText == null || resText.isEmpty) return null;
+    final match = RegExp(r'((?:x-sonos-spotify:)?spotify:track:([^?&#\s]+))',
+            caseSensitive: false)
+        .firstMatch(resText);
+    if (match == null) return null;
+    final full = match.group(1);
+    return full;
   }
 
   Future<String?> _localCallbackUrl() async {
@@ -878,6 +903,26 @@ class _GroupDevice {
   const _GroupDevice({required this.name, this.location});
   final String name;
   final String? location;
+}
+
+class _TrackMeta {
+  const _TrackMeta({
+    this.id,
+    this.parentId,
+    this.originalMediaId,
+    this.creator,
+    this.title,
+    this.album,
+    this.artworkUrl,
+  });
+
+  final String? id;
+  final String? parentId;
+  final String? originalMediaId;
+  final String? creator;
+  final String? title;
+  final String? album;
+  final String? artworkUrl;
 }
 
 extension _FirstOrNull<E> on Iterable<E> {

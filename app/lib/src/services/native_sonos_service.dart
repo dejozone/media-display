@@ -104,7 +104,7 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
       await stop();
     }
 
-    final bridge = _bridge ??= createNativeSonosBridge(enableProgress: true);
+    final bridge = _bridge ??= createNativeSonosBridge();
     _log(
         'Native Sonos bridge created (supported=${bridge.isSupported}, type=${bridge.runtimeType})',
         level: Level.FINE);

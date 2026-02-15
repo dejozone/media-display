@@ -15,7 +15,7 @@ class NativeSonosMessage {
 }
 
 class NativeSonosBridge {
-  NativeSonosBridge({bool enableProgress = true});
+  NativeSonosBridge();
   bool get isSupported => false; // Stub: no native bridge available
 
   Stream<NativeSonosMessage> get messages => const Stream.empty();
