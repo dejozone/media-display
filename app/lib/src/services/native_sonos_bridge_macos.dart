@@ -28,6 +28,7 @@ class NativeSonosBridge {
   Timer? _subscriptionRenewTimer;
   Timer? _emitDebounce;
   int _notifyCount = 0;
+  Future<_SonosDevice?>? _ongoingDiscovery;
 
   // Last known playback state from events
   String _transportState = 'UNKNOWN';
@@ -579,11 +580,23 @@ class NativeSonosBridge {
 
   Future<_SonosDevice?> _discoverCoordinator(
       {Duration timeout = const Duration(seconds: 15)}) async {
+    // Reuse in-flight discovery to avoid parallel M-SEARCH bursts and
+    // duplicate subscriptions when multiple probes overlap.
+    if (_ongoingDiscovery != null) {
+      return _ongoingDiscovery;
+    }
+
+    final completer = Completer<_SonosDevice?>();
+    _ongoingDiscovery = completer.future.whenComplete(() {
+      _ongoingDiscovery = null;
+    });
+
     // Reuse cached coordinator to avoid repeated network discovery and avoid
     // triggering fallback thresholds when already healthy.
     final cached = _cachedCoordinator();
     if (cached != null) {
-      return cached;
+      completer.complete(cached);
+      return _ongoingDiscovery;
     }
 
     _log('Sending SSDP M-SEARCH for Sonos ZonePlayers', level: Level.FINE);
@@ -609,7 +622,6 @@ class NativeSonosBridge {
       socket.send(utf8.encode(message), InternetAddress(mcast), port);
     });
 
-    final completer = Completer<_SonosDevice?>();
     var found = false;
     final attemptedHosts = <String>{};
     const maxHosts = 4; // Avoid hammering many responders; bail after a few
@@ -675,7 +687,7 @@ class NativeSonosBridge {
       _finalize(null);
     });
 
-    return completer.future;
+    return _ongoingDiscovery;
   }
 
   _SonosDevice? _cachedCoordinator() {

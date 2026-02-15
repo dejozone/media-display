@@ -311,6 +311,25 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       ref.read(nativeSonosProvider.notifier).stop();
     }
 
+    // If the current service just recovered while remaining the same logical
+    // service, re-run activation so the orchestrator restarts that service
+    // (e.g., native Sonos bridge) without requiring a priority change.
+    if (currentService != null && currentService == prevService) {
+      final prevStatus = prev?.serviceStatuses[currentService];
+      final nextStatus = next.serviceStatuses[currentService];
+      final wasRecovering =
+          prev?.recoveryStates.containsKey(currentService) ?? false;
+      final nowHealthy = nextStatus == ServiceStatus.active &&
+          !(next.recoveryStates.containsKey(currentService)) &&
+          (wasRecovering || prevStatus != ServiceStatus.active);
+
+      if (nowHealthy) {
+        _log('Reactivating $currentService after recovery');
+        _activateService(currentService, isFallback: false);
+        return;
+      }
+    }
+
     // When priority manager is re-running initial activation after reconnect,
     // it briefly has no current service while it prepares to select one. If
     // there are enabled services, skip handling to avoid emitting "No service

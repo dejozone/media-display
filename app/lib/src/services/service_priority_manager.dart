@@ -1518,25 +1518,49 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     final newAwaiting = Set<ServiceType>.from(state.awaitingRecovery)
       ..remove(service);
 
-    // Reset service status
+    // Reset service status/bookkeeping so activation is not blocked by stale
+    // cooldowns or retry windows.
     final newStatuses =
-        Map<ServiceType, ServiceStatus>.from(state.serviceStatuses);
+      Map<ServiceType, ServiceStatus>.from(state.serviceStatuses);
     newStatuses[service] = ServiceStatus.standby;
 
     final newErrors = Map<ServiceType, int>.from(state.errorCounts);
     newErrors[service] = 0;
 
+    final newCooldowns = Map<ServiceType, DateTime?>.from(state.cooldownEnds);
+    newCooldowns[service] = null;
+
+    final newRetryWindows =
+      Map<ServiceType, DateTime?>.from(state.retryWindowStarts);
+    newRetryWindows[service] = null;
+
+    final newLastRetries =
+      Map<ServiceType, DateTime?>.from(state.lastRetryAttempts);
+    newLastRetries[service] = null;
+
     state = state.copyWith(
       recoveryStates: newRecoveryStates,
       serviceStatuses: newStatuses,
       errorCounts: newErrors,
+      cooldownEnds: newCooldowns,
+      retryWindowStarts: newRetryWindows,
+      lastRetryAttempts: newLastRetries,
       awaitingRecovery: newAwaiting,
     );
 
-    // Switch to recovered service if it's higher priority
-    if (serviceIndex >= 0 && serviceIndex < currentIndex) {
-      // _log(
-      //     'Switching to recovered higher-priority service: $service');
+    // Promote recovered service when it is enabled and either (a) current is
+    // null, (b) it is the highest-priority enabled service, or (c) it is
+    // higher priority than the current service.
+    final highestEnabled = _getFirstEnabledService();
+    final current = state.currentService;
+    final currentStatus = state.serviceStatuses[service];
+    final shouldPromote =
+        (current == null && state.enabledServices.contains(service)) ||
+        (highestEnabled == service && current != service) ||
+        (serviceIndex >= 0 && serviceIndex < currentIndex) ||
+        (current == service && currentStatus != ServiceStatus.active);
+
+    if (shouldPromote && state.enabledServices.contains(service)) {
       activateService(service);
 
       // If we're now on the primary service, cancel retry timer
