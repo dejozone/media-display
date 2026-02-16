@@ -39,6 +39,11 @@ class NativeSonosBridge {
   String? _currentTrackId;
   int? _currentDurationMs;
   int? _currentProgressMs;
+  String? _playlistTitle;
+  String? _nextTrackTitle;
+  String? _nextTrackArtist;
+  String? _nextTrackAlbum;
+  String? _nextTrackArtworkUrl;
   bool get isSupported => Platform.isMacOS;
 
   Stream<NativeSonosMessage> get messages => _controller.stream;
@@ -119,7 +124,7 @@ class NativeSonosBridge {
           }
         }
       }
-      
+
       final activeStates = {'PLAYING', 'TRANSITIONING', 'BUFFERING'};
       final isPlaying = activeStates.contains(_transportState);
       final playbackStatus = _transportState.toLowerCase();
@@ -143,6 +148,26 @@ class NativeSonosBridge {
         'coordinator': _deviceIsCoordinator,
       };
 
+      final trackBlock = <String, dynamic>{
+        if (_currentTrackId != null) 'id': _currentTrackId,
+        'title': _currentTitle ?? '',
+        'artist': _currentArtists.isNotEmpty ? _currentArtists.first : '',
+        'album': _currentAlbum,
+        'artwork_url': _currentAlbumArt,
+        'duration_ms': _currentDurationMs,
+        if (_playlistTitle != null)
+          'playlist': {
+            'title': _playlistTitle,
+          },
+      };
+
+      final nextTrackBlock = <String, dynamic>{
+        if (_nextTrackTitle != null) 'title': _nextTrackTitle,
+        if (_nextTrackArtist != null) 'artist': _nextTrackArtist,
+        if (_nextTrackAlbum != null) 'album': _nextTrackAlbum,
+        if (_nextTrackArtworkUrl != null) 'artwork_url': _nextTrackArtworkUrl,
+      };
+
       final payload = <String, dynamic>{
         // Server-aligned envelope
         'type': 'now_playing',
@@ -151,14 +176,7 @@ class NativeSonosBridge {
 
         'data': {
           // Track: use server shape
-          'track': {
-            if (_currentTrackId != null) 'id': _currentTrackId,
-            'title': _currentTitle ?? '',
-            'artist': _currentArtists.isNotEmpty ? _currentArtists.first : '',
-            'album': _currentAlbum,
-            'artwork_url': _currentAlbumArt,
-            'duration_ms': _currentDurationMs,
-          },
+          'track': trackBlock,
 
           // Playback: server shape + progress placeholder
           'playback': {
@@ -166,6 +184,7 @@ class NativeSonosBridge {
             'progress_ms': _currentProgressMs,
             'timestamp': DateTime.now().millisecondsSinceEpoch,
             'status': playbackStatus,
+            if (nextTrackBlock.isNotEmpty) 'next_track': nextTrackBlock,
           },
 
           // Device: server-required fields plus native identifiers
@@ -179,6 +198,44 @@ class NativeSonosBridge {
     } catch (e) {
       _log('Error emitting payload: $e', level: Level.FINE);
       _controller.add(NativeSonosMessage(error: e.toString()));
+    }
+  }
+
+  Future<HttpClientResponse> _makeApiCall({
+    required Uri url,
+    String method = 'GET',
+    String? body,
+    Map<String, String>? headers,
+    Duration timeout = _httpTimeout,
+  }) async {
+    final client = HttpClient()..connectionTimeout = timeout;
+    final verb = method.toUpperCase();
+    final mergedHeaders = <String, String>{
+      HttpHeaders.contentTypeHeader: 'text/xml; charset="utf-8"',
+      if (headers != null) ...headers,
+    };
+
+    try {
+      final req = await client.openUrl(verb, url).timeout(timeout);
+      mergedHeaders.forEach((k, v) {
+        req.headers.set(k, v);
+      });
+
+      if (body != null) {
+        final bytes = utf8.encode(body);
+        req.headers
+          ..chunkedTransferEncoding = false
+          ..contentLength = bytes.length;
+        req.add(bytes); // Sonos rejects chunked bodies; send raw bytes.
+      }
+
+      final resp = await req.close().timeout(timeout);
+      return resp;
+    } catch (e, st) {
+      _log('HTTP $verb $url failed: $e',
+          level: Level.FINE, error: e, stackTrace: st);
+      client.close(force: true);
+      rethrow;
     }
   }
 
@@ -217,16 +274,17 @@ class NativeSonosBridge {
     }
 
     try {
-      final client = HttpClient();
-      final req = await client.openUrl('SUBSCRIBE',
-          Uri.parse('http://$host:1400/MediaRenderer/AVTransport/Event'));
-      req.headers.set('CALLBACK', '<$callback>');
-      req.headers.set('NT', 'upnp:event');
-      req.headers.set('TIMEOUT', 'Second-600');
-
-      final resp = await req.close().timeout(_httpTimeout);
+      final resp = await _makeApiCall(
+        url: Uri.parse('http://$host:1400/MediaRenderer/AVTransport/Event'),
+        method: 'SUBSCRIBE',
+        headers: {
+          'CALLBACK': '<$callback>',
+          'NT': 'upnp:event',
+          'TIMEOUT': 'Second-600',
+        },
+      );
       final sid = resp.headers.value('sid');
-      client.close(force: true);
+      await resp.drain();
       if (sid == null || sid.isEmpty) {
         _log('Subscription failed: missing SID', level: Level.WARNING);
         return;
@@ -247,13 +305,15 @@ class NativeSonosBridge {
     final sid = _subscriptionSid;
     if (sid == null) return;
     try {
-      final client = HttpClient();
-      final req = await client.openUrl('SUBSCRIBE',
-          Uri.parse('http://$host:1400/MediaRenderer/AVTransport/Event'));
-      req.headers.set('SID', sid);
-      req.headers.set('TIMEOUT', 'Second-600');
-      final resp = await req.close().timeout(_httpTimeout);
-      client.close(force: true);
+      final resp = await _makeApiCall(
+        url: Uri.parse('http://$host:1400/MediaRenderer/AVTransport/Event'),
+        method: 'SUBSCRIBE',
+        headers: {
+          'SID': sid,
+          'TIMEOUT': 'Second-600',
+        },
+      );
+      await resp.drain();
       if (resp.statusCode == 412) {
         // Precondition failed, retry full subscribe
         _subscriptionSid = null;
@@ -277,14 +337,13 @@ class NativeSonosBridge {
     _subscriptionSid = null;
     if (sid == null || _deviceIp == null) return;
     try {
-      final client = HttpClient();
-      final req = await client.openUrl(
-          'UNSUBSCRIBE',
-          Uri.parse(
-              'http://${_deviceIp}:1400/MediaRenderer/AVTransport/Event'));
-      req.headers.set('SID', sid);
-      await req.close().timeout(_httpTimeout);
-      client.close(force: true);
+      final resp = await _makeApiCall(
+        url: Uri.parse(
+            'http://${_deviceIp}:1400/MediaRenderer/AVTransport/Event'),
+        method: 'UNSUBSCRIBE',
+        headers: {'SID': sid},
+      );
+      await resp.drain();
     } catch (_) {
       // ignore
     }
@@ -354,6 +413,28 @@ class NativeSonosBridge {
         if (meta != null && meta.isNotEmpty && meta != 'NOT_IMPLEMENTED') {
           _parseDidl(meta);
         }
+
+        final playlistNode = inst.descendants
+            .whereType<xml.XmlElement>()
+            .where((e) => e.name.local.toLowerCase() == 'enqueuedtransporturimetadata')
+            .firstOrNull;
+        final playlistMeta = playlistNode?.getAttribute('val');
+        if (playlistMeta != null && playlistMeta.isNotEmpty && playlistMeta != 'NOT_IMPLEMENTED') {
+          _playlistTitle = _parsePlaylistTitle(playlistMeta);
+        }
+
+        final nextMetaNode = inst.descendants
+            .whereType<xml.XmlElement>()
+            .where((e) => e.name.local.toLowerCase() == 'nexttrackmetadata')
+            .firstOrNull;
+        final nextMetaVal = nextMetaNode?.getAttribute('val');
+        if (nextMetaVal != null && nextMetaVal.isNotEmpty && nextMetaVal != 'NOT_IMPLEMENTED') {
+          final nextMeta = _parseTrackMeta(nextMetaVal);
+          _nextTrackTitle = nextMeta.title;
+          _nextTrackArtist = nextMeta.creator;
+          _nextTrackAlbum = nextMeta.album;
+          _nextTrackArtworkUrl = nextMeta.artworkUrl;
+        }
       }
 
       _scheduleEmit(seq: seq);
@@ -410,10 +491,6 @@ class NativeSonosBridge {
     try {
       _log('Fetching content position via GetPositionInfo (Channel=Master)',
           level: Level.FINE);
-      // final client = HttpClient();
-      final client = HttpClient()..connectionTimeout = _httpTimeout;
-      final req = await client.postUrl(
-          Uri.parse('http://$host:1400/MediaRenderer/AVTransport/Control'));
       final envelope = '''<?xml version="1.0" encoding="utf-8"?>
 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
   <s:Body>
@@ -424,27 +501,25 @@ class NativeSonosBridge {
   </s:Body>
 </s:Envelope>''';
 
-      final bytes = utf8.encode(envelope);
-      req.headers
-        ..contentType = ContentType('text', 'xml', charset: 'utf-8')
-        ..set('SOAPAction', '"urn:schemas-upnp-org:service:AVTransport:1#GetPositionInfo"')
-        ..chunkedTransferEncoding = false
-        ..contentLength = bytes.length;
-      req.add(bytes); // Mustuse this method to work with this API; writing (req.write()) to the request directly does not send the body correctly.
-
-      final resp = await req.close();
+      final resp = await _makeApiCall(
+        url: Uri.parse('http://$host:1400/MediaRenderer/AVTransport/Control'),
+        method: 'POST',
+        body: envelope,
+        headers: {
+          'SOAPAction':
+              '"urn:schemas-upnp-org:service:AVTransport:1#GetPositionInfo"',
+        },
+      );
       if (resp.statusCode != 200) {
         final bodyText = await resp.transform(utf8.decoder).join();
         _log(
             'GetPositionInfo failed with status ${resp.statusCode} ${resp.reasonPhrase} $bodyText',
             level: Level.FINE);
-        client.close(force: true);
         return null;
       }
 
       final body = await resp.transform(utf8.decoder).join();
       _log('GetPositionInfo response: $body', level: Level.FINE);
-      client.close(force: true);
 
       final doc = xml.XmlDocument.parse(body);
       final relTime = doc.findAllElements('RelTime').firstOrNull?.innerText;
@@ -509,6 +584,17 @@ class NativeSonosBridge {
     return null;
   }
 
+  String? _parsePlaylistTitle(String? raw) {
+    if (raw == null || raw.isEmpty || raw == 'NOT_IMPLEMENTED') return null;
+    try {
+      final doc = xml.XmlDocument.parse(raw);
+      final title = doc.findAllElements('title').firstOrNull?.innerText;
+      return title?.isNotEmpty == true ? title : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   int? _parseDurationMs(String? duration) {
     if (duration == null || duration.isEmpty) return null;
     if (duration.toUpperCase() == 'NOT_IMPLEMENTED') return null;
@@ -563,8 +649,8 @@ class NativeSonosBridge {
         creator: _findText(item, const ['creator', 'artist']),
         title: _findText(item, const ['title']),
         album: _findText(item, const ['album']),
-        artworkUrl: _findText(
-          item, const ['albumArtURI', 'albumArtURL', 'albumarturi', 'albumarturl']),
+        artworkUrl: _findText(item,
+            const ['albumArtURI', 'albumArtURL', 'albumarturi', 'albumarturl']),
       );
     } catch (_) {
       return const _TrackMeta();
@@ -730,31 +816,31 @@ class NativeSonosBridge {
 
   Future<_SonosDevice?> _fetchCoordinatorFromZoneGroup(String host) async {
     try {
-      final client = HttpClient();
-      final req = await client
-          .postUrl(Uri.parse('http://$host:1400/ZoneGroupTopology/Control'));
-      req.headers
-          .set(HttpHeaders.contentTypeHeader, 'text/xml; charset="utf-8"');
-      req.headers.set('SOAPACTION',
-          '"urn:schemas-upnp-org:service:ZoneGroupTopology:1#GetZoneGroupState"');
       const envelope = '<?xml version="1.0" encoding="utf-8"?>\n'
           '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">\n'
           '  <s:Body>\n'
           '    <u:GetZoneGroupState xmlns:u="urn:schemas-upnp-org:service:ZoneGroupTopology:1"/>\n'
           '  </s:Body>\n'
           '</s:Envelope>';
-      req.write(envelope);
 
-      final resp = await req.close();
+      final resp = await _makeApiCall(
+        url: Uri.parse('http://$host:1400/ZoneGroupTopology/Control'),
+        method: 'POST',
+        body: envelope,
+        headers: {
+          HttpHeaders.contentTypeHeader: 'text/xml; charset="utf-8"',
+          'SOAPACTION':
+              '"urn:schemas-upnp-org:service:ZoneGroupTopology:1#GetZoneGroupState"',
+        },
+      );
       if (resp.statusCode != 200) {
         _log('ZoneGroupTopology request failed (${resp.statusCode}) from $host',
             level: Level.FINE);
-        client.close(force: true);
+        await resp.drain();
         return null;
       }
 
       final body = await resp.transform(utf8.decoder).join();
-      client.close(force: true);
 
       // _logXml('ZoneGroupTopology raw from $host', body);
       final coordinator = _parseCoordinatorFromZoneGroupState(body);
