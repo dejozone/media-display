@@ -69,7 +69,11 @@
   },
   "jwt": {
     "algorithm": "HS256",
-    "expirationHours": 24
+    "expirationHours": 24,
+    "refreshExpirationDays": 30,
+    "refreshCookieName": "refresh_token",
+    "refreshSecure": true,
+    "refreshSameSite": "Lax"
   },
   "session": {
     "timeoutMinutes": 30

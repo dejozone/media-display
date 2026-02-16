@@ -31,6 +31,7 @@ class AuthManager:
         self.jwt_secret = Config.JWT_SECRET
         self.jwt_algorithm = Config.JWT_ALGORITHM
         self.jwt_expiration = Config.JWT_EXPIRATION_HOURS * 3600  # seconds
+        self.refresh_expiration = Config.REFRESH_TOKEN_EXPIRATION_DAYS * 86400
         self.google_client = GoogleOAuthClient()
         self.spotify_client = SpotifyOAuthClient()
         # DB connection for token persistence
@@ -164,6 +165,30 @@ class AuthManager:
         token = jwt.encode(payload, self.jwt_secret, algorithm=self.jwt_algorithm)
         logger.info(f"Created JWT for user {user.get('email', user['id'])} via {provider}")
         return token
+
+    def create_refresh_token(self, user_id: str) -> str:
+        payload = {
+            'sub': str(user_id),
+            'type': 'refresh',
+            'iat': int(time.time()),
+            'exp': int(time.time()) + self.refresh_expiration,
+            'jti': str(uuid.uuid4()),
+        }
+        return jwt.encode(payload, self.jwt_secret, algorithm=self.jwt_algorithm)
+
+    def validate_refresh_token(self, token: str) -> Optional[Dict[str, Any]]:
+        try:
+            payload = jwt.decode(token, self.jwt_secret, algorithms=[self.jwt_algorithm])
+            if payload.get('type') != 'refresh':
+                logger.warning('Refresh token missing type=refresh')
+                return None
+            return payload
+        except jwt.ExpiredSignatureError:
+            logger.info('Refresh token expired')
+            return None
+        except jwt.InvalidTokenError:
+            logger.warning('Invalid refresh token')
+            return None
 
     def create_state_token(self, user_id: Optional[str] = None, ttl_seconds: int = 600) -> str:
         payload: Dict[str, Any] = {

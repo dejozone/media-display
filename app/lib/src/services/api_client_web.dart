@@ -16,7 +16,36 @@ final dioProvider = Provider<Dio>((ref) {
 
   final tokenStorage = TokenStorage();
   final authNotifier = ref.read(authStateProvider.notifier);
+  final envConfig = env;
   var clearingAuth = false;
+  var refreshing = false;
+
+  Future<String?> refreshToken() async {
+    if (refreshing) return null;
+    refreshing = true;
+    try {
+      final refreshDio = Dio(BaseOptions(
+        baseUrl: envConfig.apiBaseUrl,
+        connectTimeout: const Duration(seconds: 10),
+        receiveTimeout: const Duration(seconds: 15),
+        extra: {'withCredentials': true},
+      ));
+      final resp = await refreshDio.post('/api/auth/refresh');
+      final data = resp.data;
+      final token =
+          (data is Map<String, dynamic>) ? data['jwt'] as String? : null;
+      if (token != null && token.isNotEmpty) {
+        await tokenStorage.save(token);
+        await authNotifier.setToken(token);
+        return token;
+      }
+    } catch (_) {
+      // ignore
+    } finally {
+      refreshing = false;
+    }
+    return null;
+  }
 
   bool isUnauthorized(DioException e) {
     final status = e.response?.statusCode;
@@ -49,6 +78,7 @@ final dioProvider = Provider<Dio>((ref) {
 
   dio.interceptors.add(InterceptorsWrapper(
     onRequest: (options, handler) async {
+      options.extra['withCredentials'] = true;
       final token = await tokenStorage.load();
       if (token != null && token.isNotEmpty) {
         options.headers['Authorization'] = 'Bearer $token';
@@ -56,7 +86,20 @@ final dioProvider = Provider<Dio>((ref) {
       return handler.next(options);
     },
     onError: (e, handler) async {
-      if (isUnauthorized(e)) {
+      final req = e.requestOptions;
+      final alreadyRetried = req.extra['retried'] == true;
+      final isAuthEndpoint = req.path.contains('/api/auth/refresh');
+      if (isUnauthorized(e) && !alreadyRetried && !isAuthEndpoint) {
+        final newToken = await refreshToken();
+        if (newToken != null && newToken.isNotEmpty) {
+          final clone = await tokenStorage.load();
+          req.headers['Authorization'] = clone != null ? 'Bearer $clone' : null;
+          req.extra['retried'] = true;
+          try {
+            final retryResp = await dio.fetch(req);
+            return handler.resolve(retryResp);
+          } catch (_) {}
+        }
         await clearAuth();
       }
       return handler.next(e);

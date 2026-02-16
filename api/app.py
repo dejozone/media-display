@@ -2,7 +2,7 @@
 """
 Flask API for OAuth authentication and JWT management
 """
-from flask import Flask, request, jsonify, g, send_from_directory, redirect
+from flask import Flask, request, jsonify, g, send_from_directory, redirect, make_response
 from functools import wraps
 import secrets
 from flask_cors import CORS
@@ -13,7 +13,7 @@ from lib.utils.logger import auth_logger, server_logger
 from lib.utils.avatar import validate_avatar_file, get_mime_type, sanitize_avatar_filename
 
 app = Flask(__name__)
-CORS(app, origins=Config.CORS_ORIGINS)
+CORS(app, origins=Config.CORS_ORIGINS, supports_credentials=True)
 auth_manager = AuthManager()
 email_re = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 ASSETS_DIR = Config.ASSETS_ROOT
@@ -37,6 +37,30 @@ def require_auth(f):
         g.user_payload = payload
         return f(*args, **kwargs)
     return wrapper
+
+
+def _set_refresh_cookie(resp, refresh_token: str):
+    resp.set_cookie(
+        Config.REFRESH_TOKEN_COOKIE_NAME,
+        refresh_token,
+        httponly=True,
+        secure=Config.REFRESH_TOKEN_SECURE,
+        samesite=Config.REFRESH_TOKEN_SAMESITE,
+        max_age=Config.REFRESH_TOKEN_EXPIRATION_DAYS * 86400,
+        path='/api/auth',
+    )
+
+
+def _clear_refresh_cookie(resp):
+    resp.set_cookie(
+        Config.REFRESH_TOKEN_COOKIE_NAME,
+        '',
+        httponly=True,
+        secure=Config.REFRESH_TOKEN_SECURE,
+        samesite=Config.REFRESH_TOKEN_SAMESITE,
+        max_age=0,
+        path='/api/auth',
+    )
 
 # =============================================================================
 # Authentication Management API
@@ -85,8 +109,12 @@ def google_callback():
     token = auth_manager.login_with_google(code)
     if not token:
         return redirect(f"{frontend}/oauth/google/callback?error=auth_failed&message=Google OAuth failed")
-    # Redirect back to frontend with JWT; frontend should store token and continue.
-    return redirect(f"{frontend}/oauth/google/callback?jwt={token}")
+    payload = auth_manager.validate_jwt(token)
+    resp = make_response(redirect(f"{frontend}/oauth/google/callback?jwt={token}"))
+    if payload and payload.get('sub'):
+        refresh_token = auth_manager.create_refresh_token(payload['sub'])
+        _set_refresh_cookie(resp, refresh_token)
+    return resp
 
 @app.route('/api/auth/spotify/callback')
 def spotify_callback():
@@ -120,7 +148,12 @@ def spotify_callback():
         return jsonify({'error': 'Spotify OAuth failed'}), 401
     frontend = Config.FRONTEND_BASE_URL
     state_param = request.args.get('state')
-    return redirect(f"{frontend}/oauth/spotify/callback?jwt={token}" + (f"&state={state_param}" if state_param else ""))
+    payload = auth_manager.validate_jwt(token)
+    resp = make_response(redirect(f"{frontend}/oauth/spotify/callback?jwt={token}" + (f"&state={state_param}" if state_param else "")))
+    if payload and payload.get('sub'):
+        refresh_token = auth_manager.create_refresh_token(payload['sub'])
+        _set_refresh_cookie(resp, refresh_token)
+    return resp
 
 
 @app.route('/api/auth/<provider>/callback')
@@ -160,7 +193,46 @@ def api_auth_callback(provider: str):
         return jsonify({'error': f'{provider.capitalize()} OAuth failed'}), 401
     frontend = Config.FRONTEND_BASE_URL
     state_param = request.args.get('state')
-    return redirect(f"{frontend}/oauth/{provider}/callback?jwt={token}" + (f"&state={state_param}" if state_param else ""))
+    payload = auth_manager.validate_jwt(token)
+    resp = make_response(redirect(f"{frontend}/oauth/{provider}/callback?jwt={token}" + (f"&state={state_param}" if state_param else "")))
+    if payload and payload.get('sub'):
+        refresh_token = auth_manager.create_refresh_token(payload['sub'])
+        _set_refresh_cookie(resp, refresh_token)
+    return resp
+
+
+@app.route('/api/auth/refresh', methods=['POST', 'GET'])
+def refresh_jwt():
+    token = request.cookies.get(Config.REFRESH_TOKEN_COOKIE_NAME)
+    if not token:
+        auth_logger.warning('Refresh token missing')
+        return jsonify({'error': 'missing_refresh_token'}), 401
+    payload = auth_manager.validate_refresh_token(token)
+    if not payload or not payload.get('sub'):
+        auth_logger.warning('Refresh token invalid or expired')
+        resp = make_response(jsonify({'error': 'invalid_refresh_token'}), 401)
+        _clear_refresh_cookie(resp)
+        return resp
+
+    user = auth_manager.get_user(payload['sub'])
+    if not user:
+        auth_logger.warning('Refresh token user not found')
+        resp = make_response(jsonify({'error': 'user_not_found'}), 401)
+        _clear_refresh_cookie(resp)
+        return resp
+
+    new_access = auth_manager.create_jwt(user, provider='refresh')
+    new_refresh = auth_manager.create_refresh_token(payload['sub'])
+    resp = make_response(jsonify({'jwt': new_access}), 200)
+    _set_refresh_cookie(resp, new_refresh)
+    return resp
+
+
+@app.route('/api/auth/logout', methods=['POST'])
+def logout_user():
+    resp = make_response(jsonify({'message': 'logged out'}), 200)
+    _clear_refresh_cookie(resp)
+    return resp
 
 @app.route('/api/auth/validate', methods=['POST', 'GET'])
 def validate_jwt():

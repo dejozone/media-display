@@ -121,8 +121,20 @@ class Config:
     # JWT SETTINGS (combined from JSON config and .env)
     # =============================================================================
     JWT_SECRET = os.getenv('JWT_SECRET', SECRET_KEY)  # from .env (secure)
-    JWT_ALGORITHM = CONFIG['jwt']['algorithm']
-    JWT_EXPIRATION_HOURS = CONFIG['jwt']['expirationHours']
+    _jwt_cfg = CONFIG.get('jwt', {}) if isinstance(CONFIG, dict) else {}
+    JWT_ALGORITHM = _jwt_cfg.get('algorithm', 'HS256')
+    JWT_EXPIRATION_HOURS = _jwt_cfg.get('expirationHours', 24)
+
+    _refresh_exp_days_raw = _jwt_cfg.get('refreshExpirationDays', 30)
+    try:
+        REFRESH_TOKEN_EXPIRATION_DAYS = int(_refresh_exp_days_raw)
+    except (TypeError, ValueError):
+        REFRESH_TOKEN_EXPIRATION_DAYS = 30
+
+    REFRESH_TOKEN_COOKIE_NAME = _jwt_cfg.get('refreshCookieName', 'refresh_token')
+    _refresh_secure_raw = _jwt_cfg.get('refreshSecure', True)
+    REFRESH_TOKEN_SECURE = _refresh_secure_raw if isinstance(_refresh_secure_raw, bool) else str(_refresh_secure_raw).lower() == 'true'
+    REFRESH_TOKEN_SAMESITE = _jwt_cfg.get('refreshSameSite', 'Lax')
     
     # =============================================================================
     # SESSION SETTINGS (from JSON config)
