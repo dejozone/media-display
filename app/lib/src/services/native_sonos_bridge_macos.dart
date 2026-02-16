@@ -39,7 +39,7 @@ class NativeSonosBridge {
 
   Stream<NativeSonosMessage> get messages => _controller.stream;
 
-  void _updateCurrentTrack(Map<String, dynamic?> updates) {
+  void _updateCurrentTrack(Map<String, dynamic> updates) {
     final merged = Map<String, dynamic>.from(_currentTrack ?? const {});
     updates.forEach((key, value) {
       if (value != null) {
