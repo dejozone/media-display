@@ -520,7 +520,20 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     if (currentService != null && !enabled.contains(currentService)) {
       _log(
           'Current service $currentService is disabled, finding next available');
-      final next = state.getNextAvailableService();
+      // Try normal availability first.
+      var next = state.getNextAvailableService();
+      // If nothing is available (e.g., cooldown/awaiting-recovery), reset the
+      // highest-priority enabled service to standby so it can be retried now.
+      if (next == null) {
+        final candidate = _firstEnabledService();
+        if (candidate != null) {
+          _log(
+              'No available service due to cooldown/recovery; resetting $candidate to standby for retry');
+          _makeServiceAvailable(candidate);
+          next = state.getNextAvailableService();
+        }
+      }
+
       _log('Next available service: $next');
       if (next != null) {
         activateService(next);
@@ -557,6 +570,49 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     if (!setEquals(state.unhealthyServices, unhealthy)) {
       state = state.copyWith(unhealthyServices: unhealthy);
     }
+  }
+
+  // Force a service out of cooldown/recovery so it can be retried immediately.
+  void _makeServiceAvailable(ServiceType service) {
+    if (!state.enabledServices.contains(service)) return;
+
+    final statuses = Map<ServiceType, ServiceStatus>.from(state.serviceStatuses);
+    final errors = Map<ServiceType, int>.from(state.errorCounts);
+    final cooldowns = Map<ServiceType, DateTime?>.from(state.cooldownEnds);
+    final retryWindows =
+        Map<ServiceType, DateTime?>.from(state.retryWindowStarts);
+    final lastRetries =
+        Map<ServiceType, DateTime?>.from(state.lastRetryAttempts);
+
+    statuses[service] = ServiceStatus.standby;
+    errors[service] = 0;
+    cooldowns[service] = null;
+    retryWindows[service] = null;
+    lastRetries[service] = null;
+    _fallbackThresholdConsumed[service] = false;
+    _cancelFallbackTimer(service);
+
+    final awaiting = Set<ServiceType>.from(state.awaitingRecovery)
+      ..remove(service);
+    final recovery = Map<ServiceType, ServiceRecoveryState>.from(state.recoveryStates)
+      ..remove(service);
+
+    state = state.copyWith(
+      serviceStatuses: statuses,
+      errorCounts: errors,
+      cooldownEnds: cooldowns,
+      retryWindowStarts: retryWindows,
+      lastRetryAttempts: lastRetries,
+      awaitingRecovery: awaiting,
+      recoveryStates: recovery,
+    );
+  }
+
+  ServiceType? _firstEnabledService() {
+    for (final service in state.configuredOrder) {
+      if (state.enabledServices.contains(service)) return service;
+    }
+    return null;
   }
 
   /// Mark a cloud service as awaiting server-side recovery to avoid churn

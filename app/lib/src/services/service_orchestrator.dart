@@ -334,8 +334,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     final sonosDisabled =
         !next.enabledServices.contains(ServiceType.nativeLocalSonos);
     final sonosNewlyDisabled = sonosWasEnabled && sonosDisabled;
-    if (sonosNewlyDisabled &&
-        currentService != ServiceType.nativeLocalSonos) {
+    if (sonosNewlyDisabled) {
       _log('Stopping native Sonos bridge (reason=sonos disabled)');
       ref.read(nativeSonosProvider.notifier).stop();
     }
