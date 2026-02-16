@@ -32,21 +32,22 @@ class NativeSonosBridge {
 
   // Last known playback state from events
   String _transportState = 'UNKNOWN';
-  String? _currentTitle;
-  String? _currentAlbum;
-  List<String> _currentArtists = const [];
-  String? _currentAlbumArt;
-  String? _currentTrackId;
-  int? _currentDurationMs;
-  int? _currentProgressMs;
+  Map<String, dynamic>? _currentTrack;
   Map<String, dynamic>? _playlist;
-  String? _nextTrackTitle;
-  String? _nextTrackArtist;
-  String? _nextTrackAlbum;
-  String? _nextTrackArtworkUrl;
+  Map<String, dynamic>? _nextTrack;
   bool get isSupported => Platform.isMacOS;
 
   Stream<NativeSonosMessage> get messages => _controller.stream;
+
+  void _updateCurrentTrack(Map<String, dynamic?> updates) {
+    final merged = Map<String, dynamic>.from(_currentTrack ?? const {});
+    updates.forEach((key, value) {
+      if (value != null) {
+        merged[key] = value;
+      }
+    });
+    _currentTrack = merged;
+  }
 
   Future<bool> probe({Duration timeout = const Duration(seconds: 15)}) async {
     try {
@@ -120,7 +121,7 @@ class NativeSonosBridge {
           final progressStr = liveMedia['current_progress_time'] as String?;
           final progressMs = _parseDurationMs(progressStr);
           if (progressMs != null) {
-            _currentProgressMs = progressMs;
+            _updateCurrentTrack({'progress_ms': progressMs});
           }
         }
       }
@@ -148,22 +149,22 @@ class NativeSonosBridge {
         'coordinator': _deviceIsCoordinator,
       };
 
+      final artists = (_currentTrack?['artists'] as List<String>?) ??
+          const <String>[];
+
       final trackBlock = <String, dynamic>{
-        if (_currentTrackId != null) 'id': _currentTrackId,
-        'title': _currentTitle ?? '',
-        'artist': _currentArtists.isNotEmpty ? _currentArtists.first : '',
-        'album': _currentAlbum,
-        'artwork_url': _currentAlbumArt,
-        'duration_ms': _currentDurationMs,
+        if (_currentTrack != null && _currentTrack!['id'] != null)
+          'id': _currentTrack!['id'],
+        'title': (_currentTrack?['title'] as String?) ?? '',
+        'artist': artists.isNotEmpty ? artists.first : '',
+        'album': _currentTrack?['album'],
+        'artwork_url': _currentTrack?['artwork_url'],
+        'duration_ms': _currentTrack?['duration_ms'],
         if (_playlist != null) 'playlist': _playlist,
       };
 
-      final nextTrackBlock = <String, dynamic>{
-        if (_nextTrackTitle != null) 'title': _nextTrackTitle,
-        if (_nextTrackArtist != null) 'artist': _nextTrackArtist,
-        if (_nextTrackAlbum != null) 'album': _nextTrackAlbum,
-        if (_nextTrackArtworkUrl != null) 'artwork_url': _nextTrackArtworkUrl,
-      };
+      final nextTrackBlock = _nextTrack ?? const {};
+      final progressMs = _currentTrack?['progress_ms'] as int?;
 
       final payload = <String, dynamic>{
         // Server-aligned envelope
@@ -178,7 +179,7 @@ class NativeSonosBridge {
           // Playback: server shape + progress placeholder
           'playback': {
             'is_playing': isPlaying,
-            'progress_ms': _currentProgressMs,
+            'progress_ms': progressMs,
             'timestamp': DateTime.now().millisecondsSinceEpoch,
             'status': playbackStatus,
             if (nextTrackBlock.isNotEmpty) 'next_track': nextTrackBlock,
@@ -427,10 +428,16 @@ class NativeSonosBridge {
         final nextMetaVal = nextMetaNode?.getAttribute('val');
         if (nextMetaVal != null && nextMetaVal.isNotEmpty && nextMetaVal != 'NOT_IMPLEMENTED') {
           final nextMeta = _parseTrackMeta(nextMetaVal);
-          _nextTrackTitle = nextMeta.title;
-          _nextTrackArtist = nextMeta.creator;
-          _nextTrackAlbum = nextMeta.album;
-          _nextTrackArtworkUrl = nextMeta.artworkUrl;
+          _nextTrack = {
+            if (nextMeta.title != null && nextMeta.title!.isNotEmpty)
+              'title': nextMeta.title,
+            if (nextMeta.creator != null && nextMeta.creator!.isNotEmpty)
+              'artist': nextMeta.creator,
+            if (nextMeta.album != null && nextMeta.album!.isNotEmpty)
+              'album': nextMeta.album,
+            if (nextMeta.artworkUrl != null && nextMeta.artworkUrl!.isNotEmpty)
+              'artwork_url': nextMeta.artworkUrl,
+          };
         }
       }
 
@@ -464,16 +471,17 @@ class NativeSonosBridge {
       // _log('DIDL item=${item?.toXmlString(pretty: true)}', level: Level.FINE);
       if (item == null) return;
       final trackId = _findTrackId(item);
-      if (trackId != null && trackId.isNotEmpty) {
-        _currentTrackId = trackId;
-      }
-      _currentTitle = _findText(item, const ['title']);
-      _currentAlbum = _findText(item, const ['album']);
       final creator = _findText(item, const ['creator', 'artist']);
-      _currentArtists =
-          creator != null && creator.isNotEmpty ? [creator] : const [];
-      _currentAlbumArt = _findText(item, const ['albumarturi', 'albumarturl']);
-      _currentDurationMs = _findDurationMs(item) ?? _currentDurationMs;
+      final artists =
+          creator != null && creator.isNotEmpty ? [creator] : const <String>[];
+      _updateCurrentTrack({
+        'id': trackId,
+        'title': _findText(item, const ['title']),
+        'album': _findText(item, const ['album']),
+        'artists': artists,
+        'artwork_url': _findText(item, const ['albumarturi', 'albumarturl']),
+        'duration_ms': _findDurationMs(item),
+      });
     } catch (e) {
       _log('DIDL parse error: $e', level: Level.FINE);
     }
