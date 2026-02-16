@@ -69,7 +69,7 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
 
     final keys = payload.keys.join(',');
     _log(
-        'Native Sonos payload summary: keys=[$keys], device=$deviceName (isCoordinator=$isCoordinator)');
+        'Payload summary: keys=[$keys], device=$deviceName (isCoordinator=$isCoordinator)');
   }
 
   String? _coordinatorName(Map<String, dynamic> payload) {
@@ -94,7 +94,7 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
   Future<void> start({int? pollIntervalSec}) async {
     // If already running and connected, avoid tearing down and re-subscribing.
     if (state.isRunning && state.connected) {
-      _log('Native Sonos already running and connected; skipping restart');
+      _log('Already running and connected; skipping restart');
       return;
     }
 
@@ -106,14 +106,14 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
 
     final bridge = _bridge ??= createNativeSonosBridge();
     _log(
-        'Native Sonos bridge created (supported=${bridge.isSupported}, type=${bridge.runtimeType})',
+        'Bridge created (supported=${bridge.isSupported}, type=${bridge.runtimeType})',
         level: Level.FINE);
     if (!bridge.isSupported) {
       _log(
-          'Native Sonos bridge not available on this platform; falling back to local Sonos if enabled',
+          'Bridge not available on this platform; falling back to local Sonos if enabled',
           level: Level.WARNING);
       state = state.copyWith(
-        error: 'Native Sonos bridge not available on this platform',
+        error: 'Bridge not available on this platform',
         connected: false,
         isRunning: false,
       );
@@ -129,11 +129,11 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
     _subscription = bridge.messages.listen(
       _handleMessage,
       onError: (err, __) {
-        _log('Native Sonos stream error: $err', level: Level.WARNING);
+        _log('Stream error: $err', level: Level.WARNING);
         state = state.copyWith(error: err.toString(), connected: false);
       },
       onDone: () {
-        _log('Native Sonos stream closed');
+        _log('Stream closed');
         state = state.copyWith(isRunning: false, connected: false);
       },
       cancelOnError: false,
@@ -178,7 +178,7 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
     try {
       // _log('Probing native Sonos bridge for devices/coordinator');
       final result = await bridge.probe();
-      _log('Native Sonos probe result: ${result ? 'success' : 'no devices'}');
+      _log('Probe result: ${result ? 'success' : 'no devices'}');
       return result;
     } catch (e) {
       _log('Probe failed: $e', level: Level.WARNING);
@@ -197,13 +197,13 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
     }
 
     if (message.serviceStatus != null) {
-      _log('Native Sonos serviceStatus: ${message.serviceStatus}');
+      _log('Service status: ${message.serviceStatus}');
     }
 
     if (message.payload != null) {
       if (!_isCoordinatorPayload(message.payload!)) {
         _log(
-            'Native Sonos payload missing coordinator device; treating as failure',
+            'Payload missing coordinator device; treating as failure',
             level: Level.WARNING);
         _logPayloadSummary(message.payload!);
         state = state.copyWith(
@@ -212,12 +212,9 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
           clearPayload: true,
         );
       } else {
-        _log(
-            'Native Sonos payload received (keys=${message.payload!.keys.join(',')})',
-            level: Level.FINE);
         final coordinatorName = _coordinatorName(message.payload!);
         if (coordinatorName != null) {
-          _log('Native Sonos coordinator detected: $coordinatorName');
+          _log('Using coordinator: $coordinatorName');
         }
         _logPayloadSummary(message.payload!);
         state = state.copyWith(
@@ -229,7 +226,7 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
     }
 
     if (message.error != null) {
-      _log('Native Sonos error message: ${message.error}',
+      _log('Error message: ${message.error}',
           level: Level.WARNING);
       state = state.copyWith(
         error: message.error,
@@ -241,7 +238,7 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
         message.error == null &&
         message.serviceStatus == null) {
       _log(
-          'Native Sonos message received with no payload/status/error; ignoring',
+          'Message received with no payload/status/error; ignoring',
           level: Level.FINE);
     }
   }

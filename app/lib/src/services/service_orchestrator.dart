@@ -247,7 +247,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
         return false;
 
       case ServiceType.nativeLocalSonos:
-        // Native Sonos: probe locally (if supported)
+        // Probe locally (if supported)
         return ref.read(nativeSonosProvider.notifier).probe();
     }
   }

@@ -196,7 +196,7 @@ class NativeSonosBridge {
           'provider': 'sonos',
         },
       };
-      _log('Emitting native payload: ${jsonEncode(payload)}',
+      _log('Emitting payload: ${jsonEncode(payload)}',
           level: Level.FINE);
       _controller.add(NativeSonosMessage(payload: payload));
     } catch (e) {
