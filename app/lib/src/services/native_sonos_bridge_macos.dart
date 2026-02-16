@@ -155,8 +155,10 @@ class NativeSonosBridge {
         'coordinator': coordIsCoordinator,
       };
 
-      final artists =
-          (_currentTrack?['artists'] as List<String>?) ?? const <String>[];
+      final artistsRaw = _currentTrack?['artists'];
+      final artists = artistsRaw is List
+          ? artistsRaw.whereType<String>().toList()
+          : const <String>[];
 
       final trackBlock = <String, dynamic>{
         if (_currentTrack != null && _currentTrack!['id'] != null)
@@ -196,8 +198,7 @@ class NativeSonosBridge {
           'provider': 'sonos',
         },
       };
-      _log('Emitting payload: ${jsonEncode(payload)}',
-          level: Level.FINE);
+      _log('Emitting payload: ${jsonEncode(payload)}', level: Level.FINE);
       _controller.add(NativeSonosMessage(payload: payload));
     } catch (e) {
       _log('Error emitting payload: $e', level: Level.FINE);
