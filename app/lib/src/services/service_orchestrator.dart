@@ -328,18 +328,15 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     final prevEnabled = prev?.enabledServices ?? const {};
     final sonosWasEnabled = prevEnabled.contains(ServiceType.nativeLocalSonos);
 
-    // If we were on native-local Sonos and Sonos gets disabled or we switch
-    // away, tear down the native bridge so it stops receiving NOTIFY events.
+    // Keep native Sonos running when switching away so re-activation is fast.
+    // Only tear down when the user disables Sonos entirely or during global
+    // stop/reset paths.
     final sonosDisabled =
         !next.enabledServices.contains(ServiceType.nativeLocalSonos);
-    final leftNativeSonos = prevService == ServiceType.nativeLocalSonos &&
-        currentService != ServiceType.nativeLocalSonos;
     final sonosNewlyDisabled = sonosWasEnabled && sonosDisabled;
-    if (leftNativeSonos ||
-        (sonosNewlyDisabled &&
-            currentService != ServiceType.nativeLocalSonos)) {
-      _log(
-          'Stopping native Sonos bridge (reason=${leftNativeSonos ? 'service switched' : 'sonos disabled'})');
+    if (sonosNewlyDisabled &&
+        currentService != ServiceType.nativeLocalSonos) {
+      _log('Stopping native Sonos bridge (reason=sonos disabled)');
       ref.read(nativeSonosProvider.notifier).stop();
     }
 
