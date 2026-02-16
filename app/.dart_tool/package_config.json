@@ -3,13 +3,13 @@
   "packages": [
     {
       "name": "_fe_analyzer_shared",
-      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/_fe_analyzer_shared-91.0.0",
+      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/_fe_analyzer_shared-92.0.0",
       "packageUri": "lib/",
       "languageVersion": "3.9"
     },
     {
       "name": "analyzer",
-      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/analyzer-8.4.1",
+      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/analyzer-9.0.0",
       "packageUri": "lib/",
       "languageVersion": "3.9"
     },
@@ -381,7 +381,7 @@
     },
     {
       "name": "petitparser",
-      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/petitparser-7.0.1",
+      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/petitparser-7.0.2",
       "packageUri": "lib/",
       "languageVersion": "3.8"
     },
@@ -579,7 +579,7 @@
     },
     {
       "name": "url_launcher_ios",
-      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/url_launcher_ios-6.4.0",
+      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/url_launcher_ios-6.4.1",
       "packageUri": "lib/",
       "languageVersion": "3.10"
     },

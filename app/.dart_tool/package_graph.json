@@ -319,7 +319,7 @@
     },
     {
       "name": "petitparser",
-      "version": "7.0.1",
+      "version": "7.0.2",
       "dependencies": [
         "collection",
         "meta"
@@ -508,7 +508,7 @@
     },
     {
       "name": "url_launcher_ios",
-      "version": "6.4.0",
+      "version": "6.4.1",
       "dependencies": [
         "flutter",
         "url_launcher_platform_interface"
@@ -989,7 +989,7 @@
     },
     {
       "name": "analyzer",
-      "version": "8.4.1",
+      "version": "9.0.0",
       "dependencies": [
         "_fe_analyzer_shared",
         "collection",
@@ -1077,7 +1077,7 @@
     },
     {
       "name": "_fe_analyzer_shared",
-      "version": "91.0.0",
+      "version": "92.0.0",
       "dependencies": [
         "meta"
       ]

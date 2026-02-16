@@ -16,10 +16,7 @@ class NativeSonosBridge {
   final _controller = StreamController<NativeSonosMessage>.broadcast();
   Timer? _pollTimer;
   bool _running = false;
-  String? _deviceIp;
-  String? _deviceName;
-  bool _deviceIsCoordinator = false;
-  String? _coordinatorUuid;
+  Map<String, dynamic>? _coordinatorDevice;
   List<_GroupDevice> _groupDevices = const [];
 
   // Event subscription
@@ -38,6 +35,16 @@ class NativeSonosBridge {
   bool get isSupported => Platform.isMacOS;
 
   Stream<NativeSonosMessage> get messages => _controller.stream;
+
+  void _setCoordinator(_SonosDevice device) {
+    _coordinatorDevice = {
+      'id': device.uuid,
+      'displayName': device.name,
+      'ip': device.ip,
+      'isCoordinator': device.isCoordinator,
+    };
+    _groupDevices = device.groupDevices ?? const [];
+  }
 
   void _updateCurrentTrack(Map<String, dynamic> updates) {
     final merged = Map<String, dynamic>.from(_currentTrack ?? const {});
@@ -59,11 +66,7 @@ class NativeSonosBridge {
 
       final device = await _discoverCoordinator(timeout: timeout);
       if (device == null) return false;
-      _deviceIp = device.ip;
-      _deviceName = device.name;
-      _deviceIsCoordinator = device.isCoordinator;
-      _coordinatorUuid = device.uuid;
-      _groupDevices = device.groupDevices ?? const [];
+      _setCoordinator(device);
       return true;
     } catch (_) {
       _log('Probe failed (swallowed for probe semantics)', level: Level.FINE);
@@ -80,17 +83,14 @@ class NativeSonosBridge {
       throw Exception('No Sonos devices found on the local network');
     }
 
-    _deviceIp = device.ip;
-    _deviceName = device.name;
-    _deviceIsCoordinator = true; // We only emit a single chosen coordinator
-    _coordinatorUuid = device.uuid;
-    _groupDevices = device.groupDevices ?? const [];
-    _log('Using coordinator $_deviceName@$_deviceIp', level: Level.INFO);
-    await _ensureEventSubscription(_deviceIp!);
+    _setCoordinator(device.copyWith(isCoordinator: true));
+    final ip = _coordinatorDevice?['ip'] as String?;
+    final name = _coordinatorDevice?['displayName'] as String?;
+    _log('Using coordinator "$name@$ip"', level: Level.INFO);
+    if (ip != null) {
+      await _ensureEventSubscription(ip);
+    }
     _running = true;
-
-    // Emit once on startup; subsequent updates come from event callbacks.
-    await _emitPayload();
   }
 
   Future<void> stop() async {
@@ -111,12 +111,18 @@ class NativeSonosBridge {
     ));
   }
 
-  Future<void> _emitPayload({bool isGetLiveMediaProgress = true}) async {
-    if (!_running || _deviceIp == null) return;
+  Future<void> _emitPayload({bool isGetLiveMediaProgress = false}) async {
+    final coord = _coordinatorDevice;
+    final coordIp = coord?['ip'] as String?;
+    final coordDisplayName = coord?['displayName'] as String?;
+    final coordId = coord?['id'] as String?;
+    final coordIsCoordinator = coord?['isCoordinator'] as bool? ?? false;
+
+    if (coordIp == null || coordId == null) return;
 
     try {
       if (isGetLiveMediaProgress) {
-        final liveMedia = await _getLiveMedia(host: _deviceIp);
+        final liveMedia = await _getLiveMedia(host: coordIp);
         if (liveMedia != null) {
           final progressStr = liveMedia['current_progress_time'] as String?;
           final progressMs = _parseDurationMs(progressStr);
@@ -129,7 +135,7 @@ class NativeSonosBridge {
       final activeStates = {'PLAYING', 'TRANSITIONING', 'BUFFERING'};
       final isPlaying = activeStates.contains(_transportState);
       final playbackStatus = _transportState.toLowerCase();
-      final deviceName = _deviceName ?? 'Sonos';
+      final deviceName = coordDisplayName ?? 'Sonos';
       final groupDevices = _groupDevices
           .where((gd) => gd.name.isNotEmpty)
           .map((gd) => {
@@ -144,13 +150,13 @@ class NativeSonosBridge {
         'name': deviceName,
         'type': 'speaker',
         'group_devices': groupDevices,
-        'ip': _deviceIp,
-        'uuid': _coordinatorUuid,
-        'coordinator': _deviceIsCoordinator,
+        'ip': coordIp,
+        'uuid': coordId,
+        'coordinator': coordIsCoordinator,
       };
 
-      final artists = (_currentTrack?['artists'] as List<String>?) ??
-          const <String>[];
+      final artists =
+          (_currentTrack?['artists'] as List<String>?) ?? const <String>[];
 
       final trackBlock = <String, dynamic>{
         if (_currentTrack != null && _currentTrack!['id'] != null)
@@ -333,11 +339,11 @@ class NativeSonosBridge {
     _subscriptionRenewTimer = null;
     final sid = _subscriptionSid;
     _subscriptionSid = null;
-    if (sid == null || _deviceIp == null) return;
+    final ip = _coordinatorDevice?['ip'] as String?;
+    if (sid == null || ip == null) return;
     try {
       final resp = await _makeApiCall(
-        url: Uri.parse(
-            'http://$_deviceIp:1400/MediaRenderer/AVTransport/Event'),
+        url: Uri.parse('http://$ip:1400/MediaRenderer/AVTransport/Event'),
         method: 'UNSUBSCRIBE',
         headers: {'SID': sid},
       );
@@ -414,10 +420,13 @@ class NativeSonosBridge {
 
         final playlistNode = inst.descendants
             .whereType<xml.XmlElement>()
-            .where((e) => e.name.local.toLowerCase() == 'enqueuedtransporturimetadata')
+            .where((e) =>
+                e.name.local.toLowerCase() == 'enqueuedtransporturimetadata')
             .firstOrNull;
         final playlistMeta = playlistNode?.getAttribute('val');
-        if (playlistMeta != null && playlistMeta.isNotEmpty && playlistMeta != 'NOT_IMPLEMENTED') {
+        if (playlistMeta != null &&
+            playlistMeta.isNotEmpty &&
+            playlistMeta != 'NOT_IMPLEMENTED') {
           _playlist = _parsePlaylist(playlistMeta);
         }
 
@@ -426,7 +435,9 @@ class NativeSonosBridge {
             .where((e) => e.name.local.toLowerCase() == 'nexttrackmetadata')
             .firstOrNull;
         final nextMetaVal = nextMetaNode?.getAttribute('val');
-        if (nextMetaVal != null && nextMetaVal.isNotEmpty && nextMetaVal != 'NOT_IMPLEMENTED') {
+        if (nextMetaVal != null &&
+            nextMetaVal.isNotEmpty &&
+            nextMetaVal != 'NOT_IMPLEMENTED') {
           final nextMeta = _parseTrackMeta(nextMetaVal);
           _nextTrack = {
             if (nextMeta.title != null && nextMeta.title!.isNotEmpty)
@@ -489,8 +500,9 @@ class NativeSonosBridge {
 
   Future<Map<String, dynamic>?> _getLiveMedia({String? host}) async {
     // Sonos does not include position in AVTransport events; fetch it via GetPositionInfo.
+    final name = _coordinatorDevice?['displayName'] as String?;
     _log(
-        'Attempting get live data about the media via GetPositionInfo from $_deviceName at $host',
+        'Attempting get live data about the media via GetPositionInfo from ${name ?? 'Sonos'} at $host',
         level: Level.FINE);
     if (host == null) return null;
     try {
@@ -753,7 +765,6 @@ class NativeSonosBridge {
       found = true;
       socket.readEventsEnabled = false;
       await sub?.cancel();
-      _deviceIsCoordinator = chosen?.isCoordinator ?? false;
       completer.complete(chosen);
       socket.close();
     }
@@ -812,14 +823,16 @@ class NativeSonosBridge {
   }
 
   _SonosDevice? _cachedCoordinator() {
-    if (_deviceIp == null || _deviceName == null || _coordinatorUuid == null) {
-      return null;
-    }
+    final ip = _coordinatorDevice?['ip'] as String?;
+    final name = _coordinatorDevice?['displayName'] as String?;
+    final id = _coordinatorDevice?['id'] as String?;
+    final isCoord = _coordinatorDevice?['isCoordinator'] as bool? ?? false;
+    if (ip == null || name == null || id == null) return null;
     return _SonosDevice(
-      ip: _deviceIp!,
-      name: _deviceName!,
-      uuid: _coordinatorUuid,
-      isCoordinator: true,
+      ip: ip,
+      name: name,
+      uuid: id,
+      isCoordinator: isCoord,
       groupDevices: _groupDevices,
     );
   }
