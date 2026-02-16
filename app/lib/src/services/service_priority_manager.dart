@@ -576,7 +576,8 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
   void _makeServiceAvailable(ServiceType service) {
     if (!state.enabledServices.contains(service)) return;
 
-    final statuses = Map<ServiceType, ServiceStatus>.from(state.serviceStatuses);
+    final statuses =
+        Map<ServiceType, ServiceStatus>.from(state.serviceStatuses);
     final errors = Map<ServiceType, int>.from(state.errorCounts);
     final cooldowns = Map<ServiceType, DateTime?>.from(state.cooldownEnds);
     final retryWindows =
@@ -594,8 +595,9 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
 
     final awaiting = Set<ServiceType>.from(state.awaitingRecovery)
       ..remove(service);
-    final recovery = Map<ServiceType, ServiceRecoveryState>.from(state.recoveryStates)
-      ..remove(service);
+    final recovery =
+        Map<ServiceType, ServiceRecoveryState>.from(state.recoveryStates)
+          ..remove(service);
 
     state = state.copyWith(
       serviceStatuses: statuses,
