@@ -115,6 +115,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
   bool _initialized = false;
   bool _authInitListenerStarted = false;
+  bool _settingsLoaded = false;
 
   // Service cycling state
   ServiceType? _pausedService;
@@ -200,6 +201,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
     // Load user settings to determine which services are enabled
     final settingsLoaded = await _loadServicesSettings();
+    _settingsLoaded = settingsLoaded;
 
     // Start listening to service changes
     _startServiceWatchers();
@@ -218,6 +220,8 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       ref.read(servicePriorityProvider.notifier).restartInitialActivation();
     } else {
       _log('Skipping initial activation because settings failed to load');
+      // Allow re-init after user re-authenticates or settings become available.
+      _initialized = false;
     }
   }
 
@@ -277,6 +281,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       return true;
     } catch (e) {
       _log('Failed to load settings: $e');
+      _settingsLoaded = false;
       return false;
     }
   }
@@ -290,6 +295,14 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       if (prev?.isAuthenticated == true && !next.isAuthenticated) {
         _log('User logged out - stopping all services');
         _stopAllServices();
+        _settingsLoaded = false;
+        _initialized = false;
+      } else if (prev?.isAuthenticated != true && next.isAuthenticated) {
+        // User just logged in; if initialization was blocked by auth/settings, retry init.
+        if (!_initialized || !_settingsLoaded) {
+          _log('Auth available; resuming initialization');
+          _initialize();
+        }
       }
     });
 
@@ -2080,6 +2093,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     _lastPlayingTime = null;
     _lastIdleResetAt = null;
     _initialized = false;
+    _settingsLoaded = false;
 
     // Reset cycling state
     _resetCyclingState();
@@ -2120,6 +2134,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     _lastPlayingTime = null;
     _lastIdleResetAt = null;
     _initialized = false;
+    _settingsLoaded = false;
     _resetCyclingState();
     _lastIsPlaying.clear();
 
