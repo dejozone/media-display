@@ -337,7 +337,7 @@ class NativeSonosBridge {
     try {
       final resp = await _makeApiCall(
         url: Uri.parse(
-            'http://${_deviceIp}:1400/MediaRenderer/AVTransport/Event'),
+            'http://$_deviceIp:1400/MediaRenderer/AVTransport/Event'),
         method: 'UNSUBSCRIBE',
         headers: {'SID': sid},
       );
