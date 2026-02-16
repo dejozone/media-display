@@ -39,7 +39,7 @@ class NativeSonosBridge {
   String? _currentTrackId;
   int? _currentDurationMs;
   int? _currentProgressMs;
-  String? _playlistTitle;
+  Map<String, dynamic>? _playlist;
   String? _nextTrackTitle;
   String? _nextTrackArtist;
   String? _nextTrackAlbum;
@@ -155,10 +155,7 @@ class NativeSonosBridge {
         'album': _currentAlbum,
         'artwork_url': _currentAlbumArt,
         'duration_ms': _currentDurationMs,
-        if (_playlistTitle != null)
-          'playlist': {
-            'title': _playlistTitle,
-          },
+        if (_playlist != null) 'playlist': _playlist,
       };
 
       final nextTrackBlock = <String, dynamic>{
@@ -420,7 +417,7 @@ class NativeSonosBridge {
             .firstOrNull;
         final playlistMeta = playlistNode?.getAttribute('val');
         if (playlistMeta != null && playlistMeta.isNotEmpty && playlistMeta != 'NOT_IMPLEMENTED') {
-          _playlistTitle = _parsePlaylistTitle(playlistMeta);
+          _playlist = _parsePlaylist(playlistMeta);
         }
 
         final nextMetaNode = inst.descendants
@@ -584,12 +581,17 @@ class NativeSonosBridge {
     return null;
   }
 
-  String? _parsePlaylistTitle(String? raw) {
+  Map<String, dynamic>? _parsePlaylist(String? raw) {
     if (raw == null || raw.isEmpty || raw == 'NOT_IMPLEMENTED') return null;
     try {
       final doc = xml.XmlDocument.parse(raw);
-      final title = doc.findAllElements('title').firstOrNull?.innerText;
-      return title?.isNotEmpty == true ? title : null;
+      final titleEl = doc.descendants
+          .whereType<xml.XmlElement>()
+          .where((e) => e.name.local.toLowerCase() == 'title')
+          .firstOrNull;
+      final title = titleEl?.innerText.trim();
+      if (title == null || title.isEmpty) return null;
+      return {'title': title};
     } catch (_) {
       return null;
     }
