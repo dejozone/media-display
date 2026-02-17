@@ -160,6 +160,7 @@ class SpotifyManager:
                         was_healthy = True
                     
                     payload = resp.json()
+                    self.logger.info("spotify: received payload: %s", payload)
                     etag = resp.headers.get("ETag", etag)
                     if payload != last_payload:
                         self.logger.info("spotify: new now-playing payload")

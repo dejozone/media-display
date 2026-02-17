@@ -147,7 +147,7 @@
     },
     {
       "name": "flutter",
-      "rootUri": "file:///opt/homebrew/share/flutter/packages/flutter",
+      "rootUri": "file:///Users/hthai00/fvm/versions/3.41.1/packages/flutter",
       "packageUri": "lib/",
       "languageVersion": "3.9"
     },
@@ -183,13 +183,13 @@
     },
     {
       "name": "flutter_test",
-      "rootUri": "file:///opt/homebrew/share/flutter/packages/flutter_test",
+      "rootUri": "file:///Users/hthai00/fvm/versions/3.41.1/packages/flutter_test",
       "packageUri": "lib/",
       "languageVersion": "3.9"
     },
     {
       "name": "flutter_web_plugins",
-      "rootUri": "file:///opt/homebrew/share/flutter/packages/flutter_web_plugins",
+      "rootUri": "file:///Users/hthai00/fvm/versions/3.41.1/packages/flutter_web_plugins",
       "packageUri": "lib/",
       "languageVersion": "3.9"
     },
@@ -489,7 +489,7 @@
     },
     {
       "name": "sky_engine",
-      "rootUri": "file:///opt/homebrew/share/flutter/bin/cache/pkg/sky_engine",
+      "rootUri": "file:///Users/hthai00/fvm/versions/3.41.1/bin/cache/pkg/sky_engine",
       "packageUri": "lib/",
       "languageVersion": "3.9"
     },
@@ -543,19 +543,19 @@
     },
     {
       "name": "test",
-      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/test-1.28.0",
+      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/test-1.29.0",
       "packageUri": "lib/",
       "languageVersion": "3.7"
     },
     {
       "name": "test_api",
-      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/test_api-0.7.8",
+      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/test_api-0.7.9",
       "packageUri": "lib/",
       "languageVersion": "3.7"
     },
     {
       "name": "test_core",
-      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/test_core-0.6.14",
+      "rootUri": "file:///Users/hthai00/.pub-cache/hosted/pub.dev/test_core-0.6.15",
       "packageUri": "lib/",
       "languageVersion": "3.7"
     },
@@ -706,7 +706,7 @@
   ],
   "generator": "pub",
   "generatorVersion": "3.11.0",
-  "flutterRoot": "file:///opt/homebrew/share/flutter",
-  "flutterVersion": "3.41.0",
+  "flutterRoot": "file:///Users/hthai00/fvm/versions/3.41.1",
+  "flutterVersion": "3.41.1",
   "pubCache": "file:///Users/hthai00/.pub-cache"
 }

@@ -519,6 +519,12 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
         .whereType<String>()
         .join(', ');
 
+    final trackId = item?['id'] as String?;
+
+    final playlistTitle = _extractPlaylistTitle(response);
+
+    final nextTrack = _mapNextTrack(response['next_track']);
+
     final images = (item?['album'] as Map?)?['images'] as List?;
     final artworkUrl = images?.isNotEmpty == true
         ? ((images!.first as Map)['url'] as String?)
@@ -526,17 +532,20 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
 
     return {
       'track': {
+        if (trackId != null) 'id': trackId,
         'title': item?['name'] as String? ?? '',
         'artist': artists ?? '',
         'album': (item?['album'] as Map?)?['name'] as String? ?? '',
         'artwork_url': artworkUrl ?? '',
         'duration_ms': item?['duration_ms'] as int? ?? 0,
+        if (playlistTitle != null) 'playlist': {'title': playlistTitle},
       },
       'playback': {
         'is_playing': isPlaying,
         'progress_ms': progressMs,
         'timestamp': timestamp,
         'status': isPlaying ? 'playing' : 'paused',
+        if (nextTrack != null) 'next_track': nextTrack,
       },
       'device': {
         'name': device?['name'] as String? ?? '',
@@ -545,6 +554,44 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
       },
       'provider': 'spotify',
     };
+  }
+
+  String? _extractPlaylistTitle(Map<String, dynamic> response) {
+    final context = response['context'];
+    if (context is Map) {
+      final meta = context['metadata'];
+      if (meta is Map) {
+        final title = meta['context_description'] ?? meta['title'];
+        if (title is String && title.trim().isNotEmpty) {
+          return title.trim();
+        }
+      }
+    }
+    return null;
+  }
+
+  Map<String, dynamic>? _mapNextTrack(dynamic nextRaw) {
+    if (nextRaw is! Map) return null;
+    final title = nextRaw['title'] ?? nextRaw['name'];
+    final artists = nextRaw['artist'] ?? nextRaw['artists'];
+    final album = nextRaw['album'] ?? (nextRaw['album'] as Map?)?['name'];
+
+    String? artistStr;
+    if (artists is List) {
+      artistStr = artists
+          .whereType<Map>()
+          .map((a) => a['name'] as String?)
+          .whereType<String>()
+          .join(', ');
+    } else if (artists is String) {
+      artistStr = artists;
+    }
+
+    return {
+      'title': title is String ? title : null,
+      if (artistStr != null) 'artist': artistStr,
+      if (album is String) 'album': album,
+    }..removeWhere((_, v) => v == null);
   }
 }
 

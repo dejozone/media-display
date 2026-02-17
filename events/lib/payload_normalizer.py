@@ -39,6 +39,8 @@ def normalize_spotify_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             artist_names.append(artist)
     artist_str = ", ".join(artist_names) if artist_names else None
     
+    track_id = item.get("id") or item.get("uri")
+
     # Extract album info
     album = item.get("album") or {}
     album_name = None
@@ -75,20 +77,27 @@ def normalize_spotify_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         show = item.get("show")
         if isinstance(show, dict):
             album_name = show.get("name")
+
+    playlist_title = _extract_playlist_title(payload)
+
+    next_track = _map_next_track(payload.get("next_track"))
     
     return {
         "track": {
+            "id": track_id,
             "title": item.get("name"),
             "artist": artist_str,
             "album": album_name,
             "artwork_url": artwork_url,
             "duration_ms": item.get("duration_ms"),
+            "playlist": {"title": playlist_title} if playlist_title else None,
         },
         "playback": {
             "is_playing": payload.get("is_playing", False),
             "progress_ms": payload.get("progress_ms"),
             "timestamp": payload.get("timestamp"),
             "status": "playing" if payload.get("is_playing") else "paused",
+            "next_track": next_track,
         },
         "device": {
             "name": device.get("name"),
@@ -134,9 +143,22 @@ def normalize_sonos_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
                 artist_names.append(artist["name"])
         artist_str = ", ".join(artist_names) if artist_names else None
     
+    track_id = item.get("id")
+
     # Extract album info
     album_name = item.get("album")
     artwork_url = item.get("album_art_url") or item.get("albumArt") or item.get("album_art")
+
+    playlist_title = None
+    playlist_val = payload.get("playlist") or item.get("playlist")
+    if isinstance(playlist_val, dict):
+        title = playlist_val.get("title") or playlist_val.get("name")
+        if isinstance(title, str) and title:
+            playlist_title = title
+    elif isinstance(playlist_val, str) and playlist_val:
+        playlist_title = playlist_val
+
+    next_track = _map_next_track(payload.get("next_track"))
     
     # Extract device info
     group_devices = payload.get("group_devices") or []
@@ -160,17 +182,20 @@ def normalize_sonos_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     
     return {
         "track": {
+            "id": track_id,
             "title": item.get("name"),
             "artist": artist_str,
             "album": album_name,
             "artwork_url": artwork_url,
             "duration_ms": item.get("duration_ms") or payload.get("duration_ms"),
+            "playlist": {"title": playlist_title} if playlist_title else None,
         },
         "playback": {
             "is_playing": payload.get("is_playing", False),
             "progress_ms": payload.get("position_ms"),
             "timestamp": None,
             "status": status,
+            "next_track": next_track,
         },
         "device": {
             "name": device.get("name"),
@@ -199,3 +224,46 @@ def normalize_payload(payload: Dict[str, Any], provider: str) -> Dict[str, Any]:
     else:
         # Return as-is for unknown providers
         return payload
+
+
+def _extract_playlist_title(payload: Dict[str, Any]) -> Optional[str]:
+    context = payload.get("context")
+    if isinstance(context, dict):
+        meta = context.get("metadata")
+        if isinstance(meta, dict):
+            title = meta.get("context_description") or meta.get("title")
+            if isinstance(title, str) and title.strip():
+                return title.strip()
+    return None
+
+
+def _map_next_track(raw: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(raw, dict):
+        return None
+
+    title = raw.get("title") or raw.get("name")
+    artists = raw.get("artist") or raw.get("artists")
+    album_val = raw.get("album")
+    if isinstance(album_val, dict):
+        album_val = album_val.get("name")
+
+    artist_str: Optional[str] = None
+    if isinstance(artists, list):
+        names: List[str] = []
+        for artist in artists:
+            if isinstance(artist, dict) and artist.get("name"):
+                names.append(str(artist.get("name")))
+            elif isinstance(artist, str):
+                names.append(artist)
+        if names:
+            artist_str = ", ".join(names)
+    elif isinstance(artists, str):
+        artist_str = artists
+
+    mapped = {
+        "title": title if isinstance(title, str) and title else None,
+        "artist": artist_str,
+        "album": album_val if isinstance(album_val, str) and album_val else None,
+    }
+    mapped = {k: v for k, v in mapped.items() if v is not None}
+    return mapped or None

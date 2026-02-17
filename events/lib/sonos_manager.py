@@ -173,12 +173,25 @@ class SonosManager:
         is_playing = state_str in {"PLAYING", "TRANSITIONING", "BUFFERING"}
 
         item = {
+            "id": track_info.get("uri") or track_info.get("item_id") or track_info.get("track_id"),
             "name": track_info.get("title"),
             "artists": [track_info.get("artist")] if track_info.get("artist") else [],
             "album": track_info.get("album"),
             "album_art_url": album_art,
             "duration_ms": self._parse_ms(track_info.get("duration")),
         }
+
+        playlist_title = (
+            track_info.get("playlist_name")
+            or track_info.get("container_title")
+            or track_info.get("stream_content")
+            or track_info.get("station_name")
+        )
+
+        if playlist_title:
+            item["playlist"] = {"title": playlist_title}
+
+        next_track = track_info.get("next_track") or transport_info.get("next_track")
 
         position_ms = self._parse_ms(track_info.get("position"))
 
@@ -191,6 +204,7 @@ class SonosManager:
             "position_ms": position_ms,
             "duration_ms": item.get("duration_ms"),
             "state": state_str,
+            "next_track": next_track if isinstance(next_track, dict) else None,
         }
 
     @staticmethod
