@@ -850,12 +850,20 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
     // Check connection status
     if (!wsState.connected) {
-      // Only report errors if this is the current service
-      if (isCurrentCloudService &&
-          wsState.error != null &&
-          !wsState.wsRetrying) {
-        _log('Cloud service disconnected: ${wsState.error}');
-        ref.read(servicePriorityProvider.notifier).reportError(currentService);
+      // If the active path does NOT depend on WS (native bridge or direct polling),
+      // ignore socket drops so we don't churn away from a healthy service.
+      final wsIndependent = currentService == ServiceType.nativeLocalSonos ||
+          currentService == ServiceType.directSpotify;
+      if (wsIndependent) {
+        return;
+      }
+
+      // For WS-dependent services, treat disconnect as an error to trigger fallback.
+      if (isCurrentCloudService) {
+        _log(
+            'WebSocket disconnected while $currentService active; triggering fallback', level: Level.SEVERE);
+        ref.read(servicePriorityProvider.notifier).reportError(currentService,
+            error: wsState.error ?? 'ws_disconnected');
       }
       return;
     }

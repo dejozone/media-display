@@ -56,6 +56,11 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
   Map<String, dynamic>? _lastSettings;
   bool _useDirectPolling = false;
 
+  bool _isWsIndependentServiceActive() {
+    final currentService = ref.read(servicePriorityProvider).currentService;
+    return currentService == ServiceType.nativeLocalSonos;
+  }
+
   /// Update the cached settings. Call this before sendConfig when settings change.
   void updateCachedSettings(Map<String, dynamic> settings) {
     _lastSettings = settings;
@@ -233,7 +238,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
 
         // Try to start direct polling - either with cached token or fetch via REST API
         final spotifyEnabled = _lastSettings?['spotify_enabled'] == true;
-        if (spotifyEnabled) {
+        if (spotifyEnabled && !_isWsIndependentServiceActive()) {
           await _tryStartDirectPollingWithFallback();
         }
         return;
@@ -417,7 +422,7 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
     _retryTimer?.cancel();
     final delay = _retryPolicy.nextDelay();
     if (delay == null) {
-      _log('Connection failed after maximum retry time');
+      _log('Connection failed after maximum retry time', level: Level.SEVERE);
       // Update state to show exhausted (not retrying anymore)
       state = NowPlayingState(
         error: state.error,
@@ -442,8 +447,8 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
       wsInCooldown: _retryPolicy.inCooldown,
     );
 
-    // _log('Scheduling retry in ${delay.inMilliseconds}ms '
-    //     '(cooldown=${_retryPolicy.inCooldown}, retryCount=${_retryPolicy.retryCount})');
+    _log('Scheduling retry in ${delay.inMilliseconds}ms '
+        '(cooldown=${_retryPolicy.inCooldown}, retryCount=${_retryPolicy.retryCount})', level: Level.WARNING);
     _retryTimer = Timer(delay, () async {
       // If channel already exists, skip retry - another connection succeeded
       if (_channel != null) {
@@ -1149,7 +1154,8 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
           final directState = ref.read(spotifyDirectProvider);
           if (spotifyEnabled &&
               directState.accessToken != null &&
-              directState.mode == SpotifyPollingMode.idle) {
+              directState.mode == SpotifyPollingMode.idle &&
+              !_isWsIndependentServiceActive()) {
             ref.read(spotifyDirectProvider.notifier).startDirectPolling();
           }
           return;
@@ -1339,6 +1345,10 @@ class EventsWsNotifier extends Notifier<NowPlayingState> {
 
   /// Try to start direct polling - use cached token or fetch via REST API
   Future<void> _tryStartDirectPollingWithFallback() async {
+    if (_isWsIndependentServiceActive()) {
+      _log('Skipping direct polling fallback: native local Sonos active');
+      return;
+    }
     final directState = ref.read(spotifyDirectProvider);
     final hasValidToken = directState.accessToken != null &&
         directState.tokenExpiresAt != null &&
