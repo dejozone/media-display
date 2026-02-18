@@ -182,6 +182,9 @@ class EnvConfig {
     required this.cloudSpotifyFallback,
     required this.localSonosFallback,
     required this.nativeLocalSonosFallback,
+    required this.nativeLocalSonosHealthCheckSec,
+    required this.nativeLocalSonosHealthCheckRetry,
+    required this.nativeLocalSonosHealthCheckTimeoutSec,
     required this.localSonosPausedWaitSec,
     required this.localSonosStoppedWaitSec,
     required this.localSonosIdleWaitSec,
@@ -227,6 +230,9 @@ class EnvConfig {
   final ServiceFallbackConfig cloudSpotifyFallback;
   final ServiceFallbackConfig localSonosFallback;
   final ServiceFallbackConfig nativeLocalSonosFallback;
+  final int nativeLocalSonosHealthCheckSec;
+  final int nativeLocalSonosHealthCheckRetry;
+  final int nativeLocalSonosHealthCheckTimeoutSec;
   final int localSonosPausedWaitSec;
   final int localSonosStoppedWaitSec;
   final int localSonosIdleWaitSec;
@@ -612,6 +618,17 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
   final serviceCycleResetSec =
       int.tryParse(dotenv.env['SERVICE_CYCLE_RESET_SEC'] ?? '') ?? 30;
 
+  // Native Sonos health check configuration
+  final nativeLocalSonosHealthCheckSec =
+      int.tryParse(dotenv.env['NATIVE_LOCAL_SONOS_HEALTH_CHECK_SEC'] ?? '') ??
+          0;
+  final nativeLocalSonosHealthCheckRetry =
+      int.tryParse(dotenv.env['NATIVE_LOCAL_SONOS_HEALTH_CHECK_RETRY'] ?? '') ??
+          0;
+  final nativeLocalSonosHealthCheckTimeoutSec = int.tryParse(
+          dotenv.env['NATIVE_LOCAL_SONOS_HEALTH_CHECK_TIMEOUT_SEC'] ?? '') ??
+      5;
+
   // Parse global service settings
   final serviceTransitionGraceSec =
       int.tryParse(dotenv.env['SERVICE_TRANSITION_GRACE_SEC'] ?? '') ?? 2;
@@ -651,6 +668,10 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
     cloudSpotifyFallback: cloudSpotifyFallback,
     localSonosFallback: localSonosFallback,
     nativeLocalSonosFallback: nativeLocalSonosFallback,
+    nativeLocalSonosHealthCheckSec: nativeLocalSonosHealthCheckSec,
+    nativeLocalSonosHealthCheckRetry: nativeLocalSonosHealthCheckRetry,
+    nativeLocalSonosHealthCheckTimeoutSec:
+        nativeLocalSonosHealthCheckTimeoutSec,
     localSonosPausedWaitSec: localSonosPausedWaitSec,
     localSonosStoppedWaitSec: localSonosStoppedWaitSec,
     localSonosIdleWaitSec: localSonosIdleWaitSec,

@@ -23,9 +23,23 @@ class NativeSonosBridge {
   Stream<stub_bridge.NativeSonosMessage> get messages =>
       (_macos?.messages ?? _stub?.messages) ?? const Stream.empty();
 
-  Future<void> start({int? pollIntervalSec}) {
-    return _macos?.start(pollIntervalSec: pollIntervalSec) ??
-        _stub?.start(pollIntervalSec: pollIntervalSec) ??
+  Future<void> start(
+      {int? pollIntervalSec,
+      int? healthCheckSec,
+      int? healthCheckRetry,
+      int? healthCheckTimeoutSec}) {
+    return _macos?.start(
+          pollIntervalSec: pollIntervalSec,
+          healthCheckSec: healthCheckSec,
+          healthCheckRetry: healthCheckRetry,
+          healthCheckTimeoutSec: healthCheckTimeoutSec,
+        ) ??
+        _stub?.start(
+          pollIntervalSec: pollIntervalSec,
+          healthCheckSec: healthCheckSec,
+          healthCheckRetry: healthCheckRetry,
+          healthCheckTimeoutSec: healthCheckTimeoutSec,
+        ) ??
         Future.value();
   }
 
@@ -33,7 +47,9 @@ class NativeSonosBridge {
     return _macos?.stop() ?? _stub?.stop() ?? Future.value();
   }
 
-  Future<bool> probe() {
-    return _macos?.probe() ?? _stub?.probe() ?? Future.value(false);
+  Future<bool> probe({bool forceRediscover = false}) {
+    return _macos?.probe(forceRediscover: forceRediscover) ??
+        _stub?.probe(forceRediscover: forceRediscover) ??
+        Future.value(false);
   }
 }

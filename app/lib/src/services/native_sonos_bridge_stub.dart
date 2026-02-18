@@ -20,11 +20,15 @@ class NativeSonosBridge {
 
   Stream<NativeSonosMessage> get messages => const Stream.empty();
 
-  Future<void> start({int? pollIntervalSec}) async {
+  Future<void> start(
+      {int? pollIntervalSec,
+      int? healthCheckSec,
+      int? healthCheckRetry,
+      int? healthCheckTimeoutSec}) async {
     // No-op stub; replace with platform-specific bridge.
   }
 
   Future<void> stop() async {}
 
-  Future<bool> probe() async => false;
+  Future<bool> probe({bool forceRediscover = false}) async => false;
 }

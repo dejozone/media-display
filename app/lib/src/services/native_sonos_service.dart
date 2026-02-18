@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:logging/logging.dart';
@@ -45,6 +46,13 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
   NativeSonosBridge? _bridge;
   StreamSubscription<NativeSonosMessage>? _subscription;
 
+  Timer? _healthCheckTimer;
+  String? _healthCheckHost;
+  int _healthCheckIntervalSec = 0;
+  int _healthCheckFailures = 0;
+  int _healthCheckRetryMax = 0;
+  int _healthCheckTimeoutSec = 5;
+
   bool _isCoordinatorPayload(Map<String, dynamic> payload) {
     // Expect coordinator flag only under data
     final data = payload['data'];
@@ -83,6 +91,16 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
     return null;
   }
 
+  String? _coordinatorHost(Map<String, dynamic> payload) {
+    final data = payload['data'];
+    final device = data is Map<String, dynamic> ? data['device'] : null;
+    if (device is Map<String, dynamic>) {
+      final ip = device['ip'];
+      if (ip is String && ip.isNotEmpty) return ip;
+    }
+    return null;
+  }
+
   @override
   NativeSonosState build() {
     ref.onDispose(() async {
@@ -91,7 +109,12 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
     return const NativeSonosState();
   }
 
-  Future<void> start({int? pollIntervalSec}) async {
+  Future<void> start({
+    int? pollIntervalSec,
+    int? healthCheckSec,
+    int? healthCheckRetry,
+    int? healthCheckTimeoutSec,
+  }) async {
     // If already running and connected, avoid tearing down and re-subscribing.
     if (state.isRunning && state.connected) {
       _log('Already running and connected; skipping restart');
@@ -120,11 +143,19 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
       return;
     }
 
-    _log('Starting native Sonos bridge (pollIntervalSec=$pollIntervalSec)');
+    _log(
+        'Starting native Sonos bridge (pollIntervalSec=$pollIntervalSec, healthCheckSec=$healthCheckSec, healthCheckRetry=$healthCheckRetry)');
 
     // Mark running immediately to avoid transient "not connected" fallbacks
     // while the bridge initializes.
     state = state.copyWith(isRunning: true, connected: false, clearError: true);
+
+    _healthCheckIntervalSec = healthCheckSec ?? 0;
+    _healthCheckRetryMax = healthCheckRetry ?? 0;
+    _healthCheckFailures = 0;
+    _healthCheckHost = null;
+    _healthCheckTimeoutSec = healthCheckTimeoutSec ?? 5;
+    _healthCheckTimer?.cancel();
 
     _subscription = bridge.messages.listen(
       _handleMessage,
@@ -140,7 +171,12 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
     );
 
     try {
-      await bridge.start(pollIntervalSec: pollIntervalSec);
+      await bridge.start(
+        pollIntervalSec: pollIntervalSec,
+        healthCheckSec: healthCheckSec,
+        healthCheckRetry: healthCheckRetry,
+        healthCheckTimeoutSec: healthCheckTimeoutSec,
+      );
       state = state.copyWith(
         isRunning: true,
         connected: true,
@@ -159,6 +195,13 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
 
   Future<void> stop() async {
     _log('Stopping native Sonos bridge');
+    _healthCheckTimer?.cancel();
+    _healthCheckTimer = null;
+    _healthCheckHost = null;
+    _healthCheckFailures = 0;
+    _healthCheckIntervalSec = 0;
+    _healthCheckRetryMax = 0;
+    _healthCheckTimeoutSec = 5;
     await _subscription?.cancel();
     _subscription = null;
     try {
@@ -166,10 +209,11 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
     } catch (e) {
       _log('Error stopping native Sonos bridge: $e', level: Level.WARNING);
     }
+    _bridge = null;
     state = state.copyWith(isRunning: false, connected: false);
   }
 
-  Future<bool> probe() async {
+  Future<bool> probe({bool forceRediscover = false}) async {
     final bridge = _bridge ??= createNativeSonosBridge();
     _log(
         'Probe requested (supported=${bridge.isSupported}, type=${bridge.runtimeType})',
@@ -177,7 +221,7 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
     if (!bridge.isSupported) return false;
     try {
       // _log('Probing native Sonos bridge for devices/coordinator');
-      final result = await bridge.probe();
+      final result = await bridge.probe(forceRediscover: forceRediscover);
       _log('Probe result: ${result ? 'success' : 'no devices'}');
       return result;
     } catch (e) {
@@ -202,8 +246,7 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
 
     if (message.payload != null) {
       if (!_isCoordinatorPayload(message.payload!)) {
-        _log(
-            'Payload missing coordinator device; treating as failure',
+        _log('Payload missing coordinator device; treating as failure',
             level: Level.WARNING);
         _logPayloadSummary(message.payload!);
         state = state.copyWith(
@@ -222,24 +265,93 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
           connected: true,
           clearError: true,
         );
+
+        // Start shared health checks once we know the coordinator host.
+        final host = _coordinatorHost(message.payload!);
+        if (_healthCheckIntervalSec > 0 && host != null) {
+          _startHealthChecks(host);
+        }
       }
     }
 
     if (message.error != null) {
-      _log('Error message: ${message.error}',
-          level: Level.WARNING);
+      _log('Error message: ${message.error}', level: Level.WARNING);
       state = state.copyWith(
         error: message.error,
         connected: false,
+        isRunning: false,
+        clearPayload: true,
       );
     }
 
     if (message.payload == null &&
         message.error == null &&
         message.serviceStatus == null) {
-      _log(
-          'Message received with no payload/status/error; ignoring',
+      _log('Message received with no payload/status/error; ignoring',
           level: Level.FINE);
+    }
+  }
+
+  void _startHealthChecks(String host) {
+    if (_healthCheckHost == host && _healthCheckTimer != null) return;
+
+    _healthCheckHost = host;
+    _healthCheckFailures = 0;
+    _healthCheckTimer?.cancel();
+
+    _healthCheckTimer = Timer.periodic(
+        Duration(seconds: _healthCheckIntervalSec),
+        (_) => _performHealthCheck());
+    _log(
+        'Health checks enabled host=$host interval=${_healthCheckIntervalSec}s retryMax=$_healthCheckRetryMax',
+        level: Level.FINE);
+  }
+
+  Future<void> _performHealthCheck() async {
+    if (_healthCheckIntervalSec <= 0) return;
+    final host = _healthCheckHost;
+    if (host == null) return;
+
+    try {
+      _log('Performing health check for native Sonos bridge at $host:1400',
+          level: Level.FINE);
+      final socket = await Socket.connect(host, 1400,
+          timeout: Duration(seconds: _healthCheckTimeoutSec));
+      socket.destroy();
+      if (_healthCheckFailures != 0) {
+        _log('Health check recovered after $_healthCheckFailures failures',
+            level: Level.FINE);
+      }
+      _healthCheckFailures = 0;
+    } catch (e) {
+      _healthCheckFailures += 1;
+      _log(
+          'Health check failed (#$_healthCheckFailures/$_healthCheckRetryMax): $e',
+          level: Level.FINE);
+
+      if (_healthCheckRetryMax > 0 &&
+          _healthCheckFailures >= _healthCheckRetryMax &&
+          state.connected) {
+        _log(
+            'Health check retry limit reached; marking native Sonos disconnected',
+            level: Level.WARNING);
+        _healthCheckTimer?.cancel();
+        _healthCheckTimer = null;
+        _healthCheckHost = null;
+        _healthCheckIntervalSec = 0;
+        try {
+          await _bridge?.stop();
+        } catch (e) {
+          _log('Error stopping bridge after health check failure: $e',
+              level: Level.WARNING);
+        }
+        _bridge = null;
+        state = state.copyWith(
+          connected: false,
+          isRunning: false,
+          error: 'health_check_failed',
+        );
+      }
     }
   }
 }

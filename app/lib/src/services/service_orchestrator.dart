@@ -252,7 +252,9 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
 
       case ServiceType.nativeLocalSonos:
         // Probe locally (if supported)
-        return ref.read(nativeSonosProvider.notifier).probe();
+        return ref
+            .read(nativeSonosProvider.notifier)
+            .probe(forceRediscover: true);
     }
   }
 
@@ -596,6 +598,9 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     _log('Starting native Sonos bridge with pollIntervalSec=$pollInterval');
     ref.read(nativeSonosProvider.notifier).start(
           pollIntervalSec: pollInterval,
+          healthCheckSec: _config.nativeLocalSonosHealthCheckSec,
+          healthCheckRetry: _config.nativeLocalSonosHealthCheckRetry,
+          healthCheckTimeoutSec: _config.nativeLocalSonosHealthCheckTimeoutSec,
         );
 
     _resetTimeoutTimer();
@@ -701,6 +706,15 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     }
 
     if (!bridgeState.connected) {
+      if (bridgeState.error == 'health_check_failed') {
+        _log('NativeSonos health check failed; reporting error/fallback');
+        ref.read(servicePriorityProvider.notifier).reportError(
+              ServiceType.nativeLocalSonos,
+              error: 'health_check_failed',
+            );
+        return;
+      }
+
       if (isCurrent) {
         // Allow a brief startup period when the bridge is running but not yet connected.
         if (bridgeState.isRunning) {

@@ -56,15 +56,26 @@ class NativeSonosBridge {
     _currentTrack = merged;
   }
 
-  Future<bool> probe({Duration timeout = const Duration(seconds: 15)}) async {
+  Future<bool> probe({
+    Duration timeout = const Duration(seconds: 15),
+    bool forceRediscover = false,
+  }) async {
     try {
-      // If we already have a coordinator, treat probe as healthy
-      final cached = _cachedCoordinator();
-      if (cached != null) {
-        return true;
+      // When forcing rediscovery (e.g., after a health check failure), ignore
+      // any cached coordinator so we actually validate reachability again.
+      if (!forceRediscover) {
+        final cached = _cachedCoordinator();
+        if (cached != null) {
+          return true;
+        }
+      } else {
+        _coordinatorDevice = null;
+        _groupDevices = const [];
+        await _resetSubscriptionState(stopServer: true);
       }
 
-      final device = await _discoverCoordinator(timeout: timeout);
+      final device = await _discoverCoordinator(
+          timeout: timeout, useCache: !forceRediscover);
       if (device == null) return false;
       _setCoordinator(device);
       return true;
@@ -74,8 +85,17 @@ class NativeSonosBridge {
     }
   }
 
-  Future<void> start({int? pollIntervalSec}) async {
+  Future<void> start(
+      {int? pollIntervalSec,
+      int? healthCheckSec,
+      int? healthCheckRetry,
+      int? healthCheckTimeoutSec}) async {
     if (_running) return;
+
+    // Any new discovery attempt should discard old subscriptions since prior
+    // runs may have failed mid-subscribe. Start fresh so we always resubscribe
+    // once a coordinator is found.
+    await _resetSubscriptionState(stopServer: true);
 
     _log('Starting SSDP discovery for coordinator');
     final device = await _discoverCoordinator();
@@ -249,6 +269,31 @@ class NativeSonosBridge {
     await _subscribeToAvTransport(host);
   }
 
+  Future<void> _resetSubscriptionState({bool stopServer = false}) async {
+    _subscriptionRenewTimer?.cancel();
+    _subscriptionRenewTimer = null;
+
+    // Best-effort unsubscribe; ignore failures because we're recovering from
+    // a prior error state and just need a clean slate.
+    if (_subscriptionSid != null) {
+      try {
+        await _unsubscribeFromEvents();
+      } catch (_) {
+        // Swallow errors on reset to avoid blocking rediscovery.
+      }
+    }
+
+    _subscriptionSid = null;
+
+    if (stopServer) {
+      try {
+        await _stopEventServer();
+      } catch (_) {
+        // Ignore cleanup errors during reset.
+      }
+    }
+  }
+
   Future<void> _startEventServer() async {
     if (_eventServer != null) return;
     _eventServer = await HttpServer.bind(InternetAddress.anyIPv4, 0);
@@ -303,6 +348,9 @@ class NativeSonosBridge {
       });
     } catch (e) {
       _log('Subscribe error: $e', level: Level.WARNING);
+      _controller.add(NativeSonosMessage(
+        error: 'subscribe_failed: $e',
+      ));
     }
   }
 
@@ -332,6 +380,9 @@ class NativeSonosBridge {
       _log('Renewed subscription sid=$sid', level: Level.FINE);
     } catch (e) {
       _log('Renew error: $e', level: Level.WARNING);
+      _controller.add(NativeSonosMessage(
+        error: 'renew_failed: $e',
+      ));
     }
   }
 
@@ -349,8 +400,11 @@ class NativeSonosBridge {
         headers: {'SID': sid},
       );
       await resp.drain();
-    } catch (_) {
-      // ignore
+    } catch (e) {
+      _log('Unsubscribe error: $e', level: Level.WARNING);
+      _controller.add(NativeSonosMessage(
+        error: 'unsubscribe_failed: $e',
+      ));
     }
   }
 
@@ -712,8 +766,10 @@ class NativeSonosBridge {
     return null;
   }
 
-  Future<_SonosDevice?> _discoverCoordinator(
-      {Duration timeout = const Duration(seconds: 15)}) async {
+  Future<_SonosDevice?> _discoverCoordinator({
+    Duration timeout = const Duration(seconds: 15),
+    bool useCache = true,
+  }) async {
     // Reuse in-flight discovery to avoid parallel M-SEARCH bursts and
     // duplicate subscriptions when multiple probes overlap.
     if (_ongoingDiscovery != null) {
@@ -726,11 +782,14 @@ class NativeSonosBridge {
     });
 
     // Reuse cached coordinator to avoid repeated network discovery and avoid
-    // triggering fallback thresholds when already healthy.
-    final cached = _cachedCoordinator();
-    if (cached != null) {
-      completer.complete(cached);
-      return _ongoingDiscovery;
+    // triggering fallback thresholds when already healthy, unless explicitly
+    // disabled (e.g., during recovery probes).
+    if (useCache) {
+      final cached = _cachedCoordinator();
+      if (cached != null) {
+        completer.complete(cached);
+        return _ongoingDiscovery;
+      }
     }
 
     _log('Sending SSDP M-SEARCH for Sonos ZonePlayers', level: Level.FINE);
