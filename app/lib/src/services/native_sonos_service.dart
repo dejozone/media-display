@@ -188,6 +188,7 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
         error: e.toString(),
         connected: false,
         isRunning: false,
+        clearPayload: true,
       );
       await stop();
     }
@@ -210,7 +211,12 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
       _log('Error stopping native Sonos bridge: $e', level: Level.WARNING);
     }
     _bridge = null;
-    state = state.copyWith(isRunning: false, connected: false);
+    state = state.copyWith(
+      isRunning: false,
+      connected: false,
+      clearPayload: true,
+      clearError: true,
+    );
   }
 
   Future<bool> probe({bool forceRediscover = false}) async {
@@ -350,6 +356,7 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
           connected: false,
           isRunning: false,
           error: 'health_check_failed',
+          clearPayload: true,
         );
       }
     }
