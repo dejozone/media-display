@@ -66,6 +66,7 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
   SpotifyApiClient? _apiClient;
   int _consecutive401Errors = 0;
   static const int _max401BeforeStop = 3;
+  bool _pollInFlight = false; // prevents overlapping polls/timeouts
 
   @override
   SpotifyDirectState build() {
@@ -229,6 +230,7 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
     _tokenRefreshTimer?.cancel();
     _tokenRefreshTimer = null;
     _tokenRequestPending = false;
+    _pollInFlight = false;
     state = state.copyWith(
       mode: SpotifyPollingMode.idle,
       error: null,
@@ -262,22 +264,27 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
 
     if (state.mode != SpotifyPollingMode.direct) return;
 
-    final token = state.accessToken;
-    if (token == null) {
-      _enterFallbackMode('No access token');
-      return;
+    if (_pollInFlight) {
+      return; // Another poll is already running
     }
-
-    // Check if token is expired before making request
-    if (_isTokenExpired()) {
-      _requestTokenRefresh();
-      // Schedule retry after short delay (token refresh should arrive)
-      _pollTimer?.cancel();
-      _pollTimer = Timer(const Duration(seconds: 5), _poll);
-      return;
-    }
+    _pollInFlight = true;
 
     try {
+      final token = state.accessToken;
+      if (token == null) {
+        _enterFallbackMode('No access token');
+        return;
+      }
+
+      // Check if token is expired before making request
+      if (_isTokenExpired()) {
+        _requestTokenRefresh();
+        // Schedule retry after short delay (token refresh should arrive)
+        _pollTimer?.cancel();
+        _pollTimer = Timer(const Duration(seconds: 5), _poll);
+        return;
+      }
+
       final response = await _apiClient!.getCurrentPlayback(token);
 
       if (response == null) {
@@ -331,6 +338,8 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
       _handlePollFailure(e.message);
     } catch (e) {
       _handlePollFailure(e.toString());
+    } finally {
+      _pollInFlight = false;
     }
   }
 
@@ -389,6 +398,10 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
     if (state.mode != SpotifyPollingMode.fallback) {
       _retryTimer?.cancel();
       return;
+    }
+
+    if (_pollInFlight) {
+      return; // Skip if a poll is already running
     }
 
     final token = state.accessToken;
