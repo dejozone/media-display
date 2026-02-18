@@ -229,9 +229,20 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
       // _log('Probing native Sonos bridge for devices/coordinator');
       final result = await bridge.probe(forceRediscover: forceRediscover);
       _log('Probe result: ${result ? 'success' : 'no devices'}');
+      if (!result) {
+        // No devices found: stop any ongoing health checks tied to stale hosts
+        // so we don't keep probing unreachable addresses until a new discovery
+        // succeeds.
+        _healthCheckTimer?.cancel();
+        _healthCheckTimer = null;
+        _healthCheckHost = null;
+      }
       return result;
     } catch (e) {
       _log('Probe failed: $e', level: Level.WARNING);
+      _healthCheckTimer?.cancel();
+      _healthCheckTimer = null;
+      _healthCheckHost = null;
       return false;
     }
   }

@@ -603,6 +603,12 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
           healthCheckTimeoutSec: _config.nativeLocalSonosHealthCheckTimeoutSec,
         );
 
+    // Kick off a fresh discovery after (re)activation to clear stale
+    // coordinator/host data when networks change (e.g., wake on new Wi-Fi).
+    Future.microtask(() {
+      ref.read(nativeSonosProvider.notifier).probe(forceRediscover: true);
+    });
+
     _resetTimeoutTimer();
   }
 
@@ -861,7 +867,8 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       // For WS-dependent services, treat disconnect as an error to trigger fallback.
       if (isCurrentCloudService) {
         _log(
-            'WebSocket disconnected while $currentService active; triggering fallback', level: Level.SEVERE);
+            'WebSocket disconnected while $currentService active; triggering fallback',
+            level: Level.SEVERE);
         ref.read(servicePriorityProvider.notifier).reportError(currentService,
             error: wsState.error ?? 'ws_disconnected');
       }

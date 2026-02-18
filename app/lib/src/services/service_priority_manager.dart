@@ -783,9 +783,9 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     // when it is NOT the active service. When it's the active service we still
     // need to count errors so we can fall back to the next priority service.
     if (service.isCloudService && state.awaitingRecovery.contains(service)) {
-      if (state.currentService != service) {
-        return;
-      }
+      // Already waiting for backend recovery; suppress further error counting
+      // to avoid inflating thresholds and log noise.
+      return;
     }
 
     final fallbackConfig = _config.getFallbackConfig(service);
@@ -1254,6 +1254,10 @@ class ServicePriorityNotifier extends Notifier<ServicePriorityState> {
     _recoveryTimer?.cancel();
     _recoveryTimer = null;
     _cancelAllFallbackTimers();
+
+    // Reset per-service fallback thresholds so post-reconnect errors use the
+    // configured thresholds (e.g., 1/3 → 3/3) instead of immediate 1/1.
+    _resetFallbackThresholdFlags();
 
     // Reset statuses for enabled services back to standby (keep disabled as-is)
     final resetStatuses =
