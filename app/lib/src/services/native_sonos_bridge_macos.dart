@@ -417,6 +417,19 @@ class NativeSonosBridge {
         return;
       }
 
+      // Drop NOTIFY messages that arrive before we have a confirmed
+      // subscription SID. This can happen when the speaker sends an event
+      // immediately after discovery but before SUBSCRIBE completes, which
+      // would otherwise be parsed with a null sid and leave us with incomplete
+      // playback context.
+      if (_subscriptionSid == null) {
+        _log('Ignoring NOTIFY because subscription SID not yet established',
+            level: Level.FINE);
+        request.response.statusCode = HttpStatus.ok;
+        await request.response.close();
+        return;
+      }
+
       final seqHeader = request.headers.value('seq');
       final seq = int.tryParse(seqHeader ?? '');
 
