@@ -135,7 +135,7 @@ class NativeSonosBridge {
     ));
   }
 
-  Future<void> _emitPayload({bool isGetLiveMediaProgress = false}) async {
+  Future<void> _emitPayload({bool isGetLiveMediaProgress = true}) async {
     final coord = _coordinatorDevice;
     final coordIp = coord?['ip'] as String?;
     final coordDisplayName = coord?['displayName'] as String?;
@@ -615,13 +615,13 @@ class NativeSonosBridge {
       if (resp.statusCode != 200) {
         final bodyText = await resp.transform(utf8.decoder).join();
         _log(
-            'GetPositionInfo failed with status ${resp.statusCode} ${resp.reasonPhrase} $bodyText',
+            'GetPositionInfo (from host=$host) failed with status ${resp.statusCode} ${resp.reasonPhrase} $bodyText',
             level: Level.FINE);
         return null;
       }
 
       final body = await resp.transform(utf8.decoder).join();
-      _log('GetPositionInfo response: $body', level: Level.FINE);
+      _log('GetPositionInfo (from host=$host) response: $body', level: Level.FINE);
 
       final doc = xml.XmlDocument.parse(body);
       final relTime = doc.findAllElements('RelTime').firstOrNull?.innerText;
@@ -632,7 +632,7 @@ class NativeSonosBridge {
       final trackMetaRaw =
           doc.findAllElements('TrackMetaData').firstOrNull?.innerText;
 
-      _log('GetPositionInfo relTime=$relTime trackDuration=$trackDuration',
+      _log('GetPositionInfo (from host=$host) relTime=$relTime trackDuration=$trackDuration',
           level: Level.FINE);
 
       final meta = _parseTrackMeta(trackMetaRaw);
@@ -651,7 +651,7 @@ class NativeSonosBridge {
         'current_progress_time': relTime,
       };
     } catch (e) {
-      _log('GetPositionInfo error: $e', level: Level.FINE);
+      _log('GetPositionInfo (from host=$host) error: $e', level: Level.FINE);
       return null;
     }
   }

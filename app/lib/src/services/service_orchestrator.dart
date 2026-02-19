@@ -1914,7 +1914,7 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
       _log(
           'Idle reset: no playback for ${idleForSec}s (threshold=${idleThresholdSec}s) - resetting services');
       _lastIdleResetAt = DateTime.now();
-      reset();
+      reset(caller: 'ServiceOrchestrator._checkIdleReset');
       // } else {
       //   _log(
       //       'Idle check: idle ${idleForSec}s < threshold=${idleThresholdSec}s - no reset');
@@ -2138,8 +2138,9 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
   }
 
   /// Reset everything and start fresh
-  void reset() {
-    _log('Reset requested');
+  void reset({String? caller}) {
+    final origin = (caller != null && caller.isNotEmpty) ? ' from $caller' : '';
+    _log('Reset requested$origin');
 
     // Suppress priority change reactions while we tear down and restart
     _suppressPriorityChanges = true;

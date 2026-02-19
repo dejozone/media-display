@@ -37,7 +37,9 @@ class _HomePageState extends ConsumerState<HomePage>
   DateTime? _lastPauseTime;
 
   Future<void> _resetServices() async {
-    ref.read(serviceOrchestratorProvider.notifier).reset();
+    ref
+        .read(serviceOrchestratorProvider.notifier)
+        .reset(caller: '_HomePageState._resetServices');
   }
 
   @override

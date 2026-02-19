@@ -45,7 +45,9 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
   String? success;
 
   void _resetServices() {
-    ref.read(serviceOrchestratorProvider.notifier).reset();
+    ref
+        .read(serviceOrchestratorProvider.notifier)
+        .reset(caller: '_AccountSettingsPageState._resetServices');
   }
 
   final CropController _cropController = CropController();
