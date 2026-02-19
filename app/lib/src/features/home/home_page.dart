@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -67,11 +68,13 @@ class _HomePageState extends ConsumerState<HomePage>
         state == AppLifecycleState.inactive) {
       _lastPauseTime = DateTime.now();
     } else if (state == AppLifecycleState.resumed) {
-      _handleResume();
+      // On resume, force a full orchestrator reset (same flow as the Reset Services button)
+      // to recover from sleep/network changes that can leave services stale.
+      unawaited(_handleResume());
     }
   }
 
-  void _handleResume() {
+  Future<void> _handleResume() async {
     if (_lastPauseTime == null) return;
 
     final pauseDuration = DateTime.now().difference(_lastPauseTime!);
@@ -82,10 +85,10 @@ class _HomePageState extends ConsumerState<HomePage>
       return;
     }
 
-    // If paused for more than threshold, force reconnect via orchestrator
+    // If paused for more than threshold, force a full reset (same as UI reset)
     final env = ref.read(envConfigProvider);
     if (pauseDuration.inSeconds > env.wsForceReconnIdleSec) {
-      ref.read(serviceOrchestratorProvider.notifier).reconnect();
+      await _resetServices();
     }
     // For medium pauses (5-30s), the services should still be connected
     // and will handle token refresh automatically - no action needed

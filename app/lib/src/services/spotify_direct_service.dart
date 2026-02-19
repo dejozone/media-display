@@ -285,6 +285,7 @@ class SpotifyDirectNotifier extends Notifier<SpotifyDirectState> {
         return;
       }
 
+      _log('Polling Spotify API for current playback', level: Level.FINE);
       final response = await _apiClient!.getCurrentPlayback(token);
 
       if (response == null) {

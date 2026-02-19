@@ -154,7 +154,7 @@ class NativeSonosBridge {
 
       final activeStates = {'PLAYING', 'TRANSITIONING', 'BUFFERING'};
       final isPlaying = activeStates.contains(_transportState);
-      final playbackStatus = _transportState.toLowerCase();
+      var playbackStatus = _transportState.toLowerCase();
       final deviceName = coordDisplayName ?? 'Sonos';
       final groupDevices = _groupDevices
           .where((gd) => gd.name.isNotEmpty)
@@ -180,16 +180,29 @@ class NativeSonosBridge {
           ? artistsRaw.whereType<String>().toList()
           : const <String>[];
 
-      final trackBlock = <String, dynamic>{
-        if (_currentTrack != null && _currentTrack!['id'] != null)
-          'id': _currentTrack!['id'],
-        'title': (_currentTrack?['title'] as String?) ?? '',
-        'artist': artists.isNotEmpty ? artists.first : '',
-        'album': _currentTrack?['album'],
-        'artwork_url': _currentTrack?['artwork_url'],
-        'duration_ms': _currentTrack?['duration_ms'],
-        if (_playlist != null) 'playlist': _playlist,
-      };
+      final title = (_currentTrack?['title'] as String?)?.trim() ?? '';
+      final hasTitle = title.isNotEmpty;
+
+      // Empty/blank title while not playing usually means the user switched
+      // playback to another app; treat it as stopped so the orchestrator can
+      // cycle to the next service promptly instead of waiting on a paused state
+      // with no real metadata.
+      if (!hasTitle && !isPlaying) {
+        playbackStatus = 'stopped';
+      }
+
+      final trackBlock = hasTitle
+          ? <String, dynamic>{
+              if (_currentTrack != null && _currentTrack!['id'] != null)
+                'id': _currentTrack!['id'],
+              'title': title,
+              'artist': artists.isNotEmpty ? artists.first : '',
+              'album': _currentTrack?['album'],
+              'artwork_url': _currentTrack?['artwork_url'],
+              'duration_ms': _currentTrack?['duration_ms'],
+              if (_playlist != null) 'playlist': _playlist,
+            }
+          : const <String, dynamic>{};
 
       final nextTrackBlock = _nextTrack ?? const {};
       final progressMs = _currentTrack?['progress_ms'] as int?;
@@ -201,8 +214,8 @@ class NativeSonosBridge {
         'provider_display_name': 'Sonos',
 
         'data': {
-          // Track: use server shape
-          'track': trackBlock,
+          // Track: omit when no meaningful title (signals idle/stopped)
+          'track': hasTitle ? trackBlock : null,
 
           // Playback: server shape + progress placeholder
           'playback': {

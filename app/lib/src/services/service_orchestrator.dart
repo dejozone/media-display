@@ -590,24 +590,35 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
           caller: '_activateNativeSonos',
         );
 
-    // Start native bridge (event-driven; pollInterval optional)
-    final pollInterval = _config.nativeSonosPollIntervalSec ??
-        (_config.nativeLocalSonosFallback.timeoutSec > 0
-            ? _config.nativeLocalSonosFallback.timeoutSec
-            : null);
-    _log('Starting native Sonos bridge with pollIntervalSec=$pollInterval');
-    ref.read(nativeSonosProvider.notifier).start(
-          pollIntervalSec: pollInterval,
-          healthCheckSec: _config.nativeLocalSonosHealthCheckSec,
-          healthCheckRetry: _config.nativeLocalSonosHealthCheckRetry,
-          healthCheckTimeoutSec: _config.nativeLocalSonosHealthCheckTimeoutSec,
-        );
+    // Start native bridge (event-driven; pollInterval optional) unless it is
+    // already running and connected (background monitoring). Avoid redundant
+    // restart/probe churn when a NOTIFY arrives while the bridge is healthy.
+    final nativeState = ref.read(nativeSonosProvider);
+    final alreadyRunningConnected =
+        nativeState.isRunning && nativeState.connected;
 
-    // Kick off a fresh discovery after (re)activation to clear stale
-    // coordinator/host data when networks change (e.g., wake on new Wi-Fi).
-    Future.microtask(() {
-      ref.read(nativeSonosProvider.notifier).probe(forceRediscover: true);
-    });
+    if (!alreadyRunningConnected) {
+      final pollInterval = _config.nativeSonosPollIntervalSec ??
+          (_config.nativeLocalSonosFallback.timeoutSec > 0
+              ? _config.nativeLocalSonosFallback.timeoutSec
+              : null);
+      _log('Starting native Sonos bridge with pollIntervalSec=$pollInterval');
+      ref.read(nativeSonosProvider.notifier).start(
+            pollIntervalSec: pollInterval,
+            healthCheckSec: _config.nativeLocalSonosHealthCheckSec,
+            healthCheckRetry: _config.nativeLocalSonosHealthCheckRetry,
+            healthCheckTimeoutSec:
+                _config.nativeLocalSonosHealthCheckTimeoutSec,
+          );
+
+      // Kick off a fresh discovery after (re)activation to clear stale
+      // coordinator/host data when networks change (e.g., wake on new Wi-Fi).
+      Future.microtask(() {
+        ref.read(nativeSonosProvider.notifier).probe(forceRediscover: true);
+      });
+    } else {
+      _log('Native Sonos already running/connected; skip restart/probe');
+    }
 
     _resetTimeoutTimer();
   }
@@ -1561,6 +1572,14 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     // Cancel any existing timer
     _cancelPauseTimer();
 
+    // If Sonos reports paused with valid track info, do NOT cycle; users often
+    // pause intending to resume on the same speaker. Only cycle when paused
+    // without track info (e.g., empty title) or other idle/stopped states.
+    final normalizedStatus = _normalizeSonosStatus(status);
+    if (normalizedStatus == 'paused' && hasTrackInfo) {
+      return;
+    }
+
     // Determine wait time based on Sonos status and track info
     final int waitSec;
     final pausedWait = service == ServiceType.nativeLocalSonos
@@ -1572,7 +1591,6 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     final idleWait = service == ServiceType.nativeLocalSonos
         ? _config.nativeLocalSonosIdleWaitSec
         : _config.localSonosIdleWaitSec;
-    final normalizedStatus = (status ?? 'idle').toLowerCase();
 
     // "paused" but no track info means user has switched away from Sonos
     // This should ALWAYS use the short idle wait time - the user has actively
@@ -1610,6 +1628,19 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     _servicePausedTimer = Timer(Duration(seconds: waitSec), () {
       _onServicePauseTimerExpired(service);
     });
+  }
+
+  /// Normalize Sonos transport status strings to broad buckets we use for
+  /// cycling decisions (e.g., paused_playback -> paused).
+  String _normalizeSonosStatus(String? status) {
+    final raw = (status ?? '').toLowerCase();
+    if (raw.startsWith('paused')) return 'paused';
+    if (raw.startsWith('stopped')) return 'stopped';
+    if (raw.startsWith('idle')) return 'idle';
+    if (raw.startsWith('buffering')) return 'buffering';
+    if (raw.startsWith('transition')) return 'transitioning';
+    if (raw.startsWith('playing')) return 'playing';
+    return raw.isEmpty ? 'idle' : raw;
   }
 
   /// Called when pause timer expires - try next service in priority
