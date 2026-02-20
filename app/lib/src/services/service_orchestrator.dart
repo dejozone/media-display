@@ -609,12 +609,18 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
             healthCheckRetry: _config.nativeLocalSonosHealthCheckRetry,
             healthCheckTimeoutSec:
                 _config.nativeLocalSonosHealthCheckTimeoutSec,
+            coordinatorDiscoveryMethod:
+                _config.nativeLocalSonosCoordinatorDiscMethod,
           );
 
       // Kick off a fresh discovery after (re)activation to clear stale
       // coordinator/host data when networks change (e.g., wake on new Wi-Fi).
       Future.microtask(() {
-        ref.read(nativeSonosProvider.notifier).probe(forceRediscover: true);
+        ref.read(nativeSonosProvider.notifier).probe(
+              forceRediscover: true,
+              coordinatorDiscoveryMethod:
+                  _config.nativeLocalSonosCoordinatorDiscMethod,
+            );
       });
     } else {
       _log('Native Sonos already running/connected; skip restart/probe');

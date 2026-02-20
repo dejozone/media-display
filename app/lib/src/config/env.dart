@@ -182,6 +182,7 @@ class EnvConfig {
     required this.cloudSpotifyFallback,
     required this.localSonosFallback,
     required this.nativeLocalSonosFallback,
+    required this.nativeLocalSonosCoordinatorDiscMethod,
     required this.nativeLocalSonosHealthCheckSec,
     required this.nativeLocalSonosHealthCheckRetry,
     required this.nativeLocalSonosHealthCheckTimeoutSec,
@@ -230,6 +231,7 @@ class EnvConfig {
   final ServiceFallbackConfig cloudSpotifyFallback;
   final ServiceFallbackConfig localSonosFallback;
   final ServiceFallbackConfig nativeLocalSonosFallback;
+  final String nativeLocalSonosCoordinatorDiscMethod;
   final int nativeLocalSonosHealthCheckSec;
   final int nativeLocalSonosHealthCheckRetry;
   final int nativeLocalSonosHealthCheckTimeoutSec;
@@ -608,6 +610,16 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
       int.tryParse(dotenv.env['NATIVE_LOCAL_SONOS_IDLE_WAIT_SEC'] ?? '') ??
           localSonosIdleWaitSec;
 
+  // Native Sonos coordinator discovery method
+  final nativeLocalSonosCoordinatorDiscMethod = (() {
+    const fallback = 'lmp_zgs';
+    final raw =
+        dotenv.env['NATIVE_LOCAL_SONOS_COORDINATOR_DISC_METHOD']?.trim();
+    if (raw == null || raw.isEmpty) return fallback;
+    final lowered = raw.toLowerCase();
+    return (lowered == 'lmp_zgs' || lowered == 'zgs_lmp') ? lowered : fallback;
+  })();
+
   // Parse Spotify paused wait time
   final spotifyPausedWaitSec =
       int.tryParse(dotenv.env['SPOTIFY_PAUSED_WAIT_SEC'] ?? '') ?? 5;
@@ -668,6 +680,8 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
     cloudSpotifyFallback: cloudSpotifyFallback,
     localSonosFallback: localSonosFallback,
     nativeLocalSonosFallback: nativeLocalSonosFallback,
+    nativeLocalSonosCoordinatorDiscMethod:
+        nativeLocalSonosCoordinatorDiscMethod,
     nativeLocalSonosHealthCheckSec: nativeLocalSonosHealthCheckSec,
     nativeLocalSonosHealthCheckRetry: nativeLocalSonosHealthCheckRetry,
     nativeLocalSonosHealthCheckTimeoutSec:

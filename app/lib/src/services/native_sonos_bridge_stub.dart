@@ -24,11 +24,14 @@ class NativeSonosBridge {
       {int? pollIntervalSec,
       int? healthCheckSec,
       int? healthCheckRetry,
-      int? healthCheckTimeoutSec}) async {
+      int? healthCheckTimeoutSec,
+      String method = 'lmp_zgs'}) async {
     // No-op stub; replace with platform-specific bridge.
   }
 
   Future<void> stop() async {}
 
-  Future<bool> probe({bool forceRediscover = false}) async => false;
+  Future<bool> probe(
+          {bool forceRediscover = false, String method = 'lmp_zgs'}) async =>
+      false;
 }

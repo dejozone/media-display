@@ -114,6 +114,7 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
     int? healthCheckSec,
     int? healthCheckRetry,
     int? healthCheckTimeoutSec,
+    String? coordinatorDiscoveryMethod,
   }) async {
     // If already running and connected, avoid tearing down and re-subscribing.
     if (state.isRunning && state.connected) {
@@ -176,6 +177,7 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
         healthCheckSec: healthCheckSec,
         healthCheckRetry: healthCheckRetry,
         healthCheckTimeoutSec: healthCheckTimeoutSec,
+        method: coordinatorDiscoveryMethod ?? 'lmp_zgs',
       );
       state = state.copyWith(
         isRunning: true,
@@ -219,7 +221,9 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
     );
   }
 
-  Future<bool> probe({bool forceRediscover = false}) async {
+  Future<bool> probe(
+      {bool forceRediscover = false,
+      String? coordinatorDiscoveryMethod}) async {
     final bridge = _bridge ??= createNativeSonosBridge();
     _log(
         'Probe requested (supported=${bridge.isSupported}, type=${bridge.runtimeType})',
@@ -227,7 +231,10 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
     if (!bridge.isSupported) return false;
     try {
       // _log('Probing native Sonos bridge for devices/coordinator');
-      final result = await bridge.probe(forceRediscover: forceRediscover);
+      final result = await bridge.probe(
+        forceRediscover: forceRediscover,
+        method: coordinatorDiscoveryMethod ?? 'lmp_zgs',
+      );
       _log('Probe result: ${result ? 'success' : 'no devices'}');
       if (!result) {
         // No devices found: stop any ongoing health checks tied to stale hosts

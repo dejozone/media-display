@@ -60,6 +60,7 @@ class NativeSonosBridge {
     Duration timeout = const Duration(seconds: 15),
     bool forceRediscover = false,
     bool isGetLiveMedia = false,
+    String method = 'lmp_zgs',
   }) async {
     try {
       // When forcing rediscovery (e.g., after a health check failure), ignore
@@ -76,8 +77,7 @@ class NativeSonosBridge {
       }
 
       final device = await _discoverCoordinator(
-          timeout: timeout,
-          useCache: !forceRediscover);
+          timeout: timeout, useCache: !forceRediscover, method: method);
       if (device == null) return false;
       _setCoordinator(device);
       return true;
@@ -91,7 +91,8 @@ class NativeSonosBridge {
       {int? pollIntervalSec,
       int? healthCheckSec,
       int? healthCheckRetry,
-      int? healthCheckTimeoutSec}) async {
+      int? healthCheckTimeoutSec,
+      String method = 'lmp_zgs'}) async {
     if (_running) return;
 
     // Any new discovery attempt should discard old subscriptions since prior
@@ -100,7 +101,7 @@ class NativeSonosBridge {
     await _resetSubscriptionState(stopServer: true);
 
     _log('Starting SSDP discovery for coordinator');
-    final device = await _discoverCoordinator();
+    final device = await _discoverCoordinator(method: method);
     if (device == null) {
       throw Exception('No Sonos devices found on the local network');
     }
@@ -619,7 +620,8 @@ class NativeSonosBridge {
       }
 
       final body = await resp.transform(utf8.decoder).join();
-      _log('GetPositionInfo (from host=$host) response: $body', level: Level.FINE);
+      _log('GetPositionInfo (from host=$host) response: $body',
+          level: Level.FINE);
 
       final doc = xml.XmlDocument.parse(body);
       final relTime = doc.findAllElements('RelTime').firstOrNull?.innerText;
@@ -630,7 +632,8 @@ class NativeSonosBridge {
       final trackMetaRaw =
           doc.findAllElements('TrackMetaData').firstOrNull?.innerText;
 
-      _log('GetPositionInfo (from host=$host) relTime=$relTime trackDuration=$trackDuration',
+      _log(
+          'GetPositionInfo (from host=$host) relTime=$relTime trackDuration=$trackDuration',
           level: Level.FINE);
 
       final meta = _parseTrackMeta(trackMetaRaw);
@@ -797,6 +800,7 @@ class NativeSonosBridge {
   Future<_SonosDevice?> _discoverCoordinator({
     Duration timeout = const Duration(seconds: 15),
     bool useCache = true,
+    String method = 'lmp_zgs',
   }) async {
     // Reuse in-flight discovery to avoid parallel M-SEARCH bursts and
     // duplicate subscriptions when multiple probes overlap.
@@ -863,12 +867,15 @@ class NativeSonosBridge {
     });
 
     final pendingHosts = <String>[];
+    final methodLower = method.toLowerCase();
     var processing = false;
     Future<void> _processNext() async {
       if (processing || found || pendingHosts.isEmpty) return;
       processing = true;
       final host = pendingHosts.removeAt(0);
-      final coord = await _getCoordinator(host);
+      final coord = methodLower == 'zgs_lmp'
+          ? await _getCoordinatorZgsLmp(host)
+          : await _getCoordinatorLmpZgs(host);
       if (found) {
         processing = false;
         return;
@@ -925,7 +932,158 @@ class NativeSonosBridge {
     );
   }
 
-  Future<_SonosDevice?> _getCoordinator(String host) async {
+  Future<_SonosDevice?> _getCoordinatorZgsLmp(String host) async {
+    try {
+      _log('Fetching coordinator info via ZGS->LMP from $host',
+          level: Level.FINE);
+      final body = await _getZoneGroupTopology(host);
+      if (body == null) return null;
+
+      // _logXml('ZoneGroupTopology raw from $host', body);
+      final coordinator = _parseCoordinatorFromZoneGroupState(body);
+      if (coordinator == null) return null;
+
+      final liveMedia = await _getLiveMedia(host: host);
+      final uri = (liveMedia?['uri'] as String?)?.trim();
+      final title = (liveMedia?['title'] as String?)?.trim();
+
+      // Require live media details when requested to strengthen coordinator qualification.
+      if ((uri != null && uri.isNotEmpty && uri != 'NOT_IMPLEMENTED') ||
+          (title != null && title.isNotEmpty)) {
+        return coordinator;
+      }
+
+      _log('Live media missing uri/title on $host; skipping as coordinator',
+          level: Level.FINE);
+      return null;
+    } catch (e) {
+      _log('Coordinator fetch error from $host: $e', level: Level.FINE);
+      return null;
+    }
+  }
+
+  Future<_SonosDevice?> _getCoordinatorLmpZgs(String host) async {
+    try {
+      _log('Fetching coordinator info via LMP->ZGS from $host',
+          level: Level.FINE);
+      final liveMedia = await _getLiveMedia(host: host);
+      final candidateFields = <String?>[
+        liveMedia?['uri'] as String?,
+        liveMedia?['original_media_id'] as String?,
+        liveMedia?['id'] as String?,
+      ];
+
+      String? _extractUuid(String? text) {
+        if (text == null || text.isEmpty) return null;
+        // Examples of possible values:
+        // x-sonos-vli:RINCON_7828CAE345F801400:2,spotify:...
+        // x-rincon:RINCON_7828CAE345F801400
+        final parts = text.split(':').where((p) => p.isNotEmpty).toList();
+        final candidate =
+            parts.length > 1 ? parts[1].split(',').first.trim() : null;
+        return candidate;
+      }
+
+      String? coordinatorUuid;
+      for (final field in candidateFields) {
+        coordinatorUuid = _extractUuid(field);
+        if (coordinatorUuid != null && coordinatorUuid.isNotEmpty) {
+          break;
+        }
+      }
+
+      if (coordinatorUuid == null || coordinatorUuid.isEmpty) {
+        _log('Coordinator UUID not found in live media from $host',
+            level: Level.WARNING);
+        return null;
+      }
+
+      final body = await _getZoneGroupTopology(host);
+      if (body == null) return null;
+      final targetUuid = coordinatorUuid.toUpperCase();
+
+      return _parseSonosDeviceFromzZoneGroupState(
+        body: body,
+        targetUuid: targetUuid,
+      );
+    } catch (e) {
+      _log('Coordinator LMP->ZGS fetch error from $host: $e',
+          level: Level.FINE);
+      return null;
+    }
+  }
+
+  _SonosDevice? _parseSonosDeviceFromzZoneGroupState({
+    required String body,
+    required String targetUuid,
+  }) {
+    try {
+      final outer = xml.XmlDocument.parse(body);
+      final zgStateNode = outer.descendants
+          .whereType<xml.XmlElement>()
+          .where((e) => e.name.local.toLowerCase() == 'zonegroupstate')
+          .firstOrNull;
+      if (zgStateNode == null) return null;
+      final innerRaw = zgStateNode.innerText.trim();
+      if (innerRaw.isEmpty) return null;
+
+      final zgDoc = xml.XmlDocument.parse(innerRaw);
+      for (final group in zgDoc.descendants
+          .whereType<xml.XmlElement>()
+          .where((e) => e.name.local.toLowerCase() == 'zonegroup')) {
+        final members = group.descendants
+            .whereType<xml.XmlElement>()
+            .where((e) => e.name.local.toLowerCase() == 'zonegroupmember')
+            .toList();
+        if (members.isEmpty) continue;
+        final allBoost = members.every(
+            (m) => (m.getAttribute('ZoneName') ?? '').toLowerCase() == 'boost');
+        if (allBoost) continue;
+
+        final groupDevices = <_GroupDevice>[];
+        for (final member in members) {
+          final name = member.getAttribute('ZoneName');
+          final location = member.getAttribute('Location');
+          if (name != null && name.isNotEmpty) {
+            groupDevices.add(_GroupDevice(name: name, location: location));
+          }
+        }
+
+        for (final member in members) {
+          final uuid = member.getAttribute('UUID') ?? '';
+          if (uuid.isEmpty || uuid.toUpperCase() != targetUuid) continue;
+
+          final idleStateStr = member.getAttribute('IdleState');
+          final idleState =
+              idleStateStr != null ? int.tryParse(idleStateStr) : null;
+          final location = member.getAttribute('Location');
+          final zoneName = member.getAttribute('ZoneName') ?? 'Sonos';
+          final model = member.getAttribute('ModelNumber');
+          final ip = _hostFromLocation(location);
+          if (ip == null || ip.isEmpty) continue;
+
+          return _SonosDevice(
+            ip: ip,
+            name: zoneName,
+            uuid: uuid,
+            isCoordinator: true,
+            model: model,
+            location: location,
+            idleState: idleState,
+            roomName: zoneName,
+            groupDevices: groupDevices,
+          );
+        }
+      }
+    } catch (e) {
+      _log('_parseSonosDeviceFromzZoneGroupState parse error: $e',
+          level: Level.FINE);
+    }
+
+    return null;
+  }
+
+  Future<String?> _getZoneGroupTopology(String host) async {
     try {
       const envelope = '<?xml version="1.0" encoding="utf-8"?>\n'
           '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">\n'
@@ -944,6 +1102,7 @@ class NativeSonosBridge {
               '"urn:schemas-upnp-org:service:ZoneGroupTopology:1#GetZoneGroupState"',
         },
       );
+
       if (resp.statusCode != 200) {
         _log('ZoneGroupTopology request failed (${resp.statusCode}) from $host',
             level: Level.FINE);
@@ -952,25 +1111,9 @@ class NativeSonosBridge {
       }
 
       final body = await resp.transform(utf8.decoder).join();
-
-      // _logXml('ZoneGroupTopology raw from $host', body);
-      final coordinator = _parseCoordinatorFromZoneGroupState(body);
-      if (coordinator == null) return null;
-
-      final liveMedia = await _getLiveMedia(host: host);
-      final uri = (liveMedia?['uri'] as String?)?.trim();
-      final title = (liveMedia?['title'] as String?)?.trim();
-
-      // Require live media details when requested to strengthen coordinator qualification.
-      if ((uri != null && uri.isNotEmpty && uri != 'NOT_IMPLEMENTED') || (title != null && title.isNotEmpty) ) {
-        return coordinator;
-      }
-
-      _log('Live media missing uri/title on $host; skipping as coordinator',
-          level: Level.FINE);
-      return null;
+      return body;
     } catch (e) {
-      _log('Coordinator fetch error from $host: $e', level: Level.FINE);
+      _log('ZoneGroupTopology fetch error from $host: $e', level: Level.FINE);
       return null;
     }
   }
@@ -1017,8 +1160,10 @@ class NativeSonosBridge {
           if (uuid.toUpperCase() != coordinatorId.toUpperCase()) continue;
 
           // IdleState: 0 = active, 1 = idle. Skip idle coordinators.
-          final idleState = member.getAttribute('IdleState');
-          if (idleState != null && idleState != '0') {
+          final idleStateStr = member.getAttribute('IdleState');
+          final idleState =
+              idleStateStr != null ? int.tryParse(idleStateStr) : null;
+          if (idleState != null && idleState != 0) {
             continue;
           }
 
@@ -1027,6 +1172,7 @@ class NativeSonosBridge {
           final model = member.getAttribute('ModelNumber');
           final ip = _hostFromLocation(location);
           if (ip == null || ip.isEmpty) continue;
+
           return _SonosDevice(
             ip: ip,
             name: zoneName,
@@ -1034,12 +1180,15 @@ class NativeSonosBridge {
             isCoordinator: true,
             model: model,
             roomName: zoneName,
+            location: location,
+            idleState: idleState,
             groupDevices: groupDevices,
           );
         }
       }
     } catch (e) {
-      _log('ZoneGroupState parse error: $e', level: Level.FINE);
+      _log('_parseCoordinatorFromZoneGroupState parse error: $e',
+          level: Level.FINE);
     }
     return null;
   }
@@ -1076,34 +1225,42 @@ class _SonosDevice {
       this.model,
       this.roomName,
       this.friendlyName,
+      this.idleState,
+      this.location,
       this.groupDevices});
 
   final String ip;
   final String name;
   final String? uuid;
+  final int? idleState;
   final bool isCoordinator;
   final String? model;
   final String? roomName;
   final String? friendlyName;
+  final String? location;
   final List<_GroupDevice>? groupDevices;
 
   _SonosDevice copyWith(
       {String? ip,
       String? name,
       String? uuid,
+      int? idleState,
       bool? isCoordinator,
       String? model,
       String? roomName,
       String? friendlyName,
+      String? location,
       List<_GroupDevice>? groupDevices}) {
     return _SonosDevice(
       ip: ip ?? this.ip,
       name: name ?? this.name,
       uuid: uuid ?? this.uuid,
+      idleState: idleState ?? this.idleState,
       isCoordinator: isCoordinator ?? this.isCoordinator,
       model: model ?? this.model,
       roomName: roomName ?? this.roomName,
       friendlyName: friendlyName ?? this.friendlyName,
+      location: location ?? this.location,
       groupDevices: groupDevices ?? this.groupDevices,
     );
   }
