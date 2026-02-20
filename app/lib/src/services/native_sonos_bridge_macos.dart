@@ -33,7 +33,6 @@ class NativeSonosBridge {
   Map<String, dynamic>? _playlist;
   Map<String, dynamic>? _nextTrack;
   bool get isSupported => Platform.isMacOS;
-  final bool _isGetLiveMediaCoordDisc = true;
 
   Stream<NativeSonosMessage> get messages => _controller.stream;
 
@@ -78,8 +77,7 @@ class NativeSonosBridge {
 
       final device = await _discoverCoordinator(
           timeout: timeout,
-          useCache: !forceRediscover,
-          isGetLiveMedia: _isGetLiveMediaCoordDisc);
+          useCache: !forceRediscover);
       if (device == null) return false;
       _setCoordinator(device);
       return true;
@@ -102,7 +100,7 @@ class NativeSonosBridge {
     await _resetSubscriptionState(stopServer: true);
 
     _log('Starting SSDP discovery for coordinator');
-    final device = await _discoverCoordinator(isGetLiveMedia: _isGetLiveMediaCoordDisc);
+    final device = await _discoverCoordinator();
     if (device == null) {
       throw Exception('No Sonos devices found on the local network');
     }
@@ -799,7 +797,6 @@ class NativeSonosBridge {
   Future<_SonosDevice?> _discoverCoordinator({
     Duration timeout = const Duration(seconds: 15),
     bool useCache = true,
-    bool isGetLiveMedia = false,
   }) async {
     // Reuse in-flight discovery to avoid parallel M-SEARCH bursts and
     // duplicate subscriptions when multiple probes overlap.
@@ -871,7 +868,7 @@ class NativeSonosBridge {
       if (processing || found || pendingHosts.isEmpty) return;
       processing = true;
       final host = pendingHosts.removeAt(0);
-      final coord = await _getCoordinator(host, isGetLiveMedia: isGetLiveMedia);
+      final coord = await _getCoordinator(host);
       if (found) {
         processing = false;
         return;
@@ -928,8 +925,7 @@ class NativeSonosBridge {
     );
   }
 
-  Future<_SonosDevice?> _getCoordinator(String host,
-      {bool isGetLiveMedia = false}) async {
+  Future<_SonosDevice?> _getCoordinator(String host) async {
     try {
       const envelope = '<?xml version="1.0" encoding="utf-8"?>\n'
           '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">\n'
@@ -960,7 +956,6 @@ class NativeSonosBridge {
       // _logXml('ZoneGroupTopology raw from $host', body);
       final coordinator = _parseCoordinatorFromZoneGroupState(body);
       if (coordinator == null) return null;
-      if (!isGetLiveMedia) return coordinator;
 
       final liveMedia = await _getLiveMedia(host: host);
       final uri = (liveMedia?['uri'] as String?)?.trim();
