@@ -183,6 +183,7 @@ class EnvConfig {
     required this.localSonosFallback,
     required this.nativeLocalSonosFallback,
     required this.nativeLocalSonosCoordinatorDiscMethod,
+    required this.nativeLocalSonosMaxHostsPerCoordinatorDisc,
     required this.nativeLocalSonosHealthCheckSec,
     required this.nativeLocalSonosHealthCheckRetry,
     required this.nativeLocalSonosHealthCheckTimeoutSec,
@@ -232,6 +233,7 @@ class EnvConfig {
   final ServiceFallbackConfig localSonosFallback;
   final ServiceFallbackConfig nativeLocalSonosFallback;
   final String nativeLocalSonosCoordinatorDiscMethod;
+  final int nativeLocalSonosMaxHostsPerCoordinatorDisc;
   final int nativeLocalSonosHealthCheckSec;
   final int nativeLocalSonosHealthCheckRetry;
   final int nativeLocalSonosHealthCheckTimeoutSec;
@@ -641,6 +643,12 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
           dotenv.env['NATIVE_LOCAL_SONOS_HEALTH_CHECK_TIMEOUT_SEC'] ?? '') ??
       5;
 
+  // Maximum hosts to attempt during coordinator discovery (0 = unlimited)
+  final nativeLocalSonosMaxHostsPerCoordinatorDisc = int.tryParse(
+          dotenv.env['NATIVE_LOCAL_SONOS_MAX_HOSTS_PER_COORDINATOR_DISC'] ??
+              '') ??
+      4;
+
   // Parse global service settings
   final serviceTransitionGraceSec =
       int.tryParse(dotenv.env['SERVICE_TRANSITION_GRACE_SEC'] ?? '') ?? 2;
@@ -682,6 +690,8 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
     nativeLocalSonosFallback: nativeLocalSonosFallback,
     nativeLocalSonosCoordinatorDiscMethod:
         nativeLocalSonosCoordinatorDiscMethod,
+    nativeLocalSonosMaxHostsPerCoordinatorDisc:
+        nativeLocalSonosMaxHostsPerCoordinatorDisc,
     nativeLocalSonosHealthCheckSec: nativeLocalSonosHealthCheckSec,
     nativeLocalSonosHealthCheckRetry: nativeLocalSonosHealthCheckRetry,
     nativeLocalSonosHealthCheckTimeoutSec:

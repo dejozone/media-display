@@ -611,6 +611,8 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
                 _config.nativeLocalSonosHealthCheckTimeoutSec,
             coordinatorDiscoveryMethod:
                 _config.nativeLocalSonosCoordinatorDiscMethod,
+            maxHostsPerCoordinatorDiscovery:
+                _config.nativeLocalSonosMaxHostsPerCoordinatorDisc,
           );
 
       // Kick off a fresh discovery after (re)activation to clear stale
@@ -620,6 +622,8 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
               forceRediscover: true,
               coordinatorDiscoveryMethod:
                   _config.nativeLocalSonosCoordinatorDiscMethod,
+              maxHostsPerCoordinatorDiscovery:
+                  _config.nativeLocalSonosMaxHostsPerCoordinatorDisc,
             );
       });
     } else {

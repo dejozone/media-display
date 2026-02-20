@@ -115,6 +115,7 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
     int? healthCheckRetry,
     int? healthCheckTimeoutSec,
     String? coordinatorDiscoveryMethod,
+    int? maxHostsPerCoordinatorDiscovery,
   }) async {
     // If already running and connected, avoid tearing down and re-subscribing.
     if (state.isRunning && state.connected) {
@@ -178,6 +179,7 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
         healthCheckRetry: healthCheckRetry,
         healthCheckTimeoutSec: healthCheckTimeoutSec,
         method: coordinatorDiscoveryMethod ?? 'lmp_zgs',
+        maxHostsPerDiscovery: maxHostsPerCoordinatorDiscovery,
       );
       state = state.copyWith(
         isRunning: true,
@@ -223,7 +225,8 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
 
   Future<bool> probe(
       {bool forceRediscover = false,
-      String? coordinatorDiscoveryMethod}) async {
+      String? coordinatorDiscoveryMethod,
+      int? maxHostsPerCoordinatorDiscovery}) async {
     final bridge = _bridge ??= createNativeSonosBridge();
     _log(
         'Probe requested (supported=${bridge.isSupported}, type=${bridge.runtimeType})',
@@ -234,6 +237,7 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
       final result = await bridge.probe(
         forceRediscover: forceRediscover,
         method: coordinatorDiscoveryMethod ?? 'lmp_zgs',
+        maxHostsPerDiscovery: maxHostsPerCoordinatorDiscovery,
       );
       _log('Probe result: ${result ? 'success' : 'no devices'}');
       if (!result) {

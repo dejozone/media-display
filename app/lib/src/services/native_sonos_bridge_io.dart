@@ -28,13 +28,15 @@ class NativeSonosBridge {
       int? healthCheckSec,
       int? healthCheckRetry,
       int? healthCheckTimeoutSec,
-      String method = 'lmp_zgs'}) {
+      String method = 'lmp_zgs',
+      int? maxHostsPerDiscovery}) {
     return _macos?.start(
           pollIntervalSec: pollIntervalSec,
           healthCheckSec: healthCheckSec,
           healthCheckRetry: healthCheckRetry,
           healthCheckTimeoutSec: healthCheckTimeoutSec,
           method: method,
+          maxHostsPerDiscovery: maxHostsPerDiscovery,
         ) ??
         _stub?.start(
           pollIntervalSec: pollIntervalSec,
@@ -42,6 +44,7 @@ class NativeSonosBridge {
           healthCheckRetry: healthCheckRetry,
           healthCheckTimeoutSec: healthCheckTimeoutSec,
           method: method,
+          maxHostsPerDiscovery: maxHostsPerDiscovery,
         ) ??
         Future.value();
   }
@@ -51,9 +54,19 @@ class NativeSonosBridge {
   }
 
   Future<bool> probe(
-      {bool forceRediscover = false, String method = 'lmp_zgs'}) {
-    return _macos?.probe(forceRediscover: forceRediscover, method: method) ??
-        _stub?.probe(forceRediscover: forceRediscover, method: method) ??
+      {bool forceRediscover = false,
+      String method = 'lmp_zgs',
+      int? maxHostsPerDiscovery}) {
+    return _macos?.probe(
+          forceRediscover: forceRediscover,
+          method: method,
+          maxHostsPerDiscovery: maxHostsPerDiscovery,
+        ) ??
+        _stub?.probe(
+          forceRediscover: forceRediscover,
+          method: method,
+          maxHostsPerDiscovery: maxHostsPerDiscovery,
+        ) ??
         Future.value(false);
   }
 }

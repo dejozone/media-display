@@ -61,6 +61,7 @@ class NativeSonosBridge {
     bool forceRediscover = false,
     bool isGetLiveMedia = false,
     String method = 'lmp_zgs',
+    int? maxHostsPerDiscovery,
   }) async {
     try {
       // When forcing rediscovery (e.g., after a health check failure), ignore
@@ -77,7 +78,10 @@ class NativeSonosBridge {
       }
 
       final device = await _discoverCoordinator(
-          timeout: timeout, useCache: !forceRediscover, method: method);
+          timeout: timeout,
+          useCache: !forceRediscover,
+          method: method,
+          maxHostsPerDiscovery: maxHostsPerDiscovery);
       if (device == null) return false;
       _setCoordinator(device);
       return true;
@@ -92,7 +96,8 @@ class NativeSonosBridge {
       int? healthCheckSec,
       int? healthCheckRetry,
       int? healthCheckTimeoutSec,
-      String method = 'lmp_zgs'}) async {
+      String method = 'lmp_zgs',
+      int? maxHostsPerDiscovery}) async {
     if (_running) return;
 
     // Any new discovery attempt should discard old subscriptions since prior
@@ -101,7 +106,10 @@ class NativeSonosBridge {
     await _resetSubscriptionState(stopServer: true);
 
     _log('Starting SSDP discovery for coordinator');
-    final device = await _discoverCoordinator(method: method);
+    final device = await _discoverCoordinator(
+      method: method,
+      maxHostsPerDiscovery: maxHostsPerDiscovery,
+    );
     if (device == null) {
       throw Exception('No Sonos devices found on the local network');
     }
@@ -801,6 +809,7 @@ class NativeSonosBridge {
     Duration timeout = const Duration(seconds: 15),
     bool useCache = true,
     String method = 'lmp_zgs',
+    int? maxHostsPerDiscovery,
   }) async {
     // Reuse in-flight discovery to avoid parallel M-SEARCH bursts and
     // duplicate subscriptions when multiple probes overlap.
@@ -824,7 +833,7 @@ class NativeSonosBridge {
       }
     }
 
-    _log('Sending SSDP M-SEARCH for Sonos ZonePlayers', level: Level.FINE);
+    _log('Sending SSDP M-SEARCH for Sonos ZonePlayers');
     const mcast = '239.255.255.250';
     const port = 1900;
     const searchTarget = 'urn:schemas-upnp-org:device:ZonePlayer:1';
@@ -849,7 +858,7 @@ class NativeSonosBridge {
 
     var found = false;
     final attemptedHosts = <String>{};
-    const maxHosts = 4; // Avoid hammering many responders; bail after a few
+    final maxHosts = maxHostsPerDiscovery ?? 4; // 0 => unlimited
     StreamSubscription<RawSocketEvent>? sub;
 
     Future<void> _finalize(_SonosDevice? chosen) async {
@@ -905,7 +914,7 @@ class NativeSonosBridge {
         final host = uri?.host;
         if (host == null || host.isEmpty) return;
         if (attemptedHosts.contains(host)) return;
-        if (attemptedHosts.length >= maxHosts) return;
+        if (maxHosts > 0 && attemptedHosts.length >= maxHosts) return;
         attemptedHosts.add(host);
         pendingHosts.add(host);
         await _processNext();
@@ -978,10 +987,10 @@ class NativeSonosBridge {
         // Examples of possible values:
         // x-sonos-vli:RINCON_7828CAE345F801400:2,spotify:...
         // x-rincon:RINCON_7828CAE345F801400
-        final parts = text.split(':').where((p) => p.isNotEmpty).toList();
-        final candidate =
-            parts.length > 1 ? parts[1].split(',').first.trim() : null;
-        return candidate;
+        final preComma = text.split(',').first;
+        final parts = preComma.split(':');
+        if (parts.length < 2) return null;
+        return parts[1].trim();
       }
 
       String? coordinatorUuid;
