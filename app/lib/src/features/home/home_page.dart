@@ -350,6 +350,8 @@ class _HomePageState extends ConsumerState<HomePage>
       activeService: activeService,
       provider: effectiveProvider,
     );
+    final sonosToggleEnabled = !(env.platformMode == ClientPlatformMode.web &&
+        !env.priorityOrderOfServices.contains(ServiceType.localSonos));
 
     return Shortcuts(
       shortcuts: traversalShortcuts,
@@ -416,6 +418,7 @@ class _HomePageState extends ConsumerState<HomePage>
                         child: _SettingsToggles(
                           settings: settings,
                           saving: savingSettings,
+                          sonosToggleEnabled: sonosToggleEnabled,
                           onSpotifyChanged: _handleSpotifyToggle,
                           onSonosChanged: _handleSonosToggle,
                         ),
@@ -477,11 +480,13 @@ class _SettingsToggles extends StatelessWidget {
   const _SettingsToggles({
     required this.settings,
     required this.saving,
+    required this.sonosToggleEnabled,
     required this.onSpotifyChanged,
     required this.onSonosChanged,
   });
   final Map<String, dynamic>? settings;
   final bool saving;
+  final bool sonosToggleEnabled;
   final Future<void> Function(bool) onSpotifyChanged;
   final Future<void> Function(bool) onSonosChanged;
 
@@ -500,9 +505,13 @@ class _SettingsToggles extends StatelessWidget {
         const SizedBox(height: 12),
         _toggleRow(
           label: 'Sonos',
-          subtitle: 'Local network (requires only Sonos devices)',
+          subtitle: sonosToggleEnabled
+              ? 'Local network (requires only Sonos devices)'
+              : 'Unavailable on this web application due to platform limitations',
           value: sonos,
-          onChanged: saving ? null : (v) => onSonosChanged(v),
+          enabled: sonosToggleEnabled,
+          onChanged:
+              (saving || !sonosToggleEnabled) ? null : (v) => onSonosChanged(v),
         ),
         const SizedBox(height: 12),
         _toggleRow(
@@ -1194,17 +1203,25 @@ Widget _toggleRow(
     {required String label,
     required String subtitle,
     required bool value,
+    bool enabled = true,
     required ValueChanged<bool>? onChanged}) {
+  final titleColor = enabled ? null : const Color(0xFF7082A4);
+  final subtitleColor = enabled
+      ? const Color(0xFF9FB1D0)
+      : const Color(0xFF9FB1D0).withValues(alpha: 0.5);
+
   return Row(
     children: [
       Expanded(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
+            Text(label,
+                style:
+                    TextStyle(fontWeight: FontWeight.w700, color: titleColor)),
             const SizedBox(height: 2),
             Text(subtitle,
-                style: const TextStyle(color: Color(0xFF9FB1D0), fontSize: 12)),
+                style: TextStyle(color: subtitleColor, fontSize: 12)),
           ],
         ),
       ),
