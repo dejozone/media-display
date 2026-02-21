@@ -351,12 +351,12 @@ class _HomePageState extends ConsumerState<HomePage>
       provider: effectiveProvider,
     );
     final hasLocalSonosInPriority =
-      env.priorityOrderOfServices.contains(ServiceType.localSonos);
+        env.priorityOrderOfServices.contains(ServiceType.localSonos);
     final hasNativeSonosInPriority =
-      env.priorityOrderOfServices.contains(ServiceType.nativeLocalSonos);
+        env.priorityOrderOfServices.contains(ServiceType.nativeLocalSonos);
     final sonosToggleEnabled = env.platformMode == ClientPlatformMode.web
-      ? hasLocalSonosInPriority
-      : (hasLocalSonosInPriority || hasNativeSonosInPriority);
+        ? hasLocalSonosInPriority
+        : (hasLocalSonosInPriority || hasNativeSonosInPriority);
 
     return Shortcuts(
       shortcuts: traversalShortcuts,
@@ -512,7 +512,7 @@ class _SettingsToggles extends StatelessWidget {
           label: 'Sonos',
           subtitle: sonosToggleEnabled
               ? 'Local network (requires only Sonos devices)'
-            : 'Unavailable on this platform due to platform limitations',
+              : 'Unavailable on this platform due to platform limitations',
           value: sonos,
           enabled: sonosToggleEnabled,
           onChanged:
