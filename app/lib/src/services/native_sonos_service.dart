@@ -43,8 +43,14 @@ class NativeSonosState {
 }
 
 class NativeSonosNotifier extends Notifier<NativeSonosState> {
+  static const bool _enableAndroidNativeSonos =
+      bool.fromEnvironment('ENABLE_NATIVE_SONOS_ANDROID', defaultValue: false);
+  static const bool _enableIosNativeSonos =
+      bool.fromEnvironment('ENABLE_NATIVE_SONOS_IOS', defaultValue: false);
+
   NativeSonosBridge? _bridge;
   StreamSubscription<NativeSonosMessage>? _subscription;
+  bool _loggedBridgeRuntimeInfo = false;
 
   Timer? _healthCheckTimer;
   String? _healthCheckHost;
@@ -110,6 +116,24 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
     return const NativeSonosState();
   }
 
+  void _logBridgeRuntimeInfo(NativeSonosBridge bridge) {
+    if (_loggedBridgeRuntimeInfo) {
+      return;
+    }
+
+    final platform = Platform.operatingSystem;
+    final mobileFlags =
+        'android=$_enableAndroidNativeSonos ios=$_enableIosNativeSonos';
+
+    _log(
+      'Native Sonos runtime: platform=$platform adapter=${bridge.runtimeType} '
+      'supported=${bridge.isSupported} flags[$mobileFlags]',
+      level: Level.INFO,
+    );
+
+    _loggedBridgeRuntimeInfo = true;
+  }
+
   Future<void> start({
     int? pollIntervalSec,
     int? trackProgressPollIntervalSec,
@@ -133,6 +157,7 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
     }
 
     final bridge = _bridge ??= createNativeSonosBridge();
+    _logBridgeRuntimeInfo(bridge);
     _log(
         'Bridge created (supported=${bridge.isSupported}, type=${bridge.runtimeType})',
         level: Level.FINE);
