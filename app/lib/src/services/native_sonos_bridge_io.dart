@@ -59,6 +59,19 @@ class NativeSonosBridge {
     return _macos?.stop() ?? _stub?.stop() ?? Future.value();
   }
 
+  Future<void> setTrackProgressPolling(
+      {required bool enabled, int? intervalSec}) {
+    return _macos?.setTrackProgressPolling(
+          enabled: enabled,
+          intervalSec: intervalSec,
+        ) ??
+        _stub?.setTrackProgressPolling(
+          enabled: enabled,
+          intervalSec: intervalSec,
+        ) ??
+        Future.value();
+  }
+
   Future<bool> probe(
       {bool forceRediscover = false,
       String method = 'lmp_zgs',

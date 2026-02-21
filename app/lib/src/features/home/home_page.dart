@@ -345,13 +345,10 @@ class _HomePageState extends ConsumerState<HomePage>
             progressMs != null)
         ? (progressMs / durationMs).clamp(0.0, 1.0)
         : null;
-    final pollIntervalSec = env.nativeLocalSonosTrackProgressPollIntervalSec;
-    final progressAnimationDuration = Duration(
-      milliseconds: ((pollIntervalSec != null && pollIntervalSec > 0
-                  ? pollIntervalSec
-                  : 2) *
-              1000)
-          .clamp(300, 5000),
+    final progressAnimationDuration = _progressAnimationDuration(
+      env: env,
+      activeService: activeService,
+      provider: effectiveProvider,
     );
 
     return Shortcuts(
@@ -991,34 +988,32 @@ class _TrackProgressOverlay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final clamped = progress.clamp(0.0, 1.0);
-    return Positioned.fill(
-      child: IgnorePointer(
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(12),
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final targetWidth = constraints.maxWidth * clamped;
-              return Align(
-                alignment: Alignment.centerLeft,
-                child: AnimatedContainer(
-                  duration: animationDuration,
-                  curve: Curves.linear,
-                  width: targetWidth,
-                  height: constraints.maxHeight,
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.centerLeft,
-                      end: Alignment.centerRight,
-                      colors: [
-                        Color.fromARGB(33, 124, 116, 116),
-                        Color.fromARGB(33, 124, 116, 116),
-                      ],
-                    ),
+    return IgnorePointer(
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final targetWidth = constraints.maxWidth * clamped;
+            return Align(
+              alignment: Alignment.centerLeft,
+              child: AnimatedContainer(
+                duration: animationDuration,
+                curve: Curves.linear,
+                width: targetWidth,
+                height: constraints.maxHeight,
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.centerLeft,
+                    end: Alignment.centerRight,
+                    colors: [
+                      Color.fromARGB(33, 124, 116, 116),
+                      Color.fromARGB(33, 124, 116, 116),
+                    ],
                   ),
                 ),
-              );
-            },
-          ),
+              ),
+            );
+          },
         ),
       ),
     );
@@ -1030,12 +1025,50 @@ class _TrackProgressOverlay extends StatelessWidget {
 int? _trackDurationMs(Map<String, dynamic>? payload) {
   if (payload == null) return null;
   final track = payload['track'];
-  if (track is! Map) return null;
-  final raw = track['duration_ms'] ?? track['duration'];
+  dynamic raw;
+  if (track is Map) {
+    raw = track['duration_ms'];
+  }
   if (raw is int) return raw;
   if (raw is double) return raw.round();
   if (raw is String) return _parseDurationStringMs(raw);
   return null;
+}
+
+Duration _progressAnimationDuration({
+  required EnvConfig env,
+  required ServiceType? activeService,
+  required String? provider,
+}) {
+  int? intervalSec;
+
+  switch (activeService) {
+    case ServiceType.directSpotify:
+      intervalSec = env.directSpotifyPollIntervalSec;
+      break;
+    case ServiceType.cloudSpotify:
+      intervalSec = env.cloudSpotifyPollIntervalSec;
+      break;
+    case ServiceType.localSonos:
+      intervalSec = env.sonosPollIntervalSec;
+      break;
+    case ServiceType.nativeLocalSonos:
+      intervalSec = env.nativeLocalSonosTrackProgressPollIntervalSec;
+      break;
+    case null:
+      break;
+  }
+
+  if ((intervalSec == null || intervalSec <= 0) && provider == 'spotify') {
+    intervalSec = env.directSpotifyPollIntervalSec;
+  }
+  if ((intervalSec == null || intervalSec <= 0) && provider == 'sonos') {
+    intervalSec = env.nativeLocalSonosTrackProgressPollIntervalSec ??
+        env.sonosPollIntervalSec;
+  }
+
+  final safeSec = (intervalSec != null && intervalSec > 0) ? intervalSec : 2;
+  return Duration(milliseconds: (safeSec * 1000).clamp(300, 5000));
 }
 
 int? _effectiveProgressMs(Map<String, dynamic>? payload,
@@ -1053,20 +1086,6 @@ int? _effectiveProgressMs(Map<String, dynamic>? payload,
   }
 
   if (progressMs == null) return null;
-
-  final ts = playback['timestamp'];
-  final timestampMs = ts is int
-      ? ts
-      : ts is double
-          ? ts.round()
-          : null;
-
-  if (isPlaying && timestampMs != null) {
-    final delta = DateTime.now().millisecondsSinceEpoch - timestampMs;
-    if (delta > 0) {
-      progressMs += delta;
-    }
-  }
 
   if (durationMs != null && durationMs > 0 && progressMs > durationMs) {
     return durationMs;

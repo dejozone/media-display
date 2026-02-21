@@ -34,6 +34,9 @@ class NativeSonosBridge {
 
   Future<void> stop() async {}
 
+  Future<void> setTrackProgressPolling(
+      {required bool enabled, int? intervalSec}) async {}
+
   Future<bool> probe(
           {bool forceRediscover = false,
           String method = 'lmp_zgs',

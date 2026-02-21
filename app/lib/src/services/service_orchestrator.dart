@@ -506,6 +506,12 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
   }
 
   void _activateDirectSpotify({bool isFallback = false}) {
+    // Keep native Sonos bridge alive, but disable its track progress polling
+    // while direct Spotify is the active service.
+    ref.read(nativeSonosProvider.notifier).setTrackProgressPolling(
+          enabled: false,
+        );
+
     // Stop any direct polling first (in case switching from another mode)
     // Start direct polling
     ref.read(spotifyDirectProvider.notifier).startDirectPolling();
@@ -539,6 +545,12 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
   }
 
   void _activateCloudService(ServiceType service, {bool isFallback = false}) {
+    // Keep native Sonos bridge alive, but disable track progress polling
+    // while cloud services are active.
+    ref.read(nativeSonosProvider.notifier).setTrackProgressPolling(
+          enabled: false,
+        );
+
     // Stop direct polling if it was running
     ref.read(spotifyDirectProvider.notifier).stopPolling();
 
@@ -597,14 +609,22 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
     final alreadyRunningConnected =
         nativeState.isRunning && nativeState.connected;
 
+    final progressPollInterval =
+        _config.nativeLocalSonosTrackProgressPollIntervalSec;
+    final enableTrackProgress = _config.enableHomeTrackProgress;
+
+    // Re-enable progress polling when returning to native Sonos, even if the
+    // bridge was kept running in the background.
+    ref.read(nativeSonosProvider.notifier).setTrackProgressPolling(
+          enabled: enableTrackProgress,
+          intervalSec: progressPollInterval,
+        );
+
     if (!alreadyRunningConnected) {
       final pollInterval = _config.nativeSonosPollIntervalSec ??
           (_config.nativeLocalSonosFallback.timeoutSec > 0
               ? _config.nativeLocalSonosFallback.timeoutSec
               : null);
-      final progressPollInterval =
-          _config.nativeLocalSonosTrackProgressPollIntervalSec;
-      final enableTrackProgress = _config.enableHomeTrackProgress;
       _log(
           'Starting native Sonos bridge with pollIntervalSec=$pollInterval, trackProgressPollIntervalSec=$progressPollInterval, enableTrackProgress=$enableTrackProgress');
       ref.read(nativeSonosProvider.notifier).start(

@@ -501,7 +501,7 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
           ? null
           : nativeTrackProgressPollIntervalSecRaw;
   final enableHomeTrackProgress = _parseBool(
-      _getEnv('HomeNowPlayingWidget', 'ENABLE_TRACK_PROGRESS'),
+      _getEnv('NowPlayingHomeWidget', 'ENABLE_TRACK_PROGRESS'),
       fallback: false);
 
   // Parse service priority order based on platform mode

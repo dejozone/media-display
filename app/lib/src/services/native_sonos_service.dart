@@ -80,16 +80,17 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
         'Payload summary: keys=[$keys], device=$deviceName (isCoordinator=$isCoordinator)');
   }
 
-  String? _coordinatorName(Map<String, dynamic> payload) {
-    // Try common fields for identifying the coordinator device name
-    final data = payload['data'];
-    final device = data is Map<String, dynamic> ? data['device'] : null;
-    if (device is Map<String, dynamic>) {
-      final name = device['name'] ?? device['displayName'];
-      if (name is String && name.isNotEmpty) return name;
-    }
-    return null;
-  }
+  // String? _coordinatorName(Map<String, dynamic> payload) {
+  //   // Try common fields for identifying the coordinator device name
+  //   final data = payload['data'];
+
+  //   final device = data is Map<String, dynamic> ? data['device'] : null;
+  //   if (device is Map<String, dynamic>) {
+  //     final name = device['name'] ?? device['displayName'];
+  //     if (name is String && name.isNotEmpty) return name;
+  //   }
+  //   return null;
+  // }
 
   String? _coordinatorHost(Map<String, dynamic> payload) {
     final data = payload['data'];
@@ -227,6 +228,24 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
     );
   }
 
+  Future<void> setTrackProgressPolling(
+      {required bool enabled, int? intervalSec}) async {
+    final bridge = _bridge;
+    if (bridge == null || !state.isRunning) return;
+    try {
+      await bridge.setTrackProgressPolling(
+        enabled: enabled,
+        intervalSec: intervalSec,
+      );
+      _log(
+          'Track progress polling ${enabled ? 'enabled' : 'disabled'}'
+          '${intervalSec != null ? ' (interval=${intervalSec}s)' : ''}',
+          level: Level.FINE);
+    } catch (e) {
+      _log('Failed to update track progress polling: $e', level: Level.WARNING);
+    }
+  }
+
   Future<bool> probe(
       {bool forceRediscover = false,
       String? coordinatorDiscoveryMethod,
@@ -287,10 +306,10 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
           clearPayload: true,
         );
       } else {
-        final coordinatorName = _coordinatorName(message.payload!);
-        if (coordinatorName != null) {
-          _log('Using coordinator: $coordinatorName');
-        }
+        // final coordinatorName = _coordinatorName(message.payload!);
+        // if (coordinatorName != null) {
+        //   _log('Using coordinator: $coordinatorName');
+        // }
         _logPayloadSummary(message.payload!);
         state = state.copyWith(
           payload: message.payload,

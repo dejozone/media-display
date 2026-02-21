@@ -155,6 +155,27 @@ class NativeSonosBridge {
     ));
   }
 
+  Future<void> setTrackProgressPolling(
+      {required bool enabled, int? intervalSec}) async {
+    if (!enabled) {
+      _stopProgressPolling();
+      return;
+    }
+
+    final seconds = intervalSec ?? 0;
+    if (seconds <= 0) {
+      _stopProgressPolling();
+      return;
+    }
+
+    if (!_running) {
+      _progressPollingEnabled = true;
+      return;
+    }
+
+    _startProgressPolling(Duration(seconds: seconds));
+  }
+
   Future<void> _emitPayload({bool isGetLiveMediaProgress = true}) async {
     final coord = _coordinatorDevice;
     final coordIp = coord?['ip'] as String?;
