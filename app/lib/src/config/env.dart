@@ -1,9 +1,64 @@
 import 'package:flutter/foundation.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_display/src/utils/logging.dart';
 
 final _envLogger = appLogger('EnvConfig');
+
+// Parsed configuration from conf/.env, grouped by section name.
+Map<String, Map<String, String>> _envSections = {};
+
+Map<String, Map<String, String>> _parseEnvWithSections(String content) {
+  final sections = <String, Map<String, String>>{};
+  String current = '';
+
+  for (final rawLine in content.split('\n')) {
+    final line = rawLine.trim();
+    if (line.isEmpty || line.startsWith('#')) continue;
+    if (line.startsWith('[') && line.endsWith(']')) {
+      current = line.substring(1, line.length - 1).trim();
+      sections.putIfAbsent(current, () => <String, String>{});
+      continue;
+    }
+    final eq = line.indexOf('=');
+    if (eq <= 0) continue;
+    final key = line.substring(0, eq).trim();
+    var value = line.substring(eq + 1).trim();
+
+    final isQuoted = (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"));
+    if (!isQuoted) {
+      final inlineComment = RegExp(r'\s+#').firstMatch(value);
+      if (inlineComment != null) {
+        value = value.substring(0, inlineComment.start).trimRight();
+      }
+    }
+
+    sections.putIfAbsent(current, () => <String, String>{});
+    sections[current]![key] = value;
+  }
+
+  return sections;
+}
+
+String? _getEnv(String section, String key) {
+  return _envSections[section]?[key];
+}
+
+String? getEnvValue(String section, String key) => _getEnv(section, key);
+
+int _parseInt(String? raw, {int fallback = 0}) {
+  final v = int.tryParse(raw ?? '');
+  return v ?? fallback;
+}
+
+bool _parseBool(String? raw, {bool fallback = true}) {
+  if (raw == null || raw.isEmpty) return fallback;
+  final lowered = raw.toLowerCase();
+  if (lowered == 'true') return true;
+  if (lowered == 'false') return false;
+  return fallback;
+}
 
 /// Service types for priority-based service selection
 enum ServiceType {
@@ -266,7 +321,8 @@ class EnvConfig {
 }
 
 ClientPlatformMode _detectPlatformMode() {
-  final override = dotenv.env['PLATFORM_MODE']?.toLowerCase().trim();
+  final override =
+      _getEnv('Environment', 'PLATFORM_MODE')?.toLowerCase().trim();
   switch (override) {
     case 'web':
       return ClientPlatformMode.web;
@@ -339,21 +395,21 @@ List<ServiceType> _allowedServicesForMode(ClientPlatformMode mode) {
 String _priorityKeyForMode(ClientPlatformMode mode) {
   switch (mode) {
     case ClientPlatformMode.web:
-      return 'WEB_PRIORITY_ORDER_OF_SERVICES';
+      return 'WEB';
     case ClientPlatformMode.macos:
-      return 'MACOS_PRIORITY_ORDER_OF_SERVICES';
+      return 'MACOS';
     case ClientPlatformMode.windows:
-      return 'WINDOWS_PRIORITY_ORDER_OF_SERVICES';
+      return 'WINDOWS';
     case ClientPlatformMode.linux:
-      return 'LINUX_PRIORITY_ORDER_OF_SERVICES';
+      return 'LINUX';
     case ClientPlatformMode.android:
-      return 'ANDROID_PRIORITY_ORDER_OF_SERVICES';
+      return 'ANDROID';
     case ClientPlatformMode.ios:
-      return 'IOS_PRIORITY_ORDER_OF_SERVICES';
+      return 'IOS';
     case ClientPlatformMode.embedded:
-      return 'EMBEDDED_PRIORITY_ORDER_OF_SERVICES';
+      return 'EMBEDDED';
     case ClientPlatformMode.defaultMode:
-      return 'DEF_PRIORITY_ORDER_OF_SERVICES';
+      return 'DEFAULT';
   }
 }
 
@@ -383,75 +439,55 @@ List<ServiceType> _parsePriorityOrder(
 }
 
 final envConfigProvider = Provider<EnvConfig>((ref) {
-  final api = dotenv.env['API_BASE_URL'] ?? 'http://localhost:5001';
-  final ws = dotenv.env['WS_BASE_URL'] ?? 'ws://localhost:5002/events/media';
-  final flavor = dotenv.env['FLAVOR'] ?? 'dev';
-  final logLevel = (dotenv.env['LOG_LEVEL'] ?? 'INFO').toUpperCase();
+  final api = _getEnv('Server', 'API_BASE_URL') ?? 'http://localhost:5001';
+  final ws =
+      _getEnv('WebSocket', 'BASE_URL') ?? 'ws://localhost:5002/events/media';
+  final flavor = _getEnv('Environment', 'FLAVOR') ?? 'dev';
+  final logLevel = (_getEnv('Server', 'LOG_LEVEL') ?? 'INFO').toUpperCase();
   final apiSslVerify =
-      (dotenv.env['API_SSL_VERIFY'] ?? 'true').toLowerCase() == 'true';
+      _parseBool(_getEnv('Server', 'API_SSL_VERIFY'), fallback: true);
   final wsSslVerify =
-      (dotenv.env['WS_SSL_VERIFY'] ?? 'true').toLowerCase() == 'true';
+      _parseBool(_getEnv('WebSocket', 'SSL_VERIFY'), fallback: true);
   final wsRetryIntervalMs =
-      int.tryParse(dotenv.env['WS_RETRY_INTERVAL_MS'] ?? '') ?? 3000;
+      _parseInt(_getEnv('WebSocket', 'RETRY_INTERVAL_MS'), fallback: 3000);
   final wsRetryActiveSec =
-      int.tryParse(dotenv.env['WS_RETRY_ACTIVE_SEC'] ?? '') ?? 60;
+      _parseInt(_getEnv('WebSocket', 'RETRY_ACTIVE_SEC'), fallback: 60);
   final wsRetryCooldownSec =
-      int.tryParse(dotenv.env['WS_RETRY_COOLDOWN_SEC'] ?? '') ?? 60;
-  int _parseRetryTimeSec(String key,
-      {List<String> legacyKeys = const [], int defaultValue = 0}) {
-    final raw = dotenv.env[key]?.trim();
-    final value = int.tryParse(raw ?? '');
-    if (value != null) return value;
-
-    for (final legacyKey in legacyKeys) {
-      final legacyRaw = dotenv.env[legacyKey]?.trim();
-      final legacyValue = int.tryParse(legacyRaw ?? '');
-      if (legacyValue != null) return legacyValue;
-    }
-
-    // 0 or negative means infinite; empty/null should default to infinite (0)
-    return defaultValue;
+      _parseInt(_getEnv('WebSocket', 'RETRY_COOLDOWN_SEC'), fallback: 60);
+  int parseRetryTimeSec(String section, String key, {int defaultValue = 0}) {
+    return _parseInt(_getEnv(section, key), fallback: defaultValue);
   }
 
-  final wsRetryWindowSec = _parseRetryTimeSec('WS_RETRY_WINDOW_SEC');
+  final wsRetryWindowSec = parseRetryTimeSec('WebSocket', 'RETRY_WINDOW_SEC');
   final directSpotifyTimeoutSec =
-      int.tryParse(dotenv.env['DIRECT_SPOTIFY_TIMEOUT_SEC'] ?? '') ?? 3;
+      _parseInt(_getEnv('DirectSpotify', 'TIMEOUT_SEC'), fallback: 3);
   final cloudSpotifyPollIntervalSec =
-      int.tryParse(dotenv.env['CLOUD_SPOTIFY_POLL_INTERVAL_SEC'] ?? '') ?? 3;
+      _parseInt(_getEnv('CloudSpotify', 'POLL_INTERVAL_SEC'), fallback: 3);
   // Sonos poll interval: null or 0 means let the server decide
   final sonosPollIntervalSecRaw =
-      int.tryParse(dotenv.env['LOCAL_SONOS_POLL_INTERVAL_SEC'] ?? '');
+      _parseInt(_getEnv('LocalSonos', 'POLL_INTERVAL_SEC'), fallback: 0);
   final sonosPollIntervalSec =
-      (sonosPollIntervalSecRaw == null || sonosPollIntervalSecRaw <= 0)
-          ? null
-          : sonosPollIntervalSecRaw;
+      sonosPollIntervalSecRaw <= 0 ? null : sonosPollIntervalSecRaw;
   final maxAvatarsPerUser =
-      int.tryParse(dotenv.env['MAX_AVATARS_PER_USER'] ?? '') ?? 5;
+      _parseInt(_getEnv('Server', 'MAX_AVATARS_PER_USER'), fallback: 5);
   final directSpotifyPollIntervalSec =
-      int.tryParse(dotenv.env['DIRECT_SPOTIFY_POLL_INTERVAL_SEC'] ?? '') ?? 3;
+      _parseInt(_getEnv('DirectSpotify', 'POLL_INTERVAL_SEC'), fallback: 3);
   final directSpotifyRetryIntervalSec =
-      int.tryParse(dotenv.env['DIRECT_SPOTIFY_RETRY_INTERVAL_SEC'] ?? '') ?? 3;
-  final directSpotifyRetryTimeSec = _parseRetryTimeSec(
-    'DIRECT_SPOTIFY_RETRY_TIME_SEC',
-    legacyKeys: [
-      'DIRECT_SPOTIFY_RETRY_WINDOW_SEC',
-      'DIRECT_SPOTIFY_RETRY_MAX_WINDOW_SEC',
-    ],
-  );
-  // Prefer new retry cooldown key; fall back to legacy DIRECT_SPOTIFY_RETRY_COOLDOWN_SEC
+      _parseInt(_getEnv('DirectSpotify', 'RETRY_INTERVAL_SEC'), fallback: 3);
+  final directSpotifyRetryTimeSec =
+      parseRetryTimeSec('DirectSpotify', 'RETRY_TIME_SEC');
   final directSpotifyRetryCooldownSec =
-      int.tryParse(dotenv.env['DIRECT_SPOTIFY_RETRY_COOLDOWN_SEC'] ?? '') ?? 30;
+      _parseInt(_getEnv('DirectSpotify', 'RETRY_COOLDOWN_SEC'), fallback: 30);
   final wsForceReconnIdleSec =
-      int.tryParse(dotenv.env['WS_FORCE_RECONN_IDLE_SEC'] ?? '') ?? 30;
+      _parseInt(_getEnv('WebSocket', 'FORCE_RECONN_IDLE_SEC'), fallback: 30);
   final directSpotifyApiSslVerify =
-      (dotenv.env['DIRECT_SPOTIFY_API_SSL_VERIFY'] ?? 'true').toLowerCase() ==
-          'true';
+      _parseBool(_getEnv('DirectSpotify', 'API_SSL_VERIFY'), fallback: true);
   final directSpotifyApiBaseUrl =
-      dotenv.env['DIRECT_SPOTIFY_API_BASE_URL'] ?? 'https://api.spotify.com/v1';
+      _getEnv('DirectSpotify', 'API_BASE_URL') ??
+          'https://api.spotify.com/v1';
   final nativeSonosPollIntervalSecRaw =
-      int.tryParse(dotenv.env['NATIVE_LOCAL_SONOS_POLL_INTERVAL_SEC'] ?? '');
-  final nativeSonosPollIntervalSec = (nativeSonosPollIntervalSecRaw == null ||
-          nativeSonosPollIntervalSecRaw <= 0)
+      _parseInt(_getEnv('NativeLocalSonos', 'POLL_INTERVAL_SEC'), fallback: 0);
+  final nativeSonosPollIntervalSec = (nativeSonosPollIntervalSecRaw <= 0)
       ? null
       : nativeSonosPollIntervalSecRaw;
 
@@ -461,8 +497,8 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
 
   // Parse primary priority list; if empty/invalid, fall back to DEF_PRIORITY_ORDER_OF_SERVICES.
   final allowedServices = _allowedServicesForMode(platformMode);
-  final primaryPriorityString = dotenv.env[priorityEnvKey];
-  final defaultPriorityString = dotenv.env['DEF_PRIORITY_ORDER_OF_SERVICES'];
+  final primaryPriorityString = _getEnv('ServicePriority', priorityEnvKey);
+  final defaultPriorityString = _getEnv('ServicePriority', 'DEFAULT');
 
   var priorityOrderOfServices =
       _parsePriorityOrder(primaryPriorityString, allowedServices);
@@ -484,18 +520,16 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
 
   // Parse Spotify Direct fallback config
   final spotifyDirectFallback = ServiceFallbackConfig(
-    timeoutSec:
-        int.tryParse(dotenv.env['DIRECT_SPOTIFY_FALLBACK_TIMEOUT_SEC'] ?? '') ??
-            5,
-    onError: (dotenv.env['DIRECT_SPOTIFY_FALLBACK_ON_ERROR'] ?? 'true')
-            .toLowerCase() ==
-        'true',
-    errorThreshold: int.tryParse(
-            dotenv.env['DIRECT_SPOTIFY_FALLBACK_ERROR_THRESHOLD'] ?? '') ??
-        3,
-    fallbackTimeThresholdSec: int.tryParse(
-            dotenv.env['DIRECT_SPOTIFY_FALLBACK_TIME_THRESHOLD_SEC'] ?? '') ??
-        10,
+    timeoutSec: _parseInt(_getEnv('DirectSpotify', 'FALLBACK_TIMEOUT_SEC'),
+        fallback: 5),
+    onError: _parseBool(_getEnv('DirectSpotify', 'FALLBACK_ON_ERROR'),
+        fallback: true),
+    errorThreshold: _parseInt(
+        _getEnv('DirectSpotify', 'FALLBACK_ERROR_THRESHOLD'),
+        fallback: 3),
+    fallbackTimeThresholdSec: _parseInt(
+        _getEnv('DirectSpotify', 'FALLBACK_TIME_THRESHOLD_SEC'),
+        fallback: 10),
     retryIntervalSec: directSpotifyRetryIntervalSec,
     retryCooldownSec: directSpotifyRetryCooldownSec,
     retryTimeSec: directSpotifyRetryTimeSec,
@@ -504,160 +538,126 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
   // Parse Cloud Spotify fallback config
   final cloudSpotifyFallback = ServiceFallbackConfig(
     timeoutSec:
-        int.tryParse(dotenv.env['CLOUD_SPOTIFY_FALLBACK_TIMEOUT_SEC'] ?? '') ??
-            5,
-    onError: (dotenv.env['CLOUD_SPOTIFY_FALLBACK_ON_ERROR'] ?? 'true')
-            .toLowerCase() ==
-        'true',
-    errorThreshold: int.tryParse(
-            dotenv.env['CLOUD_SPOTIFY_FALLBACK_ERROR_THRESHOLD'] ?? '') ??
-        3,
-    fallbackTimeThresholdSec: int.tryParse(
-            dotenv.env['CLOUD_SPOTIFY_FALLBACK_TIME_THRESHOLD_SEC'] ?? '') ??
-        10,
+        _parseInt(_getEnv('CloudSpotify', 'FALLBACK_TIMEOUT_SEC'), fallback: 5),
+    onError: _parseBool(_getEnv('CloudSpotify', 'FALLBACK_ON_ERROR'),
+        fallback: true),
+    errorThreshold: _parseInt(
+        _getEnv('CloudSpotify', 'FALLBACK_ERROR_THRESHOLD'),
+        fallback: 3),
+    fallbackTimeThresholdSec: _parseInt(
+        _getEnv('CloudSpotify', 'FALLBACK_TIME_THRESHOLD_SEC'),
+        fallback: 10),
     retryIntervalSec:
-        int.tryParse(dotenv.env['CLOUD_SPOTIFY_RETRY_INTERVAL_SEC'] ?? '') ??
-            10,
+        _parseInt(_getEnv('CloudSpotify', 'RETRY_INTERVAL_SEC'), fallback: 10),
     retryCooldownSec:
-        int.tryParse(dotenv.env['CLOUD_SPOTIFY_RETRY_COOLDOWN_SEC'] ?? '') ??
-            30,
-    retryTimeSec: _parseRetryTimeSec(
-      'CLOUD_SPOTIFY_RETRY_TIME_SEC',
-      legacyKeys: [
-        'CLOUD_SPOTIFY_RETRY_WINDOW_SEC',
-        'CLOUD_SPOTIFY_RETRY_MAX_WINDOW_SEC',
-      ],
-    ),
+        _parseInt(_getEnv('CloudSpotify', 'RETRY_COOLDOWN_SEC'), fallback: 30),
+    retryTimeSec: parseRetryTimeSec('CloudSpotify', 'RETRY_TIME_SEC'),
   );
 
   // Parse Local Sonos fallback config
   // NOTE: Sonos is event-driven (only emits on state change), so timeout is disabled by default (0)
   // Fallback for Sonos relies on WebSocket connection state, not data timeout
   final localSonosFallback = ServiceFallbackConfig(
-    timeoutSec:
-        int.tryParse(dotenv.env['LOCAL_SONOS_FALLBACK_TIMEOUT_SEC'] ?? '') ??
-            0, // 0 = disabled (event-driven)
+    timeoutSec: _parseInt(_getEnv('LocalSonos', 'FALLBACK_TIMEOUT_SEC'),
+        fallback: 0), // 0 = disabled (event-driven)
     onError:
-        (dotenv.env['LOCAL_SONOS_FALLBACK_ON_ERROR'] ?? 'true').toLowerCase() ==
-            'true',
-    errorThreshold: int.tryParse(
-            dotenv.env['LOCAL_SONOS_FALLBACK_ERROR_THRESHOLD'] ?? '') ??
-        3,
-    fallbackTimeThresholdSec: int.tryParse(
-            dotenv.env['LOCAL_SONOS_FALLBACK_TIME_THRESHOLD_SEC'] ?? '') ??
-        10,
+        _parseBool(_getEnv('LocalSonos', 'FALLBACK_ON_ERROR'), fallback: true),
+    errorThreshold: _parseInt(_getEnv('LocalSonos', 'FALLBACK_ERROR_THRESHOLD'),
+        fallback: 3),
+    fallbackTimeThresholdSec: _parseInt(
+        _getEnv('LocalSonos', 'FALLBACK_TIME_THRESHOLD_SEC'),
+        fallback: 10),
     retryIntervalSec:
-        int.tryParse(dotenv.env['LOCAL_SONOS_RETRY_INTERVAL_SEC'] ?? '') ?? 10,
+        _parseInt(_getEnv('LocalSonos', 'RETRY_INTERVAL_SEC'), fallback: 10),
     retryCooldownSec:
-        int.tryParse(dotenv.env['LOCAL_SONOS_RETRY_COOLDOWN_SEC'] ?? '') ?? 30,
-    retryTimeSec: _parseRetryTimeSec(
-      'LOCAL_SONOS_RETRY_TIME_SEC',
-      legacyKeys: [
-        'LOCAL_SONOS_RETRY_WINDOW_SEC',
-        'LOCAL_SONOS_RETRY_MAX_WINDOW_SEC',
-      ],
-    ),
+        _parseInt(_getEnv('LocalSonos', 'RETRY_COOLDOWN_SEC'), fallback: 30),
+    retryTimeSec: parseRetryTimeSec('LocalSonos', 'RETRY_TIME_SEC'),
   );
 
   // Parse Native Local Sonos fallback config (on-device bridge)
   final nativeLocalSonosFallback = ServiceFallbackConfig(
-    timeoutSec: int.tryParse(
-            dotenv.env['NATIVE_LOCAL_SONOS_FALLBACK_TIMEOUT_SEC'] ?? '') ??
-        0, // 0 = disabled (event-driven)
-    onError: (dotenv.env['NATIVE_LOCAL_SONOS_FALLBACK_ON_ERROR'] ?? 'true')
-            .toLowerCase() ==
-        'true',
-    errorThreshold: int.tryParse(
-            dotenv.env['NATIVE_LOCAL_SONOS_FALLBACK_ERROR_THRESHOLD'] ?? '') ??
-        3,
-    fallbackTimeThresholdSec: int.tryParse(
-            dotenv.env['NATIVE_LOCAL_SONOS_FALLBACK_TIME_THRESHOLD_SEC'] ??
-                '') ??
-        10,
-    retryIntervalSec: int.tryParse(
-            dotenv.env['NATIVE_LOCAL_SONOS_RETRY_INTERVAL_SEC'] ?? '') ??
-        10,
-    retryCooldownSec: int.tryParse(
-            dotenv.env['NATIVE_LOCAL_SONOS_RETRY_COOLDOWN_SEC'] ?? '') ??
-        30,
-    retryTimeSec: _parseRetryTimeSec(
-      'NATIVE_LOCAL_SONOS_RETRY_TIME_SEC',
-      legacyKeys: [
-        'NATIVE_LOCAL_SONOS_RETRY_WINDOW_SEC',
-        'NATIVE_LOCAL_SONOS_RETRY_MAX_WINDOW_SEC',
-      ],
-    ),
+    timeoutSec: _parseInt(_getEnv('NativeLocalSonos', 'FALLBACK_TIMEOUT_SEC'),
+        fallback: 0), // 0 = disabled (event-driven)
+    onError: _parseBool(_getEnv('NativeLocalSonos', 'FALLBACK_ON_ERROR'),
+        fallback: true),
+    errorThreshold: _parseInt(
+        _getEnv('NativeLocalSonos', 'FALLBACK_ERROR_THRESHOLD'),
+        fallback: 3),
+    fallbackTimeThresholdSec: _parseInt(
+        _getEnv('NativeLocalSonos', 'FALLBACK_TIME_THRESHOLD_SEC'),
+        fallback: 10),
+    retryIntervalSec: _parseInt(
+        _getEnv('NativeLocalSonos', 'RETRY_INTERVAL_SEC'),
+        fallback: 10),
+    retryCooldownSec: _parseInt(
+        _getEnv('NativeLocalSonos', 'RETRY_COOLDOWN_SEC'),
+        fallback: 30),
+    retryTimeSec: parseRetryTimeSec('NativeLocalSonos', 'RETRY_TIME_SEC'),
   );
 
   // Parse Local Sonos auto-switch settings (state-based wait times)
   // 0 = disabled (don't cycle for that state)
   final localSonosPausedWaitSec =
-      int.tryParse(dotenv.env['LOCAL_SONOS_PAUSED_WAIT_SEC'] ?? '') ??
-          0; // Default: don't cycle on pause
+      _parseInt(_getEnv('LocalSonos', 'PAUSED_WAIT_SEC'), fallback: 0);
   final localSonosStoppedWaitSec =
-      int.tryParse(dotenv.env['LOCAL_SONOS_STOPPED_WAIT_SEC'] ?? '') ??
-          30; // Wait 30s after stopped
+      _parseInt(_getEnv('LocalSonos', 'STOPPED_WAIT_SEC'), fallback: 30);
   final localSonosIdleWaitSec =
-      int.tryParse(dotenv.env['LOCAL_SONOS_IDLE_WAIT_SEC'] ?? '') ??
-          3; // Quick cycle on idle/no media
+      _parseInt(_getEnv('LocalSonos', 'IDLE_WAIT_SEC'), fallback: 3);
 
   // Native local Sonos wait times (defaults to match local sonos if unset)
-  final nativeLocalSonosPausedWaitSec =
-      int.tryParse(dotenv.env['NATIVE_LOCAL_SONOS_PAUSED_WAIT_SEC'] ?? '') ??
-          localSonosPausedWaitSec;
-  final nativeLocalSonosStoppedWaitSec =
-      int.tryParse(dotenv.env['NATIVE_LOCAL_SONOS_STOPPED_WAIT_SEC'] ?? '') ??
-          localSonosStoppedWaitSec;
-  final nativeLocalSonosIdleWaitSec =
-      int.tryParse(dotenv.env['NATIVE_LOCAL_SONOS_IDLE_WAIT_SEC'] ?? '') ??
-          localSonosIdleWaitSec;
+  final nativeLocalSonosPausedWaitSec = _parseInt(
+      _getEnv('NativeLocalSonos', 'PAUSED_WAIT_SEC'),
+      fallback: localSonosPausedWaitSec);
+  final nativeLocalSonosStoppedWaitSec = _parseInt(
+      _getEnv('NativeLocalSonos', 'STOPPED_WAIT_SEC'),
+      fallback: localSonosStoppedWaitSec);
+  final nativeLocalSonosIdleWaitSec = _parseInt(
+      _getEnv('NativeLocalSonos', 'IDLE_WAIT_SEC'),
+      fallback: localSonosIdleWaitSec);
 
   // Native Sonos coordinator discovery method
   final nativeLocalSonosCoordinatorDiscMethod = (() {
     const fallback = 'lmp_zgs';
-    final raw =
-        dotenv.env['NATIVE_LOCAL_SONOS_COORDINATOR_DISC_METHOD']?.trim();
+    final raw = _getEnv('NativeLocalSonos', 'COORDINATOR_DISC_METHOD')?.trim();
     if (raw == null || raw.isEmpty) return fallback;
     final lowered = raw.toLowerCase();
     return (lowered == 'lmp_zgs' || lowered == 'zgs_lmp') ? lowered : fallback;
   })();
 
   // Parse Spotify paused wait time
-  final spotifyPausedWaitSec =
-      int.tryParse(dotenv.env['SPOTIFY_PAUSED_WAIT_SEC'] ?? '') ?? 5;
+  final spotifyPausedWaitSec = _parseInt(
+      _getEnv('GeneralService', 'SPOTIFY_PAUSED_WAIT_SEC'),
+      fallback: 5);
 
   // Parse service cycling settings
   final enableServiceCycling =
-      (dotenv.env['ENABLE_SERVICE_CYCLING'] ?? 'true').toLowerCase() == 'true';
+      _parseBool(_getEnv('GeneralService', 'ENABLE_CYCLING'), fallback: true);
   final serviceCycleResetSec =
-      int.tryParse(dotenv.env['SERVICE_CYCLE_RESET_SEC'] ?? '') ?? 30;
+      _parseInt(_getEnv('GeneralService', 'CYCLE_RESET_SEC'), fallback: 30);
 
   // Native Sonos health check configuration
   final nativeLocalSonosHealthCheckSec =
-      int.tryParse(dotenv.env['NATIVE_LOCAL_SONOS_HEALTH_CHECK_SEC'] ?? '') ??
-          0;
+      _parseInt(_getEnv('NativeLocalSonos', 'HEALTH_CHECK_SEC'), fallback: 0);
   final nativeLocalSonosHealthCheckRetry =
-      int.tryParse(dotenv.env['NATIVE_LOCAL_SONOS_HEALTH_CHECK_RETRY'] ?? '') ??
-          0;
-  final nativeLocalSonosHealthCheckTimeoutSec = int.tryParse(
-          dotenv.env['NATIVE_LOCAL_SONOS_HEALTH_CHECK_TIMEOUT_SEC'] ?? '') ??
-      5;
+      _parseInt(_getEnv('NativeLocalSonos', 'HEALTH_CHECK_RETRY'), fallback: 0);
+  final nativeLocalSonosHealthCheckTimeoutSec = _parseInt(
+      _getEnv('NativeLocalSonos', 'HEALTH_CHECK_TIMEOUT_SEC'),
+      fallback: 5);
 
   // Maximum hosts to attempt during coordinator discovery (0 = unlimited)
-  final nativeLocalSonosMaxHostsPerCoordinatorDisc = int.tryParse(
-          dotenv.env['NATIVE_LOCAL_SONOS_MAX_HOSTS_PER_COORDINATOR_DISC'] ??
-              '') ??
-      4;
+  final nativeLocalSonosMaxHostsPerCoordinatorDisc = _parseInt(
+      _getEnv('NativeLocalSonos', 'MAX_HOSTS_PER_COORDINATOR_DISC'),
+      fallback: 4);
 
   // Parse global service settings
   final serviceTransitionGraceSec =
-      int.tryParse(dotenv.env['SERVICE_TRANSITION_GRACE_SEC'] ?? '') ?? 2;
+      _parseInt(_getEnv('GeneralService', 'TRANSITION_GRACE_SEC'), fallback: 2);
 
   // Idle reset safeguards
   final serviceIdleCycleResetSec =
-      int.tryParse(dotenv.env['SERVICE_IDLE_CYCLE_RESET_SEC'] ?? '') ?? 0;
+      _parseInt(_getEnv('GeneralService', 'IDLE_CYCLE_RESET_SEC'), fallback: 0);
   final serviceIdleTimeSec =
-      int.tryParse(dotenv.env['SERVICE_IDLE_TIME_SEC'] ?? '') ?? 0;
+      _parseInt(_getEnv('GeneralService', 'IDLE_TIME_SEC'), fallback: 0);
 
   return EnvConfig(
     platformMode: platformMode,
@@ -712,5 +712,13 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
 });
 
 Future<void> loadEnv() async {
-  await dotenv.load(fileName: 'conf/.env');
+  const path = 'conf/.env';
+  try {
+    final content = await rootBundle.loadString(path);
+    _envSections = _parseEnvWithSections(content);
+    _envLogger.info('Loaded env sections: ${_envSections.keys.join(', ')}');
+  } catch (e, st) {
+    _envLogger.severe('Failed to load $path: $e', e, st);
+    _envSections = {};
+  }
 }
