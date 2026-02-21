@@ -281,6 +281,8 @@ class _HomePageState extends ConsumerState<HomePage>
           const DirectionalFocusIntent(TraversalDirection.up),
     };
 
+    final env = ref.watch(envConfigProvider);
+
     // Watch unified playback state from orchestrator
     final unifiedState = ref.watch(serviceOrchestratorProvider);
 
@@ -330,6 +332,27 @@ class _HomePageState extends ConsumerState<HomePage>
           ? ServiceType.directSpotify
           : (now.connected ? ServiceType.cloudSpotify : null);
     }
+
+    final isNowPlaying = _isPlaying(effectivePayload);
+    final isNowStopped = _isStopped(effectivePayload);
+    final durationMs = _trackDurationMs(effectivePayload);
+    final progressMs = _effectiveProgressMs(effectivePayload,
+        isPlaying: isNowPlaying, durationMs: durationMs);
+    final double? nowPlayingProgressFraction = (env.enableHomeTrackProgress &&
+            !isNowStopped &&
+            durationMs != null &&
+            durationMs > 0 &&
+            progressMs != null)
+        ? (progressMs / durationMs).clamp(0.0, 1.0)
+        : null;
+    final pollIntervalSec = env.nativeLocalSonosTrackProgressPollIntervalSec;
+    final progressAnimationDuration = Duration(
+      milliseconds: ((pollIntervalSec != null && pollIntervalSec > 0
+                  ? pollIntervalSec
+                  : 2) *
+              1000)
+          .clamp(300, 5000),
+    );
 
     return Shortcuts(
       shortcuts: traversalShortcuts,
@@ -402,6 +425,8 @@ class _HomePageState extends ConsumerState<HomePage>
                       ),
                       const SizedBox(height: 14),
                       _glassCard(
+                        progressFraction: nowPlayingProgressFraction,
+                        progressAnimationDuration: progressAnimationDuration,
                         child: _NowPlayingSection(
                           provider: effectiveProvider,
                           payload: effectivePayload,
@@ -956,12 +981,128 @@ class _EqualizerIndicatorState extends State<_EqualizerIndicator>
   }
 }
 
+class _TrackProgressOverlay extends StatelessWidget {
+  const _TrackProgressOverlay(
+      {required this.progress,
+      this.animationDuration = const Duration(milliseconds: 2000)});
+  final double progress;
+  final Duration animationDuration;
+
+  @override
+  Widget build(BuildContext context) {
+    final clamped = progress.clamp(0.0, 1.0);
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final targetWidth = constraints.maxWidth * clamped;
+              return Align(
+                alignment: Alignment.centerLeft,
+                child: AnimatedContainer(
+                  duration: animationDuration,
+                  curve: Curves.linear,
+                  width: targetWidth,
+                  height: constraints.maxHeight,
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
+                      colors: [
+                        Color.fromARGB(33, 124, 116, 116),
+                        Color.fromARGB(33, 124, 116, 116),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ---- helpers ----
 
-Widget _glassCard({required Widget child}) {
+int? _trackDurationMs(Map<String, dynamic>? payload) {
+  if (payload == null) return null;
+  final track = payload['track'];
+  if (track is! Map) return null;
+  final raw = track['duration_ms'] ?? track['duration'];
+  if (raw is int) return raw;
+  if (raw is double) return raw.round();
+  if (raw is String) return _parseDurationStringMs(raw);
+  return null;
+}
+
+int? _effectiveProgressMs(Map<String, dynamic>? payload,
+    {required bool isPlaying, int? durationMs}) {
+  if (payload == null) return null;
+  final playback = payload['playback'];
+  if (playback is! Map) return null;
+
+  int? progressMs;
+  final rawProgress = playback['progress_ms'];
+  if (rawProgress is int) {
+    progressMs = rawProgress;
+  } else if (rawProgress is double) {
+    progressMs = rawProgress.round();
+  }
+
+  if (progressMs == null) return null;
+
+  final ts = playback['timestamp'];
+  final timestampMs = ts is int
+      ? ts
+      : ts is double
+          ? ts.round()
+          : null;
+
+  if (isPlaying && timestampMs != null) {
+    final delta = DateTime.now().millisecondsSinceEpoch - timestampMs;
+    if (delta > 0) {
+      progressMs += delta;
+    }
+  }
+
+  if (durationMs != null && durationMs > 0 && progressMs > durationMs) {
+    return durationMs;
+  }
+
+  return progressMs;
+}
+
+int? _parseDurationStringMs(String value) {
+  final parts = value.split(':');
+  if (parts.length < 2) return null;
+  int hours = 0;
+  int minutes = 0;
+  double seconds = 0;
+  try {
+    if (parts.length == 2) {
+      minutes = int.parse(parts[0]);
+      seconds = double.parse(parts[1]);
+    } else {
+      hours = int.parse(parts[0]);
+      minutes = int.parse(parts[1]);
+      seconds = double.parse(parts[2]);
+    }
+    final totalMs = (hours * 3600 + minutes * 60 + seconds) * 1000;
+    return totalMs.round();
+  } catch (_) {
+    return null;
+  }
+}
+
+Widget _glassCard(
+    {required Widget child,
+    double? progressFraction,
+    Duration progressAnimationDuration = const Duration(milliseconds: 2000)}) {
   return Container(
     width: double.infinity,
-    padding: const EdgeInsets.all(16),
     decoration: BoxDecoration(
       color: const Color(0xFF111624).withValues(alpha: 0.9),
       borderRadius: BorderRadius.circular(16),
@@ -970,7 +1111,24 @@ Widget _glassCard({required Widget child}) {
         BoxShadow(color: Colors.black54, blurRadius: 18, offset: Offset(0, 10)),
       ],
     ),
-    child: child,
+    child: ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: Stack(
+        children: [
+          if (progressFraction != null)
+            Positioned.fill(
+              child: _TrackProgressOverlay(
+                progress: progressFraction,
+                animationDuration: progressAnimationDuration,
+              ),
+            ),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: child,
+          ),
+        ],
+      ),
+    ),
   );
 }
 

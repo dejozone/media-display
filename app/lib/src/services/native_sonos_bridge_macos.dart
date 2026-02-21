@@ -15,6 +15,8 @@ class NativeSonosBridge {
   final Logger _logger;
   final _controller = StreamController<NativeSonosMessage>.broadcast();
   Timer? _pollTimer;
+  bool _progressPollingEnabled = false;
+  bool _progressPollInFlight = false;
   bool _running = false;
   Map<String, dynamic>? _coordinatorDevice;
   List<_GroupDevice> _groupDevices = const [];
@@ -93,12 +95,16 @@ class NativeSonosBridge {
 
   Future<void> start(
       {int? pollIntervalSec,
+      int? trackProgressPollIntervalSec,
+      bool enableTrackProgress = false,
       int? healthCheckSec,
       int? healthCheckRetry,
       int? healthCheckTimeoutSec,
       String method = 'lmp_zgs',
       int? maxHostsPerDiscovery}) async {
     if (_running) return;
+
+    _stopProgressPolling();
 
     // Any new discovery attempt should discard old subscriptions since prior
     // runs may have failed mid-subscribe. Start fresh so we always resubscribe
@@ -122,12 +128,19 @@ class NativeSonosBridge {
       await _ensureEventSubscription(ip);
     }
     _running = true;
+
+    final effectiveTrackIntervalSec =
+        trackProgressPollIntervalSec ?? pollIntervalSec;
+    if (enableTrackProgress == true &&
+        effectiveTrackIntervalSec != null &&
+        effectiveTrackIntervalSec > 0) {
+      _startProgressPolling(Duration(seconds: effectiveTrackIntervalSec));
+    }
   }
 
   Future<void> stop() async {
     _running = false;
-    _pollTimer?.cancel();
-    _pollTimer = null;
+    _stopProgressPolling();
     _emitDebounce?.cancel();
     _emitDebounce = null;
     await _unsubscribeFromEvents();
@@ -157,8 +170,20 @@ class NativeSonosBridge {
         if (liveMedia != null) {
           final progressStr = liveMedia['current_progress_time'] as String?;
           final progressMs = _parseDurationMs(progressStr);
+          final durationStr = liveMedia['duration'] as String?;
+          final durationMs = _parseDurationMs(durationStr);
+          final updates = <String, dynamic>{};
           if (progressMs != null) {
-            _updateCurrentTrack({'progress_ms': progressMs});
+            updates['progress_ms'] = progressMs;
+          }
+          if (durationStr != null && durationStr.isNotEmpty) {
+            updates['duration'] = durationStr;
+          }
+          if (durationMs != null) {
+            updates['duration_ms'] = durationMs;
+          }
+          if (updates.isNotEmpty) {
+            _updateCurrentTrack(updates);
           }
         }
       }
@@ -211,6 +236,7 @@ class NativeSonosBridge {
               'album': _currentTrack?['album'],
               'artwork_url': _currentTrack?['artwork_url'],
               'duration_ms': _currentTrack?['duration_ms'],
+              'duration': _currentTrack?['duration'],
               if (_playlist != null) 'playlist': _playlist,
             }
           : const <String, dynamic>{};
@@ -242,7 +268,8 @@ class NativeSonosBridge {
           'provider': 'sonos',
         },
       };
-      _log('Emitting payload: ${jsonEncode(payload)}', level: Level.FINE);
+      // _log('Emitting payload: ${jsonEncode(payload)}', level: Level.FINE);
+      _log('Emitting payload...', level: Level.FINE);
       _controller.add(NativeSonosMessage(payload: payload));
     } catch (e) {
       _log('Error emitting payload: $e', level: Level.FINE);
@@ -291,6 +318,28 @@ class NativeSonosBridge {
   Future<void> _ensureEventSubscription(String host) async {
     await _startEventServer();
     await _subscribeToAvTransport(host);
+  }
+
+  void _startProgressPolling(Duration interval) {
+    _progressPollingEnabled = true;
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(interval, (_) async {
+      if (!_running || !_progressPollingEnabled) return;
+      if (_progressPollInFlight) return;
+      _progressPollInFlight = true;
+      try {
+        await _emitPayload();
+      } finally {
+        _progressPollInFlight = false;
+      }
+    });
+  }
+
+  void _stopProgressPolling() {
+    _progressPollingEnabled = false;
+    _progressPollInFlight = false;
+    _pollTimer?.cancel();
+    _pollTimer = null;
   }
 
   Future<void> _resetSubscriptionState({bool stopServer = false}) async {
@@ -628,8 +677,8 @@ class NativeSonosBridge {
       }
 
       final body = await resp.transform(utf8.decoder).join();
-      _log('GetPositionInfo (from host=$host) response: $body',
-          level: Level.FINE);
+      // _log('GetPositionInfo (from host=$host) response: $body',
+      //     level: Level.FINE);
 
       final doc = xml.XmlDocument.parse(body);
       final relTime = doc.findAllElements('RelTime').firstOrNull?.innerText;

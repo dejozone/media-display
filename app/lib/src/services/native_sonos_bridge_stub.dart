@@ -22,6 +22,8 @@ class NativeSonosBridge {
 
   Future<void> start(
       {int? pollIntervalSec,
+      int? trackProgressPollIntervalSec,
+      bool enableTrackProgress = false,
       int? healthCheckSec,
       int? healthCheckRetry,
       int? healthCheckTimeoutSec,

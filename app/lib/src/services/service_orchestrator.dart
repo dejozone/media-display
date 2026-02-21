@@ -602,9 +602,15 @@ class ServiceOrchestrator extends Notifier<UnifiedPlaybackState> {
           (_config.nativeLocalSonosFallback.timeoutSec > 0
               ? _config.nativeLocalSonosFallback.timeoutSec
               : null);
-      _log('Starting native Sonos bridge with pollIntervalSec=$pollInterval');
+      final progressPollInterval =
+          _config.nativeLocalSonosTrackProgressPollIntervalSec;
+      final enableTrackProgress = _config.enableHomeTrackProgress;
+      _log(
+          'Starting native Sonos bridge with pollIntervalSec=$pollInterval, trackProgressPollIntervalSec=$progressPollInterval, enableTrackProgress=$enableTrackProgress');
       ref.read(nativeSonosProvider.notifier).start(
             pollIntervalSec: pollInterval,
+            trackProgressPollIntervalSec: progressPollInterval,
+            enableTrackProgress: enableTrackProgress,
             healthCheckSec: _config.nativeLocalSonosHealthCheckSec,
             healthCheckRetry: _config.nativeLocalSonosHealthCheckRetry,
             healthCheckTimeoutSec:

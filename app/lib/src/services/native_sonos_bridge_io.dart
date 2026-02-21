@@ -25,6 +25,8 @@ class NativeSonosBridge {
 
   Future<void> start(
       {int? pollIntervalSec,
+      int? trackProgressPollIntervalSec,
+      bool enableTrackProgress = false,
       int? healthCheckSec,
       int? healthCheckRetry,
       int? healthCheckTimeoutSec,
@@ -32,6 +34,8 @@ class NativeSonosBridge {
       int? maxHostsPerDiscovery}) {
     return _macos?.start(
           pollIntervalSec: pollIntervalSec,
+          trackProgressPollIntervalSec: trackProgressPollIntervalSec,
+          enableTrackProgress: enableTrackProgress,
           healthCheckSec: healthCheckSec,
           healthCheckRetry: healthCheckRetry,
           healthCheckTimeoutSec: healthCheckTimeoutSec,
@@ -40,6 +44,8 @@ class NativeSonosBridge {
         ) ??
         _stub?.start(
           pollIntervalSec: pollIntervalSec,
+          trackProgressPollIntervalSec: trackProgressPollIntervalSec,
+          enableTrackProgress: enableTrackProgress,
           healthCheckSec: healthCheckSec,
           healthCheckRetry: healthCheckRetry,
           healthCheckTimeoutSec: healthCheckTimeoutSec,

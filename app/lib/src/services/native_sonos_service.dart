@@ -111,6 +111,8 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
 
   Future<void> start({
     int? pollIntervalSec,
+    int? trackProgressPollIntervalSec,
+    bool enableTrackProgress = false,
     int? healthCheckSec,
     int? healthCheckRetry,
     int? healthCheckTimeoutSec,
@@ -146,7 +148,7 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
     }
 
     _log(
-        'Starting native Sonos bridge (pollIntervalSec=$pollIntervalSec, healthCheckSec=$healthCheckSec, healthCheckRetry=$healthCheckRetry)');
+        'Starting native Sonos bridge (pollIntervalSec=$pollIntervalSec, trackProgressPollIntervalSec=$trackProgressPollIntervalSec, enableTrackProgress=$enableTrackProgress, healthCheckSec=$healthCheckSec, healthCheckRetry=$healthCheckRetry)');
 
     // Mark running immediately to avoid transient "not connected" fallbacks
     // while the bridge initializes.
@@ -175,6 +177,8 @@ class NativeSonosNotifier extends Notifier<NativeSonosState> {
     try {
       await bridge.start(
         pollIntervalSec: pollIntervalSec,
+        trackProgressPollIntervalSec: trackProgressPollIntervalSec,
+        enableTrackProgress: enableTrackProgress,
         healthCheckSec: healthCheckSec,
         healthCheckRetry: healthCheckRetry,
         healthCheckTimeoutSec: healthCheckTimeoutSec,

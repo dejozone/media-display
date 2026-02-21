@@ -231,6 +231,8 @@ class EnvConfig {
     required this.wsForceReconnIdleSec,
     required this.directSpotifyApiSslVerify,
     required this.directSpotifyApiBaseUrl,
+    required this.enableHomeTrackProgress,
+    this.nativeLocalSonosTrackProgressPollIntervalSec,
     this.nativeSonosPollIntervalSec,
     required this.priorityOrderOfServices,
     required this.spotifyDirectFallback,
@@ -271,7 +273,9 @@ class EnvConfig {
   final int directSpotifyTimeoutSec;
   final int cloudSpotifyPollIntervalSec;
   final int? sonosPollIntervalSec;
+  final bool enableHomeTrackProgress;
   final int? nativeSonosPollIntervalSec;
+  final int? nativeLocalSonosTrackProgressPollIntervalSec;
   final int maxAvatarsPerUser;
   final int directSpotifyPollIntervalSec;
   final int directSpotifyRetryIntervalSec;
@@ -483,13 +487,22 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
   final directSpotifyApiSslVerify =
       _parseBool(_getEnv('DirectSpotify', 'API_SSL_VERIFY'), fallback: true);
   final directSpotifyApiBaseUrl =
-      _getEnv('DirectSpotify', 'API_BASE_URL') ??
-          'https://api.spotify.com/v1';
+      _getEnv('DirectSpotify', 'API_BASE_URL') ?? 'https://api.spotify.com/v1';
   final nativeSonosPollIntervalSecRaw =
       _parseInt(_getEnv('NativeLocalSonos', 'POLL_INTERVAL_SEC'), fallback: 0);
   final nativeSonosPollIntervalSec = (nativeSonosPollIntervalSecRaw <= 0)
       ? null
       : nativeSonosPollIntervalSecRaw;
+  final nativeTrackProgressPollIntervalSecRaw = _parseInt(
+      _getEnv('NativeLocalSonos', 'TRACK_PROGRESS_POLL_INTERVAL_SEC'),
+      fallback: 0);
+  final nativeTrackProgressPollIntervalSec =
+      (nativeTrackProgressPollIntervalSecRaw <= 0)
+          ? null
+          : nativeTrackProgressPollIntervalSecRaw;
+  final enableHomeTrackProgress = _parseBool(
+      _getEnv('HomeNowPlayingWidget', 'ENABLE_TRACK_PROGRESS'),
+      fallback: false);
 
   // Parse service priority order based on platform mode
   final platformMode = _detectPlatformMode();
@@ -682,6 +695,9 @@ final envConfigProvider = Provider<EnvConfig>((ref) {
     wsForceReconnIdleSec: wsForceReconnIdleSec,
     directSpotifyApiSslVerify: directSpotifyApiSslVerify,
     directSpotifyApiBaseUrl: directSpotifyApiBaseUrl,
+    enableHomeTrackProgress: enableHomeTrackProgress,
+    nativeLocalSonosTrackProgressPollIntervalSec:
+        nativeTrackProgressPollIntervalSec,
     nativeSonosPollIntervalSec: nativeSonosPollIntervalSec,
     priorityOrderOfServices: priorityOrderOfServices,
     spotifyDirectFallback: spotifyDirectFallback,
