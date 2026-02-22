@@ -5,9 +5,29 @@ Real-time music dashboard supporting Spotify and Sonos with public/private shari
 ## 🏗️ Architecture
 
 - **Backend**: Python/Flask with Socket.IO
-- **Frontend**: React/TypeScript
+- **Frontend**: Flutter (multi-platform) + React/TypeScript client
 - **Database**: PostgreSQL 15
 - **Auth**: Google OAuth + Spotify OAuth
+
+## ✨ Important Updates
+
+- **Service orchestration is now priority-driven**
+	- The app uses platform-aware `ServicePriority` ordering (Direct Spotify / Cloud Spotify / Local Sonos / Native Local Sonos) with fallback and recovery behavior.
+
+- **Native Sonos bridge refactor for reusability**
+	- Sonos protocol logic (SSDP discovery flow, SOAP control calls, event subscription lifecycle, payload parsing/normalization) has been extracted into reusable core modules under `app/lib/src/services/sonos_core/`.
+	- Desktop adapters now share the same core implementation, with a neutral desktop bridge and platform shims/adapters.
+
+- **Desktop platform adapter support expanded**
+	- Linux and Windows now use dedicated adapters that reuse the shared desktop/native Sonos bridge flow.
+	- macOS remains supported via a compatibility shim.
+
+- **Home Now Playing progress visualization**
+	- Added full-card live track progress overlay in the Home now-playing widget.
+	- Progress animation cadence is service-aware and tied to polling intervals.
+
+- **Sonos settings UX now respects platform priority config**
+	- Sonos toggle remains visible but is disabled/greyed when Sonos services are not present in platform `ServicePriority` configuration (including Web-specific behavior).
 
 ## 🚀 Quick Start
 
@@ -126,11 +146,11 @@ Access at: http://localhost:5050
 
 ## 📝 Next Steps
 
-### Phase 1 (Current)
-- ✅ Project structure
-- ✅ Docker Compose setup
-- ✅ Database schema
-- 🚧 Backend foundation (next)
+### Current
+- ✅ Multi-platform Flutter app integration
+- ✅ Priority-based service orchestration and failover
+- ✅ Reusable native Sonos core + desktop adapter architecture
+- ✅ Home now-playing live progress visualization
 
 ### Phase 2
 - Google OAuth
